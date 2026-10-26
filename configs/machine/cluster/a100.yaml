@@ -11,3 +11,5 @@ max_workers: 48
 threads_per_worker: 1
 min_free_disk_gib: 20
 container_tmp: /mnt/nvme0/jihoonkwon/tmg_tmp/container_tmp   # bound to /tmp in the containers (home disk is small and shared)
+egl_device_id: 8                # CP-Gen image only (robosuite 1.5): Mesa lists the 8 GPUs' DRM devices (not openable by the
+                                # user) and then its software device; 8 is that software device (the robosuite image finds it itself)

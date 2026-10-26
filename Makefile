@@ -44,12 +44,16 @@ REVISION   := $(shell git -C $(REPO) rev-parse --short HEAD 2>/dev/null || echo 
 ifeq ($(IMAGE),cpgen)
 DOCKER_GPU = --gpus all
 SING_NV    = --nv
+# robosuite 1.5 picks the EGL device by index from CUDA_VISIBLE_DEVICES; on a host whose /dev/dri the user cannot
+# open (A100: Mesa software rendering, device index = cluster `egl_device_id`) the index must be set explicitly
+EGL_DEVICE_ID ?= $(call cluster_value,egl_device_id)
+SING_ENV_EXTRA = $(if $(EGL_DEVICE_ID),--env MUJOCO_EGL_DEVICE_ID=$(EGL_DEVICE_ID),)
 endif
 DOCKER_RUN  = docker run --rm -i $(if $(shell tty -s && echo t),-t,) --network host $(DOCKER_GPU) \
               -v $(DATA_ROOT):/data -v $(REPO):/opt/tmg \
               -e TMG_DATA_ROOT=/data -e HOME=/tmp -e HF_HOME=/data/.cache/huggingface \
               --user $(shell id -u):$(shell id -g) tmg/$(IMAGE):$(TAG)
-SINGULARITY_RUN = singularity exec $(SING_NV) --cleanenv --no-home --writable-tmpfs --pwd /opt/tmg -B $(DATA_ROOT):/data -B $(REPO):/opt/tmg -B $(CONTAINER_TMP):/tmp \
+SINGULARITY_RUN = singularity exec $(SING_NV) $(SING_ENV_EXTRA) --cleanenv --no-home --writable-tmpfs --pwd /opt/tmg -B $(DATA_ROOT):/data -B $(REPO):/opt/tmg -B $(CONTAINER_TMP):/tmp \
               --env TMG_DATA_ROOT=/data,HOME=/tmp,HF_HOME=/data/.cache/huggingface,MUJOCO_GL=egl,PYOPENGL_PLATFORM=egl $(SIF) tmg
 # the train image (python 3.12, torch, lerobot) runs with the GPU; the data root and repo are mounted the same way
 TRAIN_SIF   ?= $(or $(call cluster_value,train_sif),$(DATA_ROOT)/images/tmg_$(TRAIN_IMAGE).sif)

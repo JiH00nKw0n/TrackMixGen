@@ -131,6 +131,18 @@ CP-Gen은 원본 구간을 다시 재생하지 않는다. 시도마다 주석된
 다시 그린 파일이고, `tmg dataset`은 이것을 읽는다. k번째 데모는 k번째 성공 시도다. 성공이 하나도 없으면 공식 `main`이 그릴
 파일이 없어 예외를 내는데, 모든 시도가 기록된 뒤라면 청크 프로세스는 이를 정상 종료로 처리한다.
 
+### 3.x 실행 환경에서 확인한 두 가지 (2026-10-27, A100 Singularity)
+
+- 환경 클래스 등록. CP-Gen 이미지의 robosuite 1.5 포크에는 `single_arm_env` 모듈이 없어서 MimicGen의 환경 모듈(`mimicgen.envs.robosuite.*`)이
+  불러와지지 않는다. Coffee_D0 같은 기본 환경 클래스는 CP-Gen의 `cpgen_envs` 패키지가 robosuite 1.5용으로 다시 구현해 등록한다.
+  `tmg.generation.simulators.robosuite.register_env_class`는 `mimicgen` 다음에 `cpgen_envs`도 불러오며(없으면 건너뛴다), 그래서
+  장면 클래스(Coffee_OURS)는 cpgen_envs의 Coffee_D0를 부모로 만들어진다.
+- 화면 밖 렌더링 장치. robosuite 1.5의 EGL 문맥은 `MUJOCO_EGL_DEVICE_ID`가 없으면 `CUDA_VISIBLE_DEVICES`의 값을 EGL 장치
+  번호로 쓴다. A100 서버의 Singularity는 NVIDIA EGL 라이브러리를 넣어 주지 않아(nvidia-container-cli 방식, graphics 기능 없음)
+  Mesa 소프트웨어 렌더링만 가능하고, Mesa는 사용자가 열 수 없는 GPU 8대의 DRM 장치 다음에 소프트웨어 장치를 9번째(번호 8)로
+  나열한다. 그래서 `configs/machine/cluster/a100.yaml`의 `egl_device_id: 8`을 Makefile이 CP-Gen 이미지 실행에
+  `MUJOCO_EGL_DEVICE_ID`로 넘긴다. 도커(Isaac)에서는 이미지의 `NVIDIA_DRIVER_CAPABILITIES`에 graphics를 넣어 NVIDIA EGL을 쓴다.
+
 ## 4. 기록 형식
 
 

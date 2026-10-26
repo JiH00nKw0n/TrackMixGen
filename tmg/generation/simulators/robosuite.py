@@ -228,6 +228,13 @@ def make_reach_reset(parent: type, constraint: Mapping, object_xy: Callable, lab
 def register_env_class(task: Mapping, scene: Mapping, *, interface_name: str | None = None) -> str:
     """Register the environment class of (task, scene) and return its name. Idempotent."""
     import mimicgen  # noqa: F401  registers the public environments and interfaces
+
+    # CP-Gen's image runs robosuite 1.5, where MimicGen's own environment modules fail to import (no
+    # ``single_arm_env``); there the base classes (Coffee_D0, ...) come from CP-Gen's ``cpgen_envs`` package.
+    try:
+        import cpgen_envs  # noqa: F401
+    except ImportError:
+        pass
     from robosuite.environments.base import REGISTERED_ENVS
 
     scene = load_scene_chain(scene)

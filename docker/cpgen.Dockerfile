@@ -50,7 +50,8 @@ COPY configs/ configs/
 RUN --mount=type=cache,target=/root/.cache/uv uv pip install --python /opt/venv/bin/python --no-deps -e /opt/tmg \
     && uv pip install --python /opt/venv/bin/python 'hydra-core>=1.3,<1.4' 'omegaconf>=2.3,<2.4' pyyaml scipy msgpack websockets
 ENV TMG_DATA_ROOT=/data TMG_IMAGE=tmg/cpgen TMG_REVISION=$TMG_REVISION TMG_CPGEN_SRC=/opt/src/cpgen TMG_MIMICGEN_SRC=/opt/src/mimicgen \
-    HF_HUB_DISABLE_TELEMETRY=1
+    HF_HUB_DISABLE_TELEMETRY=1 \
+    NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics
 LABEL org.opencontainers.image.revision=$TMG_REVISION
 VOLUME ["/data"]
 ENTRYPOINT ["tmg"]
