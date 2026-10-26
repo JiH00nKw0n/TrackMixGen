@@ -208,3 +208,19 @@ def test_eval_output_carries_split_and_horizon():
     ckpt = Path("/data/runs/r/checkpoints/0040000")
     assert eval_output(ckpt, "test", 600) == Path("/data/runs/r/eval/test_h600/0040000")
     assert eval_output(ckpt, "val") == Path("/data/runs/r/eval/val/0040000")
+
+
+def test_adjusted_env_meta_keeps_controller_and_sets_scene_and_cameras():
+    from tmg.evaluation.envs import adjusted_env_meta
+
+    meta = {"env_name": "Coffee_D0", "env_version": "1.5.1", "type": 1,
+            "env_kwargs": {"env_name": "Coffee_D0", "controller_configs": {"type": "IK_POSE", "control_delta": False}, "control_freq": 20,
+                           "use_camera_obs": False, "has_offscreen_renderer": False, "robots": "Panda"}}
+    out = adjusted_env_meta(meta, "Coffee_OURS", ["agentview", "robot0_eye_in_hand"], [84, 84])
+    assert out["env_name"] == "Coffee_OURS" and "env_name" not in out["env_kwargs"]
+    assert out["env_kwargs"]["controller_configs"] == meta["env_kwargs"]["controller_configs"]      # untouched
+    assert out["env_kwargs"]["camera_names"] == ["agentview", "robot0_eye_in_hand"] and out["env_kwargs"]["camera_heights"] == 84
+    assert out["env_kwargs"]["use_camera_obs"] is True and out["env_kwargs"]["has_offscreen_renderer"] is True
+    low = adjusted_env_meta(meta, "Coffee_OURS", [], None)
+    assert low["env_kwargs"]["use_camera_obs"] is False and "camera_names" not in low["env_kwargs"]
+    assert meta["env_kwargs"]["use_camera_obs"] is False                                            # input not modified

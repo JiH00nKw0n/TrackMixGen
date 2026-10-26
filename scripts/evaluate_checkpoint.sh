@@ -4,6 +4,7 @@
 #   RUN    run folder on the host (…/runs/<generator>/<task>/<scene>/<method>/<generation>/<observation>/<policy>/seed<k>)
 #   CKPT   checkpoint folder on the host (RUN/checkpoints/<update>); default: the newest one
 #   TASK, SCENE, OBSERVATION (image|low_dim, as trained), CLUSTER, SPLIT (val|test), EXTRA (extra tmg eval overrides)
+#   GENERATOR (mimicgen), IMAGE (simulator image of the rollouts: robosuite, or cpgen for CP-Gen data)
 #   PORT   first server port (default 8765); SHARDS (default 1): play the scenes in SHARDS parallel shards, each with
 #          its own server on PORT, PORT+1, ... (the servers keep per-episode state, so one server serves one shard)
 # The validation split appends a row to RUN/validation.jsonl (what `tmg select_checkpoint` reads).
@@ -11,8 +12,8 @@ set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 : "${RUN:?RUN=<run folder> is required}"
 : "${TASK:?TASK=<generator/task> is required}"
-SCENE=${SCENE:-ours}; OBSERVATION=${OBSERVATION:-image}; CLUSTER=${CLUSTER:-local}; SPLIT=${SPLIT:-val}
-PORT=${PORT:-8765}; SHARDS=${SHARDS:-1}; EXTRA=${EXTRA:-}
+SCENE=${SCENE:-ours}; OBSERVATION=${OBSERVATION:-image}; CLUSTER=${CLUSTER:-local}; SPLIT=${SPLIT:-val}; GENERATOR=${GENERATOR:-mimicgen}
+PORT=${PORT:-8765}; SHARDS=${SHARDS:-1}; EXTRA=${EXTRA:-}; IMAGE=${IMAGE:-robosuite}
 CKPT=${CKPT:-$(for d in "$RUN"/checkpoints/[0-9]*/; do [ -f "$d/checkpoint.json" ] && echo "${d%/}"; done | sort | tail -1)}
 DATA_ROOT=$(make -s -C "$REPO" print-data-root CLUSTER="$CLUSTER")
 in_container() { echo "${1/#$DATA_ROOT//data}"; }     # host path under the data root -> /data/... inside the containers
@@ -38,7 +39,7 @@ APPEND=""
 if [ "$SHARDS" -gt 1 ]; then
   k=0; pids=""
   for p in $PORTS; do
-    make -s -C "$REPO" eval CLUSTER="$CLUSTER" TASK="$TASK" SCENE="$SCENE" OBSERVATION="$OBSERVATION" \
+    make -s -C "$REPO" eval CLUSTER="$CLUSTER" IMAGE="$IMAGE" GENERATOR="$GENERATOR" TASK="$TASK" SCENE="$SCENE" OBSERVATION="$OBSERVATION" \
       OVERRIDES="checkpoint=$CKPT_C split=$SPLIT training_seed=$TRAINING_SEED evaluation.server.port=$p shard=[$k,$SHARDS] $EXTRA" &
     pids="$pids $!"; k=$((k + 1))
   done
@@ -46,5 +47,5 @@ if [ "$SHARDS" -gt 1 ]; then
   [ "$fail" = 0 ] || { echo "[evaluate] a shard failed"; exit 1; }
 fi
 # the merge run (every scene already played when sharded) writes the summary and the validation row
-make -s -C "$REPO" eval CLUSTER="$CLUSTER" TASK="$TASK" SCENE="$SCENE" OBSERVATION="$OBSERVATION" \
+make -s -C "$REPO" eval CLUSTER="$CLUSTER" IMAGE="$IMAGE" GENERATOR="$GENERATOR" TASK="$TASK" SCENE="$SCENE" OBSERVATION="$OBSERVATION" \
   OVERRIDES="checkpoint=$CKPT_C split=$SPLIT training_seed=$TRAINING_SEED evaluation.server.port=$PORT $APPEND $EXTRA"

@@ -4,7 +4,7 @@
 name: a100
 runtime: singularity
 image: tmg/robosuite:latest
-sif: /mnt/nvme0/jihoonkwon/tmg_data/images/tmg_robosuite.sif
+sif: null                       # null = <data_root>/images/tmg_<IMAGE>.sif, one file per image (robosuite, cpgen, ...)
 data_root: /mnt/nvme0/jihoonkwon/tmg_data
 workers: auto
 max_workers: 48

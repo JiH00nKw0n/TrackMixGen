@@ -55,11 +55,20 @@ def make_resets(cfg) -> dict:
             return {"path": str(path), "n_val": int(f.attrs["n_val"]), "n_test": int(f.attrs["n_test"]), "env_name": str(f.attrs["env_name"])}
     path.parent.mkdir(parents=True, exist_ok=True)
     env_name = register_env_class(task, scene)
-    import robosuite
-    from robosuite.controllers import load_controller_config
+    if plain.get("dataset"):
+        # the generation environment of another generator (CP-Gen): rebuilt from the dataset's env_args
+        from tmg.evaluation.envs import adjusted_env_meta, env_meta_from_dataset, make_env_from_meta
 
-    kwargs = dict(ENV_KWARGS, robots=str(plain.get("robot", "Panda")), controller_configs=load_controller_config(default_controller="OSC_POSE"))
-    env = robosuite.make(env_name, **kwargs)
+        meta = env_meta_from_dataset(Path(plain["dataset"]))
+        env = make_env_from_meta(meta, env_name, {"cameras": [], "robot_state": task.get("robot_state", []), "object_state": []}).env
+        kwargs = adjusted_env_meta(meta, env_name, [], None)["env_kwargs"]
+        print(f"[tmg] environment from the dataset's env_args ({plain['dataset']})", flush=True)
+    else:
+        import robosuite
+        from robosuite.controllers import load_controller_config
+
+        kwargs = dict(ENV_KWARGS, robots=str(plain.get("robot", "Panda")), controller_configs=load_controller_config(default_controller="OSC_POSE"))
+        env = robosuite.make(env_name, **kwargs)
     interface = str(task.get("datagen_interface") or f"MG_{task['env_prefix']}")
     object_xy = make_object_xy(interface)
     n_val, n_test, seed = int(ev["val_scenes"]), int(ev["test_scenes"]), int(ev["seed"])
@@ -68,7 +77,7 @@ def make_resets(cfg) -> dict:
     with h5py.File(part, "w") as f:
         f.attrs["env_name"], f.attrs["task"], f.attrs["scene"], f.attrs["seed"] = env_name, task["name"], scene["name"], seed
         f.attrs["n_val"], f.attrs["n_test"] = n_val, n_test
-        f.attrs["env_kwargs"] = json.dumps({k: v for k, v in kwargs.items() if k != "controller_configs"} | {"controller_configs": kwargs["controller_configs"]})
+        f.attrs["env_kwargs"] = json.dumps(kwargs, default=str)
         for i in range(n_val + n_test):
             env.reset()
             g = f.create_group(f"reset_{i}")

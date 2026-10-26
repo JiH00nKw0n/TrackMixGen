@@ -4,18 +4,23 @@
 # on the test scenes (evaluation.test_scenes, 300) in TEST_SHARDS parallel shards.
 #   scripts/task_policy_pipeline.sh <task> <first port>      (the task uses ports <first port> .. <first port>+39:
 #   validation ports <first port>+<checkpoint index>, test shards from <first port>+20)
-# Variables: CLUSTER (a100), GPU (CUDA device for the train image, 1), METHOD (none), GENERATION (pool_lowdim),
-# OBSERVATION (low_dim), POLICY (bc_rnn), SEED (1), SCENE (ours), VAL_PARALLEL (5), TEST_SHARDS (6).
+# Variables: CLUSTER (a100), GPU (CUDA device for the train image, 1), GENERATOR (mimicgen), IMAGE (simulator image of the
+# rollouts, robosuite), METHOD (none), GENERATION (pool_lowdim), OBSERVATION (low_dim), POLICY (bc_rnn), SEED (1), SCENE (ours),
+# SIZE (dataset demos, 1000), VAL_PARALLEL (5), TEST_SHARDS (6).
 set -uo pipefail
 TASK=$1; PORT0=$2
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 CLUSTER=${CLUSTER:-a100}; GPU=${GPU:-1}; METHOD=${METHOD:-none}; GENERATION=${GENERATION:-pool_lowdim}
 OBSERVATION=${OBSERVATION:-low_dim}; POLICY=${POLICY:-bc_rnn}; SEED=${SEED:-1}; SCENE=${SCENE:-ours}
-VAL_PARALLEL=${VAL_PARALLEL:-5}; TEST_SHARDS=${TEST_SHARDS:-6}
+VAL_PARALLEL=${VAL_PARALLEL:-5}; TEST_SHARDS=${TEST_SHARDS:-6}; GENERATOR=${GENERATOR:-mimicgen}; IMAGE=${IMAGE:-robosuite}; SIZE=${SIZE:-1000}
 export SINGULARITYENV_CUDA_VISIBLE_DEVICES=$GPU CUDA_VISIBLE_DEVICES=$GPU
 DATA_ROOT=$(make -s -C "$REPO" print-data-root CLUSTER="$CLUSTER")
-RUN=$DATA_ROOT/runs/mimicgen/$TASK/$SCENE/$METHOD/$GENERATION/$OBSERVATION/$POLICY/seed$SEED
-C="TASK=$TASK SCENE=$SCENE METHOD=$METHOD GENERATION=$GENERATION OBSERVATION=$OBSERVATION POLICY=$POLICY SEED=$SEED CLUSTER=$CLUSTER"
+RUN=$DATA_ROOT/runs/$GENERATOR/$TASK/$SCENE/$METHOD/$GENERATION/$OBSERVATION/$POLICY/seed$SEED
+DATASET_C=/data/datasets/$GENERATOR/$TASK/$SCENE/$METHOD/$GENERATION/$OBSERVATION/n${SIZE}_seed0.hdf5
+export GENERATOR IMAGE
+# generators whose environment differs from MimicGen's (CP-Gen) evaluate in the generation environment of their dataset
+[ "$GENERATOR" = mimicgen ] || export EXTRA="dataset=$DATASET_C ${EXTRA:-}"
+C="GENERATOR=$GENERATOR TASK=$TASK SCENE=$SCENE METHOD=$METHOD GENERATION=$GENERATION OBSERVATION=$OBSERVATION POLICY=$POLICY SEED=$SEED CLUSTER=$CLUSTER OVERRIDES=dataset.size=$SIZE"
 log() { echo "[$TASK $(date +%H:%M:%S)] $*"; }
 validated() { [ -f "$RUN/validation.jsonl" ] && grep -q "/$1\"" "$RUN/validation.jsonl"; }
 
@@ -30,7 +35,7 @@ for d in "$RUN"/checkpoints/[0-9]*/; do
   # one port per checkpoint (never reused while another validation may still hold it): PORT0 .. PORT0+19
   port=$((PORT0 + i)); i=$((i + 1))
   [ "$i" -le 20 ] || { log "more than 20 checkpoints; the port block of 40 is too small"; exit 1; }
-  make -s -C "$REPO" validate RUN="$RUN" CKPT="$d" TASK=$TASK SCENE=$SCENE OBSERVATION=$OBSERVATION CLUSTER=$CLUSTER PORT=$port \
+  make -s -C "$REPO" validate RUN="$RUN" CKPT="$d" GENERATOR=$GENERATOR TASK=$TASK SCENE=$SCENE OBSERVATION=$OBSERVATION CLUSTER=$CLUSTER PORT=$port \
     > "$RUN/validate_$(basename "$d").log" 2>&1 || log "VALIDATE $(basename "$d") FAILED (see $RUN/validate_$(basename "$d").log)" &
   sleep 20      # stagger server start-ups
 done
@@ -41,7 +46,7 @@ make -s -C "$REPO" select-checkpoint $C || { log "SELECT FAILED"; exit 1; }
 SEL=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['checkpoint'])" "$RUN/SELECTED.json")
 SEL_HOST="${SEL/#\/data/$DATA_ROOT}"
 log "evaluate $(basename "$SEL_HOST") on the test scenes ($TEST_SHARDS shards)"
-make -s -C "$REPO" evaluate RUN="$RUN" CKPT="$SEL_HOST" TASK=$TASK SCENE=$SCENE OBSERVATION=$OBSERVATION CLUSTER=$CLUSTER SPLIT=test \
+make -s -C "$REPO" evaluate RUN="$RUN" CKPT="$SEL_HOST" GENERATOR=$GENERATOR TASK=$TASK SCENE=$SCENE OBSERVATION=$OBSERVATION CLUSTER=$CLUSTER SPLIT=test \
   PORT=$((PORT0 + 20)) SHARDS=$TEST_SHARDS || { log "EVALUATE FAILED"; exit 1; }
 python3 - "$RUN" "$SEL_HOST" <<'PY'
 import json, sys, pathlib

@@ -21,3 +21,5 @@ output: null                      # null = <run folder>/eval/<split>/<checkpoint
 command: eval
 overrides: []
 robot: Panda
+dataset: null                     # common hdf5 whose env_args rebuild the generation environment (CP-Gen: robosuite 1.5,
+                                  # absolute actions); null = the MimicGen-style environment of the registered scene class

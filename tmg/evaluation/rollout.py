@@ -64,11 +64,16 @@ def eval_output(checkpoint: Path, split: str, horizon: int | None = None) -> Pat
     return run_dir / "eval" / folder / checkpoint.name
 
 
-def make_env(env_name: str, observation: dict, robot: str):
-    """robomimic ``EnvRobosuite`` built exactly as MimicGen builds it for data collection
+def make_env(env_name: str, observation: dict, robot: str, env_meta: dict | None = None):
+    """The evaluation environment. With ``env_meta`` (the dataset's ``env_args``; CP-Gen) the generation
+    environment is rebuilt from it (``tmg.evaluation.envs``). Otherwise: robomimic ``EnvRobosuite`` built exactly as MimicGen builds it for data collection
     (``create_for_data_processing``): it registers the cameras as rgb observations in robomimic's modality table,
     so ``get_observation`` returns the same vertically flipped uint8 (H, W, 3) images the generation wrote. With no
     cameras (low-dim) robomimic creates the environment without an offscreen renderer."""
+    if env_meta is not None:
+        from tmg.evaluation.envs import make_env_from_meta
+
+        return make_env_from_meta(env_meta, env_name, observation)
     from robomimic.envs.env_robosuite import EnvRobosuite
     from robosuite.controllers import load_controller_config
 
@@ -136,7 +141,9 @@ def sync_controllers(env) -> None:
     joints, controller state and goal from the restored simulator state."""
     robosuite_env = getattr(env, "env", env)
     for robot in getattr(robosuite_env, "robots", []):
-        controller = robot.controller
+        controller = getattr(robot, "controller", None)
+        if controller is None or not hasattr(controller, "reset_goal"):
+            continue                 # robosuite 1.5 composite controllers (CP-Gen, absolute actions): no stale delta goal
         controller.update_initial_joints(robot.sim.data.qpos[robot._ref_joint_pos_indexes])
         controller.update(force=True)
         controller.reset_goal()
@@ -207,7 +214,13 @@ def evaluate(cfg) -> dict:
     print(f"[tmg] eval {checkpoint} on {len(scenes)} scenes ({len(todo)} to play) of {task['name']}/{scene['name']}", flush=True)
     if todo:
         env_name = register_env_class(task, scene)
-        env = make_env(env_name, obs_cfg, str(plain.get("robot", "Panda")))
+        env_meta = None
+        if plain.get("dataset"):
+            from tmg.evaluation.envs import env_meta_from_dataset
+
+            env_meta = env_meta_from_dataset(Path(plain["dataset"]))
+            print(f"[tmg] environment from the dataset's env_args ({plain['dataset']})", flush=True)
+        env = make_env(env_name, obs_cfg, str(plain.get("robot", "Panda")), env_meta)
         url = f"ws://{ev['server']['host']}:{ev['server']['port']}"
         with PolicyClient(url) as policy:
             info = policy.info()
