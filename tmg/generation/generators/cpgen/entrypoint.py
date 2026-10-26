@@ -24,6 +24,9 @@ def main(argv=None):
     parser.add_argument("--spec", required=True)
     args = parser.parse_args(argv)
     spec = json.loads(Path(args.spec).read_text())
+    from tmg.core import egl
+
+    egl.apply()
     extra = spec["extra"]
     root = Path(extra["source_root"])
     if not (root / "demo_aug").exists():

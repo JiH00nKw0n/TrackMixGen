@@ -146,3 +146,13 @@ def test_low_dim_dataset_has_object_state_and_no_images(tmp_path):
     with pytest.raises(DatasetError):
         write_dataset(tmp_path / "bad.hdf5", select(candidates(pool), 1, seed=0), pool=pool,
                       observation={"name": "x", "cameras": [], "robot_state": ["robot0_eef_pos"], "object_state": []}, meta={})
+
+
+def test_egl_device_appended_to_cuda_visible_devices():
+    from tmg.core import egl
+
+    env = {"MUJOCO_EGL_DEVICE_ID": "8", "CUDA_VISIBLE_DEVICES": "7"}
+    assert egl.apply(env)["CUDA_VISIBLE_DEVICES"] == "7,8"
+    assert egl.apply({"MUJOCO_EGL_DEVICE_ID": "8", "CUDA_VISIBLE_DEVICES": "7,8"})["CUDA_VISIBLE_DEVICES"] == "7,8"
+    assert "CUDA_VISIBLE_DEVICES" not in egl.apply({"MUJOCO_EGL_DEVICE_ID": "8"})
+    assert egl.apply({"CUDA_VISIBLE_DEVICES": "7"})["CUDA_VISIBLE_DEVICES"] == "7"

@@ -141,7 +141,7 @@ CP-Gen은 원본 구간을 다시 재생하지 않는다. 시도마다 주석된
   번호로 쓴다. A100 서버의 Singularity는 NVIDIA EGL 라이브러리를 넣어 주지 않아(nvidia-container-cli 방식, graphics 기능 없음)
   Mesa 소프트웨어 렌더링만 가능하고, Mesa는 사용자가 열 수 없는 GPU 8대의 DRM 장치 다음에 소프트웨어 장치를 9번째(번호 8)로
   나열한다. 그래서 `configs/machine/cluster/a100.yaml`의 `egl_device_id: 8`을 Makefile이 CP-Gen 이미지 실행에
-  `MUJOCO_EGL_DEVICE_ID`로 넘긴다. 도커(Isaac)에서는 이미지의 `NVIDIA_DRIVER_CAPABILITIES`에 graphics를 넣어 NVIDIA EGL을 쓴다.
+  `MUJOCO_EGL_DEVICE_ID`로 넘기고, `tmg.core.egl.apply`가 그 번호를 `CUDA_VISIBLE_DEVICES` 뒤에 덧붙인다(robosuite 1.5가 두 변수의 일치를 확인하는데, CUDA는 존재하지 않는 번호부터는 무시하므로 보이는 GPU는 바뀌지 않는다). 도커(Isaac)에서는 이미지의 `NVIDIA_DRIVER_CAPABILITIES`에 graphics를 넣어 NVIDIA EGL을 쓴다.
 
 ## 4. 기록 형식
 

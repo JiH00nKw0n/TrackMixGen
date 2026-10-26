@@ -7,6 +7,7 @@ import sys
 from omegaconf import OmegaConf
 
 from tmg.config import COMMANDS, compose, resolved
+from tmg.core import egl
 
 HELP = """commands:
   generate      one pool of generation attempts (generator, task, scene, method, generation)
@@ -40,6 +41,7 @@ def main(argv=None) -> int:
     Raises:
         SystemExit: for unknown commands or malformed overrides (argparse / Hydra errors).
     """
+    egl.apply()  # before anything imports robosuite (its import-time EGL device check)
     argv = list(sys.argv[1:] if argv is None else argv)
     parser = argparse.ArgumentParser(prog="tmg", description=HELP, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("command", choices=list(COMMANDS) + ["show"])
