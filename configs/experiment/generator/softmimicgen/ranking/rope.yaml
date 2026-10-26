@@ -1,0 +1,13 @@
+# Source ranking of SoftMimicGen Rope: sources ordered from the highest to the lowest generation success rate, one
+# ranking for all subtasks (`default`). The good/bad split is not stored here (method.mixing.good_fraction).
+generator: softmimicgen
+task: rope
+basis: Full-demonstration generation success rate of each of the 3 source demonstrations in the 2026-10-25 SoftMimicGen baseline
+  pilot (first 20 attempts plus 8, 28 attempts in total, method off, official range). Small sample; frozen before the mixed
+  generation of that experiment (evidence file soft_SOURCE_RANKING_FROZEN.json).
+split_note: The ranking only orders the sources. Which prefix counts as high-success is method.mixing.good_fraction.
+default:
+  order: [0, 2, 1]
+  attempts: {0: 9, 2: 11, 1: 8}
+  successes: {0: 8, 2: 8, 1: 4}
+  rate: {0: 0.8889, 2: 0.7273, 1: 0.5}

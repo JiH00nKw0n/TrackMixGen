@@ -1,0 +1,19 @@
+name: three_piece_assembly
+display_name: Three Piece Assembly
+env_prefix: ThreePieceAssembly              # robosuite environment class is <env_prefix>_<scene.env_suffix> (MimicGen's classes)
+datagen_interface: MG_ThreePieceAssembly        # MimicGen interface used by the reach constraint to read object positions
+source: ${paths.sources}/cpgen/three_piece_assembly/source.hdf5
+annotation: ${paths.sources}/cpgen/three_piece_assembly/constraints.json
+source_file: datasets/source/three_piece_assembly.hdf5          # in generator.source_repo (cpgen/datasets-src)
+annotation_file: datasets/source/three_piece_assembly/constraints.json
+num_sources: 10
+source_indices: [0, 1]              # CP-Gen's default: the first source demonstration only ([start, end) of load_demos)
+cpgen_config: {}                    # extra demo_aug.generate.Config fields for this task
+subtasks: ['grasp piece 1', 'insert piece 1 into base', 'grasp piece 2', 'insert piece 2 into piece 1']
+reference_objects: ['piece_1', 'base', 'piece_2', 'piece_1']
+horizon: 600                        # evaluation step limit (project decision 2026-10-27: 600 for every robosuite task; MimicGen's own values were 400/500)
+cameras: ['agentview', 'robot0_eye_in_hand']
+image_size: [84, 84]
+robot_state: ['robot0_eef_pos', 'robot0_eef_quat', 'robot0_gripper_qpos']
+object_state: [object]              # low-dim object observation (robosuite object-state: poses and relative positions)
+instruction: assemble the two pieces onto the base one after the other        # language instruction for π0

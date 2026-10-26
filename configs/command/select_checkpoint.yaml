@@ -1,0 +1,25 @@
+# @package _global_
+# tmg select_checkpoint: choose a run's checkpoint by training.selection (same choices as tmg train).
+defaults:
+  - /paths: local
+  - /cluster: local
+  - /generator: mimicgen
+  - /task: ???
+  - /scene: ours
+  - /method: none
+  - /generation: pool
+  - /observation: image
+  - /policy: bc_rnn
+  - /training: default
+  - _self_
+
+dataset:
+  size: 1000
+  seed: 0
+  path: ${paths.datasets}/${generator.name}/${task.name}/${scene.name}/${method.name}/${generation.name}/${observation.name}/n${dataset.size}_seed${dataset.seed}.hdf5
+seed: 1                           # training seed (model init, batch order)
+output: ${paths.runs}/${generator.name}/${task.name}/${scene.name}/${method.name}/${generation.name}/${observation.name}/${policy.name}/seed${seed}
+device: cuda
+command: select_checkpoint
+overrides: []
+updates: null                     # override the policy's update budget (e.g. 1000 for a check run)

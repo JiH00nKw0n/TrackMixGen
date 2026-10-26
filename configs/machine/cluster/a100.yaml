@@ -1,0 +1,13 @@
+# ADS A100 server (ssh a100): no docker permission for the user, Singularity 4.0 only. The .sif is built from a
+# docker archive saved on Isaac (`make sif ARCHIVE=...`). 255 CPUs; generation is CPU-bound. The home disk has a
+# per-user quota of 35 GB, so everything lives on /mnt/nvme0 (no quota, hundreds of GB free).
+name: a100
+runtime: singularity
+image: tmg/robosuite:latest
+sif: /mnt/nvme0/jihoonkwon/tmg_data/images/tmg_robosuite.sif
+data_root: /mnt/nvme0/jihoonkwon/tmg_data
+workers: auto
+max_workers: 48
+threads_per_worker: 1
+min_free_disk_gib: 20
+container_tmp: /mnt/nvme0/jihoonkwon/tmg_tmp/container_tmp   # bound to /tmp in the containers (home disk is small and shared)

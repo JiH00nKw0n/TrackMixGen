@@ -1,0 +1,18 @@
+# π0: LeRobot 0.6.1 PI0Policy started from the hub weights lerobot/pi0_base (PaliGemma 3B + 300M action expert).
+# Implemented, not yet exercised (stage 6): the fine-tuning values follow openpi's pi0_libero recipe through
+# LeRobot's presets (AdamW 2.5e-5, betas 0.9/0.95, weight decay 0.01, grad clip 1.0, cosine decay with 1,000 warmup
+# steps to 2.5e-6 over 30,000 steps). Images are resized with padding to 224x224 inside the policy; the task
+# instruction comes from the task config (`instruction`) and is tokenized by LeRobot's pipeline (tmg/policy/io.py).
+name: pi0
+pretrained_path: lerobot/pi0_base
+params:
+  chunk_size: 50                 # predicted action steps (openpi action_horizon); TODO confirm against pi0_libero
+  n_action_steps: 50             # executed per prediction
+  dtype: bfloat16
+  gradient_checkpointing: true
+  freeze_vision_encoder: false
+  train_expert_only: false
+by_observation:
+  image: {}
+  low_dim: null                  # π0 is a vision-language policy; observation=low_dim is an error
+ema: false

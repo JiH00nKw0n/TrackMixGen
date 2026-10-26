@@ -1,0 +1,23 @@
+# @package _global_
+# tmg eval: play the fixed scenes with a served checkpoint (simulator image; the policy server runs in the train image).
+#   tmg eval task=square scene=ours checkpoint=/data/runs/.../checkpoints/0010000 split=val append_validation=/data/runs/...
+defaults:
+  - /paths: local
+  - /cluster: local
+  - /generator: mimicgen
+  - /task: ???
+  - /scene: ours
+  - /observation: image
+  - /evaluation: default
+  - _self_
+checkpoint: ???                   # checkpoint folder (with pretrained_model/ and stats.json)
+# `observation` must be the one the checkpoint was trained with (the server reports its inputs and eval checks them)
+split: val                        # val | test | all
+max_scenes: null                  # play only the first n scenes of the split (check runs)
+shard: null                       # [k, n]: play the scenes with index % n == k (parallel shards; see rollout.py)
+training_seed: 0                  # enters the per-episode policy seed
+append_validation: null           # run folder whose validation.jsonl gets the val-split row
+output: null                      # null = <run folder>/eval/<split>/<checkpoint name> (derived from the checkpoint path)
+command: eval
+overrides: []
+robot: Panda

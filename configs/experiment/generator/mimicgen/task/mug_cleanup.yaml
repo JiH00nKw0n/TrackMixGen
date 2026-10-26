@@ -1,0 +1,16 @@
+name: mug_cleanup
+display_name: Mug Cleanup
+env_prefix: MugCleanup              # robosuite environment class is <env_prefix>_<scene.env_suffix>
+datagen_interface: MG_MugCleanup    # MimicGen environment interface
+template: mug_cleanup.json          # MimicGen config template under generator.templates
+source: ${paths.sources}/mimicgen/mug_cleanup/source.hdf5
+source_registry_name: mug_cleanup   # key in mimicgen.DATASET_REGISTRY["source"]
+num_sources: 10
+subtasks: [open drawer, grasp mug, place mug and close drawer]
+reference_objects: [drawer, object, drawer]   # the mug is named "object" in the MimicGen interface
+horizon: 600                        # evaluation step limit (project decision 2026-10-27: 600 for every robosuite task; MimicGen's own values were 400/500)
+cameras: [agentview, robot0_eye_in_hand]
+image_size: [84, 84]
+robot_state: [robot0_eef_pos, robot0_eef_quat, robot0_gripper_qpos]
+object_state: [object]              # low-dim object observation (robosuite object-state: poses and relative positions)
+instruction: open the drawer, put the mug inside and close the drawer        # language instruction for π0

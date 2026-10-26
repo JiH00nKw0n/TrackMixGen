@@ -1,0 +1,23 @@
+# Diffusion Policy: LeRobot 0.6.1 DiffusionPolicy with the official image U-Net values (real-stanford/diffusion_policy,
+# robomimic image config). Only fields that differ from LeRobot's defaults are listed; the rest are LeRobot's
+# defaults, which already equal the official values (down_dims 512/1024/2048, kernel 5, 8 groups, step embed 128,
+# DDPM 100 steps squaredcos_cap_v2, epsilon prediction, clip_sample, spatial softmax 32, Adam 1e-4 betas .95/.999
+# wd 1e-6, cosine schedule with 500 warmup steps).
+name: diffusion_policy
+pretrained_path: null
+params:
+  n_obs_steps: 2
+  horizon: 16                    # LeRobot default 64
+  n_action_steps: 8              # LeRobot default 32
+  drop_n_last_frames: 7          # horizon - n_action_steps - n_obs_steps + 1
+  crop_shape: [76, 76]           # official robomimic image crop
+  crop_is_random: true
+  use_group_norm: true           # official: GroupNorm ResNet18 trained from scratch
+  pretrained_backbone_weights: null
+by_observation:
+  image: {}
+  low_dim:                       # official low-dim U-Net (train_diffusion_unet_lowdim_workspace): narrower U-Net, step embedding 256
+    down_dims: [256, 512, 1024]
+    diffusion_step_embed_dim: 256
+    crop_shape: null
+ema: true                        # the official implementation evaluates the EMA weights (power 0.75)

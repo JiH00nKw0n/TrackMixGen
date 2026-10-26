@@ -1,0 +1,10 @@
+# @package _global_
+# tmg sources: download and prepare the human source demonstrations of one generator task.
+defaults:
+  - /paths: local
+  - /cluster: local
+  - /generator: mimicgen
+  - /task: ???
+  - _self_
+command: sources
+overrides: []

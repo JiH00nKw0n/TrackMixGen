@@ -1,0 +1,10 @@
+# Isaac PRO 6000 server (ssh isaac): docker available to the user, data under the lab workspace.
+name: isaac
+runtime: docker
+image: tmg/robosuite:latest
+sif: null
+data_root: /home/gpuadmin/workspace/jihoonkwon/tmg_data
+workers: auto
+max_workers: 16
+threads_per_worker: 1
+min_free_disk_gib: 20

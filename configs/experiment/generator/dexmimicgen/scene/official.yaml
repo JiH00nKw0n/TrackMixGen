@@ -1,0 +1,3 @@
+# The generator's own reset distribution: nothing is overridden (the official task config's reset events).
+name: official
+override_bounds: false

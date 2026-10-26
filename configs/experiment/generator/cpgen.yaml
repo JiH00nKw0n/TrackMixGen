@@ -1,0 +1,21 @@
+# CP-Gen (kevin-thankyou-lin/cpgen @ 1e7c1fc4, cpgen-envs @ c4eea73e) on robosuite f687ae7c / MuJoCo 3.2.6 with
+# cuRobo v0.7.8 motion planning (GPU). Constraint-preserving generation: each attempt re-solves the annotated
+# keypoint constraints of one source demonstration for the new object poses and motion-plans between them.
+name: cpgen
+simulator: robosuite
+image: tmg/cpgen
+package: demo_aug
+commit: 1e7c1fc4a467c7678c8542ca762e332d1757d8d5
+source_repo: cpgen/datasets-src        # Hugging Face dataset repo of the source demonstrations and annotations
+source_root: ${oc.env:TMG_CPGEN_SRC,/opt/src/cpgen}   # checkout: working directory of the chunk (relative config paths)
+# Source text hash (sha256 of inspect.getsource) of the grafted DemoGenerator.generate_demo at the pinned commit
+# (tests/unit/fixtures/cpgen_generate_demo.py holds that text); a changed package refuses to run.
+graft_hashes: {generate_demo: a497e9da6ef4f84624c9646fd49ee55fae1dedaa93e428c90f8fa312972b40e2}
+config: {}                             # demo_aug.generate.Config fields applied to every task (after the task's)
+# CP-Gen replays no source segment (it re-solves constraints), so source mixing has no counterpart: the mixing
+# part of every method is off. Its saved actions are already noise-free, so labels are pre_noise for every method.
+method_overrides:
+  none: {labels: pre_noise}
+  tracking_only: {labels: pre_noise}
+  mixup_only: {mixing: {enabled: false}, labels: pre_noise}
+  trackmix: {mixing: {enabled: false}, labels: pre_noise}

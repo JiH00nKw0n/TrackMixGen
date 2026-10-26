@@ -1,0 +1,8 @@
+# Data layout on this machine. TMG_DATA_ROOT overrides the root; inside the docker images it is /data.
+root: ${oc.env:TMG_DATA_ROOT,${oc.env:HOME}/tmg_data}
+sources: ${paths.root}/sources          # human source demonstrations per generator (<generator>/<task>/source.hdf5)
+pools: ${paths.root}/pools              # generation pools (attempts, records, demos)
+datasets: ${paths.root}/datasets
+resets: ${paths.root}/resets
+runs: ${paths.root}/runs
+reports: ${paths.root}/reports

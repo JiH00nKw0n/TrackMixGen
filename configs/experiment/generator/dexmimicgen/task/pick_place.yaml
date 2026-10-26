@@ -1,0 +1,17 @@
+name: pick_place
+display_name: GR1 Pick and Place
+env_name: Isaac-PickPlace-GR1T2-Abs-Mimic-v0
+camera_env: TMG-PickPlace-GR1T2-Images-Mimic-v0   # the official task has no cameras; registered by camera_module
+camera_module: tmg.generation.simulators.isaaclab_tasks.gr1_pickplace_cameras
+source: ${paths.sources}/dexmimicgen/pick_place/source.hdf5
+source_url: https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Mimic/dataset_annotated_gr1.hdf5   # TODO confirm
+num_sources: 5
+subtasks: [right idle until grasp, right place; left grasp and hold]
+reference_objects: [object, object]
+horizon: 600                        # evaluation step limit (project decision 2026-10-27)
+eval_episode_length_s: 30.0         # the env's own limit is 20 s = 400 steps at 20 Hz; the evaluation must raise episode_length_s to cover the horizon
+cameras: [front_image, side_image]
+image_size: [128, 128]
+robot_state: [left_eef_pos, left_eef_quat, right_eef_pos, right_eef_quat, hand_joint_state]
+object_state: []                    # low-dim training is not set up for the Isaac Lab tasks yet
+instruction: pick up the object with the right hand and place it in the bin

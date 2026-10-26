@@ -1,0 +1,19 @@
+name: mug_cleanup
+display_name: Mug Cleanup
+env_prefix: MugCleanup              # robosuite environment class is <env_prefix>_<scene.env_suffix> (MimicGen's classes)
+datagen_interface: MG_MugCleanup        # MimicGen interface used by the reach constraint to read object positions
+source: ${paths.sources}/cpgen/mug_cleanup/source.hdf5
+annotation: ${paths.sources}/cpgen/mug_cleanup/constraints.json
+source_file: datasets/source/mug_cleanup.hdf5          # in generator.source_repo (cpgen/datasets-src)
+annotation_file: datasets/source/mug_cleanup/constraints.json
+num_sources: 10
+source_indices: [0, 1]              # CP-Gen's default: the first source demonstration only ([start, end) of load_demos)
+cpgen_config: {}                    # extra demo_aug.generate.Config fields for this task
+subtasks: ['open drawer', 'grasp mug', 'place mug and close drawer']
+reference_objects: ['drawer', 'object', 'drawer']
+horizon: 600                        # evaluation step limit (project decision 2026-10-27: 600 for every robosuite task; MimicGen's own values were 400/500)
+cameras: ['agentview', 'robot0_eye_in_hand']
+image_size: [84, 84]
+robot_state: ['robot0_eef_pos', 'robot0_eef_quat', 'robot0_gripper_qpos']
+object_state: [object]              # low-dim object observation (robosuite object-state: poses and relative positions)
+instruction: open the drawer, put the mug inside and close the drawer        # language instruction for π0

@@ -1,0 +1,23 @@
+# @package _global_
+# tmg check_scene: reset one (task, scene) environment many times and report whether the configured placement
+# ranges produce usable initial states: placement failures, objects over the table edge, objects spawned in
+# contact, objects that fall or move while settling, reach rejects and distances to the robot base.
+#   tmg check_scene task=hammer_cleanup scene=ours resets=200
+defaults:
+  - /paths: local
+  - /cluster: local
+  - /generator: mimicgen
+  - /task: ???
+  - /scene: official_d1
+  - _self_
+
+output: ${paths.reports}/scene_check/${generator.name}/${task.name}/${scene.name}
+command: check_scene
+overrides: []
+resets: 200                       # reset draws to inspect
+seed: 7                           # numpy seed before the first reset
+settle_steps: 20                  # zero-action control steps after each reset before re-reading object poses
+robot: Panda                      # robosuite robot of the environment (the source demonstrations use Panda)
+edge_margin_m: 0.0                # extra margin inside the table edge that an object footprint must respect
+fall_threshold_m: 0.03            # z drop during settling that counts as a fall
+drift_threshold_m: 0.05           # xy move during settling that counts as unstable

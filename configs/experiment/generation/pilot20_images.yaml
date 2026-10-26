@@ -1,0 +1,7 @@
+defaults:
+  - pilot20
+  - _self_
+name: pilot20_images
+protocol:
+  camera_names: ${task.cameras}
+  camera_size: ${task.image_size}

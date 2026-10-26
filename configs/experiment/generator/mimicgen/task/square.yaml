@@ -1,0 +1,16 @@
+name: square
+display_name: Square
+env_prefix: Square                  # robosuite environment class is <env_prefix>_<scene.env_suffix>
+datagen_interface: MG_Square        # MimicGen environment interface
+template: square.json               # MimicGen config template under generator.templates
+source: ${paths.sources}/mimicgen/square/source.hdf5
+source_registry_name: square        # key in mimicgen.DATASET_REGISTRY["source"]
+num_sources: 10
+subtasks: [grasp nut, insert nut]
+reference_objects: [square_nut, square_peg]
+horizon: 600                        # evaluation step limit (project decision 2026-10-27: 600 for every robosuite task; MimicGen's own values were 400/500)
+cameras: [agentview, robot0_eye_in_hand]
+image_size: [84, 84]
+robot_state: [robot0_eef_pos, robot0_eef_quat, robot0_gripper_qpos]
+object_state: [object]              # low-dim object observation (robosuite object-state: poses and relative positions)
+instruction: pick up the square nut and insert it onto the square peg        # language instruction for π0

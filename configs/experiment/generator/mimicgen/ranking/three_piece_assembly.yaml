@@ -1,0 +1,30 @@
+# Source ranking of mimicgen three_piece_assembly. Sources ordered from the highest to the lowest full-task generation
+# success rate per subtask (ties: lower source index first). The good/bad split is not stored here; the
+# method config chooses how many top sources count as high-success (method.mixing.good_fraction).
+generator: mimicgen
+task: three_piece_assembly
+basis: Full-task generation success rate (successes / attempts) of each source demonstration, per subtask, measured by tmg
+  rank_sources on the baseline pool /data/pools/mimicgen/three_piece_assembly/ours/none/rank3000 (3000 attempts, 12 chunks,
+  scene ours, generation rank3000). The source of a subtask is the demonstration the generator selected for that subtask.
+split_note: The ranking only orders the sources. Which prefix counts as high-success is method.mixing.good_fraction.
+subtasks:
+  0:
+    order: [7, 9, 0, 4, 3, 8, 2, 1, 6, 5]
+    attempts: {7: 319, 9: 279, 0: 305, 4: 304, 3: 280, 8: 301, 2: 310, 1: 288, 6: 304, 5: 310}
+    successes: {7: 27, 9: 23, 0: 23, 4: 20, 3: 18, 8: 19, 2: 19, 1: 16, 6: 15, 5: 14}
+    rate: {7: 0.0846, 9: 0.0824, 0: 0.0754, 4: 0.0658, 3: 0.0643, 8: 0.0631, 2: 0.0613, 1: 0.0556, 6: 0.0493, 5: 0.0452}
+  1:
+    order: [9, 3, 7, 4, 0, 8, 2, 6, 1, 5]
+    attempts: {9: 334, 3: 296, 7: 317, 4: 266, 0: 303, 8: 284, 2: 293, 6: 314, 1: 295, 5: 298}
+    successes: {9: 37, 3: 27, 7: 28, 4: 23, 0: 21, 8: 19, 2: 15, 6: 14, 1: 7, 5: 3}
+    rate: {9: 0.1108, 3: 0.0912, 7: 0.0883, 4: 0.0865, 0: 0.0693, 8: 0.0669, 2: 0.0512, 6: 0.0446, 1: 0.0237, 5: 0.0101}
+  2:
+    order: [7, 0, 3, 4, 2, 1, 5, 9, 8, 6]
+    attempts: {7: 291, 0: 310, 3: 297, 4: 300, 2: 266, 1: 325, 5: 293, 9: 317, 8: 296, 6: 305}
+    successes: {7: 26, 0: 26, 3: 21, 4: 21, 2: 18, 1: 19, 5: 17, 9: 18, 8: 15, 6: 13}
+    rate: {7: 0.0893, 0: 0.0839, 3: 0.0707, 4: 0.07, 2: 0.0677, 1: 0.0585, 5: 0.058, 9: 0.0568, 8: 0.0507, 6: 0.0426}
+  3:
+    order: [6, 7, 2, 1, 4, 0, 5, 9, 8, 3]
+    attempts: {6: 305, 7: 287, 2: 271, 1: 331, 4: 289, 0: 290, 5: 310, 9: 286, 8: 305, 3: 326}
+    successes: {6: 27, 7: 25, 2: 19, 1: 22, 4: 19, 0: 18, 5: 19, 9: 17, 8: 15, 3: 13}
+    rate: {6: 0.0885, 7: 0.0871, 2: 0.0701, 1: 0.0665, 4: 0.0657, 0: 0.0621, 5: 0.0613, 9: 0.0594, 8: 0.0492, 3: 0.0399}

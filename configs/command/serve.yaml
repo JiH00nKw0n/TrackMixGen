@@ -1,0 +1,15 @@
+# @package _global_
+# tmg serve: websocket policy server for one checkpoint (train image).
+#   tmg serve checkpoint=/data/runs/.../checkpoints/0010000 server.port=8765
+defaults:
+  - /paths: local
+  - /cluster: local
+  - /evaluation: default
+  - _self_
+checkpoint: ???
+device: cuda
+server:                           # a node of its own so `server.port=...` can be overridden on the command line
+  host: ${evaluation.server.host}
+  port: ${evaluation.server.port}
+command: serve
+overrides: []

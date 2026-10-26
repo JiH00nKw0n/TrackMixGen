@@ -1,0 +1,5 @@
+# Our scene for this generator equals the official reset distribution (decision 2026-10-26: the Isaac Lab tasks keep
+# the ranges of their papers). Listed under the same name as MimicGen's widened scene so the command line is uniform.
+# To widen, set override_bounds: true and list bounds: {<task>: {<reset event>: {x: [lo, hi], y: ..., yaw: ...}}}.
+name: ours
+override_bounds: false

@@ -1,0 +1,20 @@
+# MimicGen (NVlabs/mimicgen@72bd767) on robosuite 1.4.1 / MuJoCo 2.3.2.
+name: mimicgen
+simulator: robosuite
+image: tmg/robosuite
+package: mimicgen
+commit: 72bd767
+# Source text hashes (sha256 of inspect.getsource) of the two official functions the adapter grafts.
+# The adapter refuses to run when the installed package differs.
+graft_hashes:
+  generate: 5259272430921d419d37661d168dea8f6d95c8d79258f040a9a35dee606e7be1   # DataGenerator.generate
+  execute: 5bdf546e1ddd515b1b7fc95624d5c9428b0a1f21d8be16c2ea853e171415f643    # WaypointTrajectory.execute
+source_repo: amandlek/mimicgen_datasets      # Hugging Face dataset repo of the released source demonstrations
+# MimicGen's config templates are data files of its repository, not of the installed package. The image keeps the
+# pinned checkout at /opt/src/mimicgen; set TMG_MIMICGEN_SRC to point elsewhere.
+source_root: ${oc.env:TMG_MIMICGEN_SRC,/opt/src/mimicgen}
+templates: mimicgen/exps/templates/robosuite
+# Values of configs/experiment/method/<name>.yaml that this generator needs differently (none for MimicGen).
+# Example for a dexterous-hand generator: method_overrides: {trackmix: {mixing: {max_anchor_rotation_deg: 40.0},
+#   tracking: {gripper_events: {type: closure, columns: [...]}}}}
+method_overrides: {}

@@ -1,0 +1,24 @@
+# SoftMimicGen (NVlabs/SoftMimicGen @ c9d146ba on the Isaac Lab fork masoudmoghani/IsaacLab, branch softmimicgen
+# @ 25c69e08) on Isaac Sim 5.1. One Franka arm, soft objects (rope, towel).
+name: softmimicgen
+simulator: isaaclab
+image: tmg/isaaclab-soft
+package: softmimicgen.datagen           # official datagen package (DataGenerator, MultiWaypoint)
+commit: c9d146ba57358a544167de8ebe946caaac8f6220
+isaaclab_commit: 25c69e088fa8122ad189b3a566d38ef24fa74d6f
+source_repo: masoudmoghani/SoftMimicGen   # Hugging Face dataset repo of the annotated source demonstrations
+source_root: ${oc.env:TMG_ISAACLAB_SRC,/opt/src/IsaacLab}
+script: scripts/imitation_learning/isaaclab_mimic/generate_dataset.py
+kit_args: "--/renderer/multiGpu/enabled=false --/renderer/activeGpu=0"
+extra_args: []
+# Source text hashes of the grafted functions (sha256 of inspect.getsource). null = not pinned yet: the first chunk
+# run prints the installed hashes; pin them here afterwards so a changed package refuses to run.
+graft_hashes: {generate: null, trajectory: null, execute: null}
+# end effectors and action layout (relative Franka action: dpos 3, axis-angle 3, gripper 1)
+eefs: [robot0]
+arm_action_dims: {robot0: [0, 6]}
+hand_prefixes: null
+hand_term: null
+measure_links: null                     # the observed eef pose is the controller target for the Franka
+noise_draw_shapes: [6]                  # target_eef_pose_to_action draws one 6-vector per step (also at zero noise)
+method_overrides: {}

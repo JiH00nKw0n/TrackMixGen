@@ -1,0 +1,30 @@
+# Source ranking of MimicGen stack_three. Sources ordered from the highest to the lowest full-task generation success
+# rate per subtask (ties: lower source index first). The good/bad split is not stored here; the method config
+# chooses how many top sources count as high-success (method.mixing.good_fraction).
+generator: mimicgen
+task: stack_three
+basis: Full-task generation success rate (successes / attempts) of each source demonstration, per subtask, measured in the
+  2026-09 baseline pools (method off, scene wide + reach 0.85 m, 30,000 attempts per task). The source of a subtask is the
+  demonstration the generator selected for that subtask.
+split_note: The ranking only orders the sources. Which prefix counts as high-success is method.mixing.good_fraction.
+subtasks:
+  0:
+    order: [9, 2, 5, 8, 6, 3, 7, 1, 0, 4]
+    attempts: {9: 4807, 2: 4850, 5: 4775, 8: 4778, 6: 4828, 3: 4740, 7: 4844, 1: 4698, 0: 4749, 4: 4931}
+    successes: {9: 638, 2: 624, 5: 599, 8: 588, 6: 587, 3: 568, 7: 550, 1: 494, 0: 496, 4: 472}
+    rate: {9: 0.1327, 2: 0.1287, 5: 0.1254, 8: 0.1231, 6: 0.1216, 3: 0.1198, 7: 0.1135, 1: 0.1052, 0: 0.1044, 4: 0.0957}
+  1:
+    order: [7, 8, 9, 1, 5, 3, 2, 0, 4, 6]
+    attempts: {7: 4904, 8: 4767, 9: 4859, 1: 4714, 5: 4882, 3: 4749, 2: 4917, 0: 4746, 4: 4762, 6: 4700}
+    successes: {7: 819, 8: 708, 9: 677, 1: 604, 5: 610, 3: 490, 2: 489, 0: 456, 4: 408, 6: 355}
+    rate: {7: 0.167, 8: 0.1485, 9: 0.1393, 1: 0.1281, 5: 0.1249, 3: 0.1032, 2: 0.0995, 0: 0.0961, 4: 0.0857, 6: 0.0755}
+  2:
+    order: [9, 5, 1, 7, 4, 3, 6, 8, 2, 0]
+    attempts: {9: 4835, 5: 4859, 1: 4784, 7: 4692, 4: 4727, 3: 4747, 6: 4823, 8: 4836, 2: 4810, 0: 4887}
+    successes: {9: 709, 5: 620, 1: 598, 7: 562, 4: 557, 3: 541, 6: 543, 8: 540, 2: 487, 0: 459}
+    rate: {9: 0.1466, 5: 0.1276, 1: 0.125, 7: 0.1198, 4: 0.1178, 3: 0.114, 6: 0.1126, 8: 0.1117, 2: 0.1012, 0: 0.0939}
+  3:
+    order: [7, 1, 8, 0, 4, 9, 5, 3, 2, 6]
+    attempts: {7: 4847, 1: 4800, 8: 4713, 0: 4888, 4: 4848, 9: 4790, 5: 4702, 3: 4814, 2: 4817, 6: 4781}
+    successes: {7: 618, 1: 602, 8: 572, 0: 592, 4: 581, 9: 566, 5: 548, 3: 551, 2: 507, 6: 479}
+    rate: {7: 0.1275, 1: 0.1254, 8: 0.1214, 0: 0.1211, 4: 0.1198, 9: 0.1182, 5: 0.1165, 3: 0.1145, 2: 0.1053, 6: 0.1002}

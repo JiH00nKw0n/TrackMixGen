@@ -1,0 +1,7 @@
+# Image observations: the task's cameras (84x84 RGB, rendered during generation) plus the robot state keys.
+# This is the paper setting (MimicGen's image policies). Datasets and runs of this choice live under `.../image/`.
+name: image
+cameras: ${task.cameras}            # cameras stored in the dataset and fed to the policy
+image_size: ${task.image_size}
+robot_state: ${task.robot_state}    # keys concatenated into observation.state
+object_state: []                    # no object state: the policy must read the scene from the images

@@ -1,0 +1,22 @@
+# @package _global_
+# tmg dataset: one training dataset (common hdf5) from the successful attempts of a finished pool.
+#   tmg dataset task=square scene=ours method=trackmix generation=pool observation=image size=1000 seed=0
+# `observation` decides what the file holds: image = the cameras and the robot state, low_dim = robot and object state.
+defaults:
+  - /paths: local
+  - /cluster: local
+  - /generator: mimicgen
+  - /task: ???
+  - /scene: ours
+  - /method: none
+  - /generation: pool
+  - /observation: image
+  - _self_
+
+pool: ${paths.pools}/${generator.name}/${task.name}/${scene.name}/${method.name}/${generation.name}
+output: ${paths.datasets}/${generator.name}/${task.name}/${scene.name}/${method.name}/${generation.name}/${observation.name}/n${size}_seed${seed}.hdf5
+command: dataset
+overrides: []
+size: 1000                        # successful demonstrations to select, uniformly without replacement
+seed: 0                           # selection seed
+overwrite: false                  # rebuild an existing file

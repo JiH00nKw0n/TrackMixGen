@@ -1,0 +1,22 @@
+# BC-RNN (robomimic BC_RNN_GMM with MimicGen's official image settings, ported in tmg/policy/bc_rnn.py).
+# `params` go into BCRNNConfig, then the block of the chosen observation (`by_observation`) overrides them; batch
+# size and update budget are in the training config. Low-dim values are robomimic's bc_rnn low-dim template
+# (LSTM hidden 400); the image values are MimicGen's image template (hidden 1000, crop 76, spatial softmax 32).
+name: bc_rnn
+pretrained_path: null
+params:
+  seq_length: 10                 # training sequence length = rollout hidden-state horizon
+  crop_shape: [76, 76]           # random crop of the 84x84 images (centre crop in evaluation)
+  num_keypoints: 32              # spatial softmax keypoints per camera
+  visual_feature_dim: 64
+  rnn_hidden_dim: 1000
+  rnn_num_layers: 2
+  num_modes: 5                   # Gaussian mixture modes
+  min_std: 0.0001
+  std_activation: softplus
+  low_noise_eval: true
+  optimizer_lr: 0.0001
+by_observation:
+  image: {}
+  low_dim: {rnn_hidden_dim: 400}
+ema: false

@@ -1,0 +1,4 @@
+# The generator as released: no mixing, no path following, executed actions as labels.
+name: none
+mixing: {enabled: false}
+tracking: {enabled: false}

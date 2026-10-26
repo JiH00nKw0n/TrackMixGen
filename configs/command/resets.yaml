@@ -1,0 +1,15 @@
+# @package _global_
+# tmg resets: draw and store the fixed evaluation scenes of (task, scene) once (simulator image).
+#   tmg resets task=square scene=ours
+defaults:
+  - /paths: local
+  - /cluster: local
+  - /generator: mimicgen
+  - /task: ???
+  - /scene: ours
+  - /evaluation: default
+  - _self_
+command: resets
+overrides: []
+robot: Panda
+overwrite: false

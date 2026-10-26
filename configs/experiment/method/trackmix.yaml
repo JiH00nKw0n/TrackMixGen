@@ -1,0 +1,22 @@
+# TrackMix: guided source mixing + error-adaptive path following + pre-noise action labels.
+name: trackmix
+mixing:
+  enabled: true
+  type: guided                      # implementation (tmg/generation/method/guided_mix.py); a variant adds a class and a name here
+  weight_a: 0.8                     # share of the primary (selected) source in the blend
+  max_anchor_rotation_deg: 20.0     # donor allowed only if hand orientation differs at most this much at the anchors
+  ranking: ${generator.name}/${task.name}   # configs/experiment/generator/<gen>/ranking/<task>.yaml (tmg rank_sources)
+  good_fraction: 0.5                # top ceil(N * fraction) ranked sources count as high-success (donors)
+  good_count: null                  # explicit count instead of the fraction, when set
+  seed_offset: 817263               # mixes with a private RNG seeded from (chunk seed, call index, this)
+tracking:
+  enabled: true
+  type: error_adaptive              # implementation (tmg/generation/method/tracking.py)
+  ds_min: 0.25
+  regions:
+    default: {alpha_p: 12.0, alpha_r: 1.2}
+    approach: {alpha_p: 50.0, alpha_r: 5.0}
+  approach_window: 10               # waypoints before (and at) a gripper event that use the approach gains
+  extra_steps_cap: segment          # extra steps per segment at most the segment length, then base speed
+  gripper_events: {type: sign}      # sign: scalar +close/-open commands (robosuite, Soft); closure: many-joint hands (GR1)
+labels: pre_noise                   # pre_noise | executed

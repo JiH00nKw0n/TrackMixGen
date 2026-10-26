@@ -1,0 +1,8 @@
+# CP-Gen's official setting: the generator resets the public <env_prefix>_D0 class of MimicGen (the source
+# demonstrations' own distribution, as in demo_aug.generate's default env_name). Nothing is overridden.
+name: official_d0
+generator: cpgen
+env_suffix: D0
+base_env_suffix: D0
+override_bounds: false
+reach_constraint: {enabled: false}

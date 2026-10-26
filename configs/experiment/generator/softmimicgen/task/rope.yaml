@@ -1,0 +1,17 @@
+name: rope
+display_name: Franka Rope
+env_name: Isaac-Rope-Franka-IK-Rel-Mimic-v0   # read from the dataset's env args by the official script
+camera_env: null                        # the official task already records agentview and eye-in-hand images
+camera_module: null
+source: ${paths.sources}/softmimicgen/rope/source.hdf5
+source_file: annotated_dataset_franka_rope.hdf5   # file in generator.source_repo
+num_sources: 3
+subtasks: [grasp rope, shape rope]
+reference_objects: [rope, rope]
+horizon: 400                        # evaluation step limit (project decision 2026-10-27)
+eval_episode_length_s: 20.0         # the env's own limit is 10 s = 200 steps at 20 Hz; the evaluation must raise episode_length_s to cover the horizon
+cameras: [agentview, robot0_eye_in_hand]
+image_size: [128, 128]
+robot_state: [eef_pos, eef_quat, gripper_pos]
+object_state: []                    # low-dim training is not set up for the Isaac Lab tasks yet
+instruction: pick up the rope and shape it into a U

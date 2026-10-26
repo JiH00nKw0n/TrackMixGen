@@ -1,0 +1,11 @@
+# How and where commands run on this machine. One file per machine; `make ... CLUSTER=<name>` reads the runtime
+# keys (runtime, image, sif, data_root) and `tmg generate` reads the worker keys inside the container.
+name: local
+runtime: docker               # container runtime the Makefile uses: docker | singularity
+image: tmg/robosuite:latest   # docker image (runtime docker)
+sif: null                     # singularity image path (runtime singularity); null = <data_root>/images/tmg_<IMAGE>.sif
+data_root: null               # host folder mounted at /data; null = $HOME/tmg_data
+workers: auto                 # chunk processes run at once; auto = cpu count capped at max_workers
+max_workers: 12
+threads_per_worker: 1         # OMP/MKL threads inside one chunk process
+min_free_disk_gib: 8          # refuse to start a pool when the data root has less free space

@@ -1,0 +1,12 @@
+# Fixed evaluation scenes and the policy server address. All policies, conditions and seeds use the same scenes.
+# Sizes (decision 2026-10-27): 25 validation scenes select the checkpoint; 300 test scenes per training seed and 3
+# training seeds per condition. One seed's 300 scenes give a 95% interval of about +-5.2 points at a success rate
+# of 70%; the interval of the 3-seed mean is set mostly by the spread between seeds, which more rollouts do not
+# reduce. Tables report the mean and the standard deviation over the 3 seeds. The reference papers report 50
+# rollouts per checkpoint (MimicGen) or 3 x 50 (CP-Gen) and the maximum over seeds; we select on validation scenes.
+name: default
+val_scenes: 25                    # validation scenes played at every checkpoint
+test_scenes: 300                  # test scenes of the final table (per training seed)
+training_seeds: [1, 2, 3]         # training seeds of one condition in the final table
+seed: 7                           # reset draw seed of the scene file
+server: {host: 127.0.0.1, port: 8765}

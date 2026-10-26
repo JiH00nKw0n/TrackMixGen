@@ -1,0 +1,9 @@
+defaults:
+  - pool
+  - _self_
+# Small pool with images for end-to-end checks of the dataset, training and evaluation commands: 200 attempts in
+# chunks of 100, seeds from 40001. Same protocol as `pool` (images on).
+name: check200
+attempts: 200
+chunk: 100
+seed_offset: 40000

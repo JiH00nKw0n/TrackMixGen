@@ -1,0 +1,25 @@
+# Source ranking of mimicgen hammer_cleanup. Sources ordered from the highest to the lowest full-task generation
+# success rate per subtask (ties: lower source index first). The good/bad split is not stored here; the
+# method config chooses how many top sources count as high-success (method.mixing.good_fraction).
+generator: mimicgen
+task: hammer_cleanup
+basis: Full-task generation success rate (successes / attempts) of each source demonstration, per subtask, measured by tmg
+  rank_sources on the baseline pool /data/pools/mimicgen/hammer_cleanup/ours/none/rank3000 (3000 attempts, 12 chunks, scene
+  ours, generation rank3000). The source of a subtask is the demonstration the generator selected for that subtask.
+split_note: The ranking only orders the sources. Which prefix counts as high-success is method.mixing.good_fraction.
+subtasks:
+  0:
+    order: [4, 1, 6, 9, 3, 0, 8, 2, 5, 7]
+    attempts: {4: 264, 1: 273, 6: 303, 9: 318, 3: 295, 0: 317, 8: 308, 2: 290, 5: 286, 7: 346}
+    successes: {4: 50, 1: 49, 6: 53, 9: 52, 3: 48, 0: 51, 8: 48, 2: 45, 5: 40, 7: 47}
+    rate: {4: 0.1894, 1: 0.1795, 6: 0.1749, 9: 0.1635, 3: 0.1627, 0: 0.1609, 8: 0.1558, 2: 0.1552, 5: 0.1399, 7: 0.1358}
+  1:
+    order: [0, 5, 6, 2, 4, 1, 7, 3, 9, 8]
+    attempts: {0: 305, 5: 311, 6: 309, 2: 340, 4: 274, 1: 303, 7: 294, 3: 291, 9: 315, 8: 258}
+    successes: {0: 64, 5: 61, 6: 58, 2: 61, 4: 49, 1: 45, 7: 42, 3: 40, 9: 37, 8: 26}
+    rate: {0: 0.2098, 5: 0.1961, 6: 0.1877, 2: 0.1794, 4: 0.1788, 1: 0.1485, 7: 0.1429, 3: 0.1375, 9: 0.1175, 8: 0.1008}
+  2:
+    order: [0, 6, 4, 1, 7, 2, 8, 5, 3, 9]
+    attempts: {0: 303, 6: 306, 4: 274, 1: 288, 7: 312, 2: 293, 8: 309, 5: 314, 3: 299, 9: 302}
+    successes: {0: 56, 6: 56, 4: 49, 1: 51, 7: 52, 2: 46, 8: 46, 5: 45, 3: 41, 9: 41}
+    rate: {0: 0.1848, 6: 0.183, 4: 0.1788, 1: 0.1771, 7: 0.1667, 2: 0.157, 8: 0.1489, 5: 0.1433, 3: 0.1371, 9: 0.1358}

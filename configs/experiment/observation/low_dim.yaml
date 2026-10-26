@@ -1,0 +1,8 @@
+# Low-dimensional observations: robot state keys plus the task's object state keys, no images. Used for method
+# exploration (training is about 10x cheaper than with images and needs no rendered pool). The policies switch
+# to their low-dim hyperparameters (`policy.by_observation.low_dim`); π0 has no low-dim form.
+name: low_dim
+cameras: []
+image_size: null
+robot_state: ${task.robot_state}    # keys concatenated into observation.state
+object_state: ${task.object_state}  # keys concatenated into observation.environment_state

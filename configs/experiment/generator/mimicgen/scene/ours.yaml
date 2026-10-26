@@ -1,0 +1,51 @@
+# Our scene for the MimicGen experiments. Ranges: the D1 centre of every object is kept, the x and y widths are
+# doubled, and the range is clipped to +-0.35 m of the table centre; z_rot ranges are D1's, except Three Piece
+# Assembly which takes D2's rotations (base +-45 deg, pieces 0 to 180 deg). On top of the ranges, a reach
+# constraint redraws the reset until every task object lies within 0.85 m of the robot base (world x -0.56, y 0).
+# Registered environment class is <env_prefix>_OURS. Units as in official_d1.yaml.
+# Narrowed after the 2026-10-26 scene check (200 resets per task, tmg check_scene): bounds that put an object into
+# the robot pedestal or the gripper's home pose were pulled back to the D1 value on that side only:
+#   hammer_cleanup.hammer x lower -0.35 -> -0.2 (15/200 resets inside the pedestal; the table centre is at world x -0.2),
+#   hammer_cleanup.drawer y lower 0.15 -> 0.2 (35/200 resets against the gripper fingers),
+#   three_piece_assembly.* x lower -0.35 -> -0.28 (10/200 resets inside the pedestal),
+# Three Piece Assembly (2026-10-27): set to MimicGen's D2 ranges exactly (x, y +-0.22 m, base yaw +-45 deg, pieces 0 to 180 deg);
+#   with the doubled widths the baseline generator succeeded in 6.1 % of attempts (D2 in the paper: 31.3 %) and the low-dim
+#   BC-RNN policy reached 0.2 % (paper D2: 38.7 %), so the task was out of reach for every method.
+#   threading.tripod y upper -0.05 -> -0.1 (2/200 resets against the gripper fingers).
+# Remaining after narrowing: hammer_cleanup drawer against the gripper in 22/200 resets. The same check on official_d1
+# (2026-10-26) shows 64/200 such resets, so this contact comes from the task's own drawer placement near the gripper's
+# home pose and the range is not narrowed further.
+name: ours
+generator: mimicgen
+env_suffix: OURS
+override_bounds: true
+table_clip_m: 0.35
+reach_constraint:
+  enabled: true
+  radius_m: 0.85
+  base_xy: [-0.56, 0.0]
+  max_rejects: 500
+bounds:
+  square:
+    nut: {x: [-0.23, 0.23], y: [-0.35, 0.35], z_rot: [0.0, 6.283185307179586], reference: [0.0, 0.0, 0.82]}
+    peg: {x: [-0.3, 0.35], y: [-0.35, 0.35], z_rot: [0.0, 0.0], reference: [0.0, 0.0, 0.82]}
+  coffee:
+    coffee_machine: {x: [0.0, 0.2], y: [-0.25, -0.05], z_rot: [-0.5235987755982988, 1.0471975511965976], reference: table_offset}
+    coffee_pod: {x: [-0.325, 0.175], y: [0.105, 0.35], z_rot: [0.0, 0.0], reference: table_offset}
+  threading:
+    needle: {x: [-0.325, 0.175], y: [0.1, 0.3], z_rot: [-3.665191429188092, 0.5235987755982988], reference: table_offset}
+    tripod: {x: [-0.225, 0.275], y: [-0.25, -0.1], z_rot: [0.5235987755982988, 2.6179938779914944], reference: table_offset}
+  stack_three:
+    cubeA: {x: [-0.35, 0.35], y: [-0.35, 0.35], z_rot: [0.0, 6.283185307179586], reference: [0.0, 0.0, 0.8]}
+    cubeB: {x: [-0.35, 0.35], y: [-0.35, 0.35], z_rot: [0.0, 6.283185307179586], reference: [0.0, 0.0, 0.8]}
+    cubeC: {x: [-0.35, 0.35], y: [-0.35, 0.35], z_rot: [0.0, 6.283185307179586], reference: [0.0, 0.0, 0.8]}
+  hammer_cleanup:
+    hammer: {x: [-0.2, 0.35], y: [-0.31, -0.07], z_rot: [0.0, 6.283185307179586], rotation_axis: y, reference: table_offset}
+    drawer: {x: [-0.1, 0.3], y: [0.2, 0.35], z_rot: [-0.5235987755982988, 0.5235987755982988], reference: table_offset}
+  mug_cleanup:
+    drawer: {x: [-0.25, 0.15], y: [0.2, 0.35], z_rot: [-0.5235987755982988, 0.5235987755982988], reference: table_offset}
+    object: {x: [-0.35, 0.35], y: [-0.35, -0.075], z_rot: [0.0, 6.283185307179586], reference: table_offset}
+  three_piece_assembly:                 # = MimicGen D2 exactly (2026-10-27): the widened ranges gave 6.1 % generation success and a 0.2 % policy
+    base: {x: [-0.22, 0.22], y: [-0.22, 0.22], z_rot: [-0.7853981633974483, 0.7853981633974483], reference: table_offset}
+    piece_1: {x: [-0.22, 0.22], y: [-0.22, 0.22], z_rot: [0.0, 3.141592653589793], reference: table_offset}
+    piece_2: {x: [-0.22, 0.22], y: [-0.22, 0.22], z_rot: [0.0, 3.141592653589793], reference: table_offset}

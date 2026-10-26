@@ -1,0 +1,13 @@
+# Source ranking of DexMimicGen GR1 Pick-and-Place: sources ordered from the highest to the lowest generation success rate, one
+# ranking for all subtasks (`default`). The good/bad split is not stored here (method.mixing.good_fraction).
+generator: dexmimicgen
+task: pick_place
+basis: Full-demonstration generation success rate of each of the 5 source demonstrations in the 2026-10-25 DexMimicGen GR1
+  baseline (first 213 attempts, method off, official range). Sampling uncertainty is large; frozen before the mixed generation
+  of that experiment (evidence file dex_SOURCE_RANKING_FROZEN.json).
+split_note: The ranking only orders the sources. Which prefix counts as high-success is method.mixing.good_fraction.
+default:
+  order: [3, 1, 0, 4, 2]
+  attempts: {3: 71, 1: 35, 0: 33, 4: 34, 2: 40}
+  successes: {3: 12, 1: 4, 0: 2, 4: 1, 2: 1}
+  rate: {3: 0.169, 1: 0.1143, 0: 0.0606, 4: 0.0294, 2: 0.025}

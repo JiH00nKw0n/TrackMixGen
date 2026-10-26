@@ -1,0 +1,5 @@
+# CPU-only torch for the robosuite image (robomimic imports torch at import time). Installed from the PyTorch
+# index alone so that no other package is resolved against that index.
+--index-url https://download.pytorch.org/whl/cpu
+torch==2.6.0
+torchvision==0.21.0

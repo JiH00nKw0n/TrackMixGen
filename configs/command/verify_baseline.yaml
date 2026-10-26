@@ -1,0 +1,15 @@
+# @package _global_
+# tmg verify_baseline: run one chunk twice, once as the official generator (no grafts) and once through the
+# adapter with the method switched off, and compare the written demonstrations byte for byte.
+defaults:
+  - /paths: local
+  - /cluster: local
+  - /generator: mimicgen
+  - /task: ???
+  - /scene: official_d1
+  - /method: none
+  - /generation: pilot20
+  - _self_
+output: ${paths.pools}/_verify_baseline/${generator.name}/${task.name}/${scene.name}/${generation.name}
+command: verify_baseline
+overrides: []

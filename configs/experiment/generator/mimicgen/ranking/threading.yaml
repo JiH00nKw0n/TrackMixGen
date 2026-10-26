@@ -1,0 +1,20 @@
+# Source ranking of MimicGen threading. Sources ordered from the highest to the lowest full-task generation success
+# rate per subtask (ties: lower source index first). The good/bad split is not stored here; the method config
+# chooses how many top sources count as high-success (method.mixing.good_fraction).
+generator: mimicgen
+task: threading
+basis: Full-task generation success rate (successes / attempts) of each source demonstration, per subtask, measured in the
+  2026-09 baseline pools (method off, scene wide + reach 0.85 m, 30,000 attempts per task). The source of a subtask is the
+  demonstration the generator selected for that subtask.
+split_note: The ranking only orders the sources. Which prefix counts as high-success is method.mixing.good_fraction.
+subtasks:
+  0:
+    order: [3, 4, 6, 7, 2, 9, 0, 5, 8, 1]
+    attempts: {3: 2923, 4: 3021, 6: 3029, 7: 3091, 2: 3084, 9: 3007, 0: 2953, 5: 2929, 8: 2987, 1: 2976}
+    successes: {3: 639, 4: 656, 6: 631, 7: 629, 2: 621, 9: 545, 0: 496, 5: 450, 8: 379, 1: 235}
+    rate: {3: 0.2186, 4: 0.2171, 6: 0.2083, 7: 0.2035, 2: 0.2014, 9: 0.1812, 0: 0.168, 5: 0.1536, 8: 0.1269, 1: 0.079}
+  1:
+    order: [2, 0, 8, 7, 5, 1, 4, 6, 9, 3]
+    attempts: {2: 3078, 0: 3005, 8: 3035, 7: 3026, 5: 2878, 1: 3104, 4: 2900, 6: 2972, 9: 2981, 3: 3021}
+    successes: {2: 868, 0: 829, 8: 821, 7: 732, 5: 498, 1: 531, 4: 372, 6: 370, 9: 160, 3: 100}
+    rate: {2: 0.282, 0: 0.2759, 8: 0.2705, 7: 0.2419, 5: 0.173, 1: 0.1711, 4: 0.1283, 6: 0.1245, 9: 0.0537, 3: 0.0331}
