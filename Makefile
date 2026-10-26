@@ -119,13 +119,13 @@ serve-detached:  ## start the policy server for CKPT (container path) in the bac
 ifeq ($(RUNTIME),singularity)
 	@python3 -c "import socket,sys; s=socket.socket(); s.settimeout(1); sys.exit(1 if s.connect_ex(('127.0.0.1', $(PORT)))==0 else 0)" \
 	  || { echo "serve-detached: port $(PORT) is already in use (a server is still running there)"; exit 1; }
-	$(PREP) && setsid nohup $(SINGULARITY_TRAIN) serve checkpoint=$(CKPT) server.port=$(PORT) > $(DATA_ROOT)/$(SERVER_NAME).log 2>&1 & echo $$! > $(DATA_ROOT)/$(SERVER_NAME).pid
+	$(PREP); setsid nohup $(SINGULARITY_TRAIN) serve checkpoint=$(CKPT) server.port=$(PORT) > $(DATA_ROOT)/$(SERVER_NAME).log 2>&1 & echo $$! > $(DATA_ROOT)/$(SERVER_NAME).pid
 else
 	docker run -d --rm --name $(SERVER_NAME) --gpus all --shm-size 16g --network host -v $(DATA_ROOT):/data -v $(REPO):/opt/tmg \
 	  -e TMG_DATA_ROOT=/data -e HOME=/tmp --user $(shell id -u):$(shell id -g) tmg/$(TRAIN_IMAGE):$(TAG) serve checkpoint=$(CKPT) server.port=$(PORT) >/dev/null
 endif
 
-serve-stop:  ## stop the background policy server SERVER_NAME (singularity: the whole process group, plus any server left on PORT)
+serve-stop:  ## stop the background policy server SERVER_NAME (singularity: its session's process group (the pid file names the setsid leader), plus any server left on PORT)
 ifeq ($(RUNTIME),singularity)
 	-kill -- -$$(cat $(DATA_ROOT)/$(SERVER_NAME).pid) 2>/dev/null; pkill -u $$(id -u) -f "serve checkpoint=.* server.port=$(PORT)$$" 2>/dev/null; rm -f $(DATA_ROOT)/$(SERVER_NAME).pid
 else

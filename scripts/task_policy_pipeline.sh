@@ -23,6 +23,7 @@ export GENERATOR IMAGE
 C="GENERATOR=$GENERATOR TASK=$TASK SCENE=$SCENE METHOD=$METHOD GENERATION=$GENERATION OBSERVATION=$OBSERVATION POLICY=$POLICY SEED=$SEED CLUSTER=$CLUSTER OVERRIDES=dataset.size=$SIZE"
 log() { echo "[$TASK $(date +%H:%M:%S)] $*"; }
 validated() { [ -f "$RUN/validation.jsonl" ] && grep -q "/$1\"" "$RUN/validation.jsonl"; }
+port_busy() { python3 -c "import socket,sys; s=socket.socket(); s.settimeout(1); sys.exit(0 if s.connect_ex(('127.0.0.1', int(sys.argv[1])))==0 else 1)" "$1"; }
 
 log "train -> $RUN"
 make -s -C "$REPO" train $C || { log "TRAIN FAILED"; exit 1; }
@@ -32,9 +33,11 @@ for d in "$RUN"/checkpoints/[0-9]*/; do
   d=${d%/}; [ -f "$d/checkpoint.json" ] || continue
   validated "$(basename "$d")" && continue
   while [ "$(jobs -rp | wc -l)" -ge "$VAL_PARALLEL" ]; do wait -n || true; done
-  # one port per checkpoint (never reused while another validation may still hold it): PORT0 .. PORT0+19
+  # one port per checkpoint (never reused while another validation may still hold it): PORT0 .. PORT0+19; a port
+  # another process holds (a shared machine) is skipped
   port=$((PORT0 + i)); i=$((i + 1))
-  [ "$i" -le 20 ] || { log "more than 20 checkpoints; the port block of 40 is too small"; exit 1; }
+  while port_busy "$port"; do log "port $port is busy, skipping it"; port=$((port + 1)); i=$((i + 1)); done
+  [ "$i" -le 20 ] || { log "more than 20 checkpoints or busy ports; the port block of 40 is too small"; exit 1; }
   make -s -C "$REPO" validate RUN="$RUN" CKPT="$d" GENERATOR=$GENERATOR TASK=$TASK SCENE=$SCENE OBSERVATION=$OBSERVATION CLUSTER=$CLUSTER PORT=$port \
     > "$RUN/validate_$(basename "$d").log" 2>&1 || log "VALIDATE $(basename "$d") FAILED (see $RUN/validate_$(basename "$d").log)" &
   sleep 20      # stagger server start-ups
@@ -45,9 +48,12 @@ log "select checkpoint"
 make -s -C "$REPO" select-checkpoint $C || { log "SELECT FAILED"; exit 1; }
 SEL=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['checkpoint'])" "$RUN/SELECTED.json")
 SEL_HOST="${SEL/#\/data/$DATA_ROOT}"
-log "evaluate $(basename "$SEL_HOST") on the test scenes ($TEST_SHARDS shards)"
+# the test shards need TEST_SHARDS consecutive free ports from PORT0+20
+tport=$((PORT0 + 20))
+while :; do ok=1; for p in $(seq "$tport" $((tport + TEST_SHARDS - 1))); do port_busy "$p" && { ok=0; break; }; done; [ "$ok" = 1 ] && break; tport=$((tport + 1)); done
+log "evaluate $(basename "$SEL_HOST") on the test scenes ($TEST_SHARDS shards, ports $tport..$((tport + TEST_SHARDS - 1)))"
 make -s -C "$REPO" evaluate RUN="$RUN" CKPT="$SEL_HOST" GENERATOR=$GENERATOR TASK=$TASK SCENE=$SCENE OBSERVATION=$OBSERVATION CLUSTER=$CLUSTER SPLIT=test \
-  PORT=$((PORT0 + 20)) SHARDS=$TEST_SHARDS || { log "EVALUATE FAILED"; exit 1; }
+  PORT=$tport SHARDS=$TEST_SHARDS || { log "EVALUATE FAILED"; exit 1; }
 python3 - "$RUN" "$SEL_HOST" <<'PY'
 import json, sys, pathlib
 run, sel = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
