@@ -37,7 +37,7 @@ ARCHIVE    ?= $(DATA_ROOT)/images/tmg_$(IMAGE).tar
 # host folder bound to /tmp inside the Singularity containers: the session overlay that backs /tmp is capped at
 # 64 MB (sessiondir max size) and MimicGen assembles each chunk's demo file through a temporary directory there
 CONTAINER_TMP ?= $(or $(call cluster_value,container_tmp),$(DATA_ROOT)/tmp/container_tmp)
-PREP        = mkdir -p $(DATA_ROOT) $(CONTAINER_TMP)
+PREP        = mkdir -p $(DATA_ROOT) $(CONTAINER_TMP) $(PREP_EXTRA)
 GEN_ARGS    = generator=$(GENERATOR) task=$(TASK) scene=$(SCENE) method=$(METHOD) generation=$(GENERATION) cluster=$(CLUSTER) $(OVERRIDES)
 REVISION   := $(shell git -C $(REPO) rev-parse --short HEAD 2>/dev/null || echo unknown)
 # the CP-Gen image needs the GPU (cuRobo motion planning) also for generation and evaluation
@@ -48,12 +48,25 @@ SING_NV    = --nv
 # open (A100: Mesa software rendering, device index = cluster `egl_device_id`) the index must be set explicitly
 EGL_DEVICE_ID ?= $(call cluster_value,egl_device_id)
 SING_ENV_EXTRA = $(if $(EGL_DEVICE_ID),--env MUJOCO_EGL_DEVICE_ID=$(EGL_DEVICE_ID),)
+# CP-Gen rewrites cuRobo's task configs (it adds its straight-line cost) inside the cuRobo checkout, which is
+# read-only in the image (and root-owned under docker --user): a writable host copy, filled from the image on
+# first use, is mounted over that folder
+CUROBO_TASK_DIR = /opt/src/curobo/src/curobo/content/configs/task
+CPGEN_TASKCFG   = $(DATA_ROOT)/cpgen_writable/curobo_task
+SING_BIND_EXTRA  = -B $(CPGEN_TASKCFG):$(CUROBO_TASK_DIR)
+DOCKER_VOL_EXTRA = -v $(CPGEN_TASKCFG):$(CUROBO_TASK_DIR)
+ifeq ($(RUNTIME),singularity)
+CPGEN_TASKCFG_FILL = singularity exec $(SIF) cp -r $(CUROBO_TASK_DIR)/. $(CPGEN_TASKCFG)/
+else
+CPGEN_TASKCFG_FILL = docker run --rm -v $(CPGEN_TASKCFG):/out --entrypoint cp tmg/$(IMAGE):$(TAG) -r $(CUROBO_TASK_DIR)/. /out/
+endif
+PREP_EXTRA = && { test -n "$$(ls -A $(CPGEN_TASKCFG) 2>/dev/null)" || { mkdir -p $(CPGEN_TASKCFG) && $(CPGEN_TASKCFG_FILL); }; }
 endif
 DOCKER_RUN  = docker run --rm -i $(if $(shell tty -s && echo t),-t,) --network host $(DOCKER_GPU) \
-              -v $(DATA_ROOT):/data -v $(REPO):/opt/tmg \
+              -v $(DATA_ROOT):/data -v $(REPO):/opt/tmg $(DOCKER_VOL_EXTRA) \
               -e TMG_DATA_ROOT=/data -e HOME=/tmp -e HF_HOME=/data/.cache/huggingface \
               --user $(shell id -u):$(shell id -g) tmg/$(IMAGE):$(TAG)
-SINGULARITY_RUN = singularity exec $(SING_NV) $(SING_ENV_EXTRA) --cleanenv --no-home --writable-tmpfs --pwd /opt/tmg -B $(DATA_ROOT):/data -B $(REPO):/opt/tmg -B $(CONTAINER_TMP):/tmp \
+SINGULARITY_RUN = singularity exec $(SING_NV) $(SING_ENV_EXTRA) --cleanenv --no-home --writable-tmpfs --pwd /opt/tmg -B $(DATA_ROOT):/data -B $(REPO):/opt/tmg -B $(CONTAINER_TMP):/tmp $(SING_BIND_EXTRA) \
               --env TMG_DATA_ROOT=/data,HOME=/tmp,HF_HOME=/data/.cache/huggingface,MUJOCO_GL=egl,PYOPENGL_PLATFORM=egl $(SIF) tmg
 # the train image (python 3.12, torch, lerobot) runs with the GPU; the data root and repo are mounted the same way
 TRAIN_SIF   ?= $(or $(call cluster_value,train_sif),$(DATA_ROOT)/images/tmg_$(TRAIN_IMAGE).sif)

@@ -137,6 +137,11 @@ CP-Gen은 원본 구간을 다시 재생하지 않는다. 시도마다 주석된
   불러와지지 않는다. Coffee_D0 같은 기본 환경 클래스는 CP-Gen의 `cpgen_envs` 패키지가 robosuite 1.5용으로 다시 구현해 등록한다.
   `tmg.generation.simulators.robosuite.register_env_class`는 `mimicgen` 다음에 `cpgen_envs`도 불러오며(없으면 건너뛴다), 그래서
   장면 클래스(Coffee_OURS)는 cpgen_envs의 Coffee_D0를 부모로 만들어진다.
+- 쓰기 위치. CP-Gen은 cuRobo 체크아웃의 과제 설정 폴더(`/opt/src/curobo/src/curobo/content/configs/task`)에 직선 비용을 더한 설정
+  파일을 새로 쓰고, 현재 작업 폴더에 임시 xml 파일(`eef_and_env_model.xml` 등)을 쓴다. 이미지 안은 읽기 전용이므로 Makefile은
+  CP-Gen 이미지에서 그 설정 폴더 위에 호스트의 쓰기 가능한 복사본(`<data_root>/cpgen_writable/curobo_task`, 처음 쓸 때 이미지에서
+  채운다)을 붙이고, 조각 프로세스는 자기 조각 폴더의 `cwd/`(체크아웃 최상위를 심볼릭 링크로 비춘 폴더)를 작업 폴더로 쓴다. 그래서
+  조각 프로세스 여러 개가 같은 임시 파일을 두고 겹쳐 쓰는 일도 없다.
 - 화면 밖 렌더링 장치. robosuite 1.5의 EGL 문맥은 `MUJOCO_EGL_DEVICE_ID`가 없으면 `CUDA_VISIBLE_DEVICES`의 값을 EGL 장치
   번호로 쓴다. A100 서버의 Singularity는 NVIDIA EGL 라이브러리를 넣어 주지 않아(nvidia-container-cli 방식, graphics 기능 없음)
   Mesa 소프트웨어 렌더링만 가능하고, Mesa는 사용자가 열 수 없는 GPU 8대의 DRM 장치 다음에 소프트웨어 장치를 9번째(번호 8)로

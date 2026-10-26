@@ -2,8 +2,9 @@
 
     python -m tmg.generation.generators.cpgen.entrypoint --spec <chunk>/chunk_spec.json
 
-Steps: make the CP-Gen checkout the working directory (its code opens ``demo_aug/configs/...`` relative to
-it) and put it on ``sys.path`` (``scripts.dataset.mp4_from_h5``), register the scene's environment class,
+Steps: put the CP-Gen checkout on ``sys.path`` (``scripts.dataset.mp4_from_h5``) and work in a per-chunk folder
+that mirrors it (its code opens ``demo_aug/configs/...`` relative to the working directory and writes scratch
+files there), register the scene's environment class,
 install the grafts (``runtime.apply``) unless the spec disables them for the identity check, then call
 ``demo_aug.generate.main`` with the chunk's ``Config``. CP-Gen's ``main`` raises after the attempts when no
 attempt succeeded (it tries to render observations of a merged file that does not exist); that case ends the
@@ -32,7 +33,16 @@ def main(argv=None):
     if not (root / "demo_aug").exists():
         raise FileNotFoundError(f"CP-Gen checkout {root} has no demo_aug/ (generator.source_root, TMG_CPGEN_SRC)")
     sys.path.insert(0, str(root))
-    os.chdir(root)
+    # CP-Gen opens ``demo_aug/configs/...`` relative to its checkout and writes scratch files (``eef_and_env_model.xml``,
+    # ``updated_xml.xml``) into the working directory. The checkout is read-only in the images and shared by the
+    # chunk processes, so each chunk works in its own folder that mirrors the checkout's top level with symlinks.
+    workdir = Path(spec["folder"]) / "cwd"
+    workdir.mkdir(parents=True, exist_ok=True)
+    for entry in root.iterdir():
+        link = workdir / entry.name
+        if not link.exists() and not link.is_symlink():
+            link.symlink_to(entry)
+    os.chdir(workdir)
 
     from tmg.core.records import RECORDS_DIR, read_attempts
     from tmg.generation.generators.cpgen import runtime
