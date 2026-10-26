@@ -15,3 +15,9 @@ image_size: [128, 128]
 robot_state: [eef_pos, eef_quat, gripper_pos]
 object_state: []                    # low-dim training is not set up for the Isaac Lab tasks yet
 instruction: pick up the rope and shape it into a U
+# Success term timing (2026-10-27 audit): rope_ends_close_tracked picks the two rope end nodes at its FIRST call of an
+# episode and keeps them; the official generator and evaluator first call it after the first action. Calling it right
+# after reset picks other nodes (the rope has not settled) and changes the verdict. Generation only reads the official
+# value; an evaluation must call the term after the first action onwards, never at reset, and leave the reset event
+# reset_rope_end_tracking in place.
+success_term: {name: rope_ends_close_tracked, first_call: after_first_action}

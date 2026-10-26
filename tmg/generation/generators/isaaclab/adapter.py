@@ -12,6 +12,10 @@ lets the official script run. Outputs of a chunk::
 
 The source demonstrations are the released annotated datasets (``sources.py``). ``chunk_result`` validates the
 records against the attempt count and counts the exported episodes.
+
+Success is never computed by tmg: the grafts read the official ``success`` value inside ``MultiWaypoint.execute``.
+SoftMimicGen's rope term fixes the rope end nodes at its first call of an episode, so calling it at reset (before the
+first action) would change the verdict; see ``docs/GENERATORS.md`` and ``task.success_term``.
 """
 from __future__ import annotations
 

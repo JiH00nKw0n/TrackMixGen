@@ -91,6 +91,15 @@
 걸음별 잡음 뽑기는 `NoiseLedger`가 보존한다(원본 경유점마다 공식 뽑기 한 묶음, 추가 걸음은 사설 난수). `method=none`은
 항상 공식 `generate`를 돈다.
 
+SoftMimicGen의 Rope 성공 판정(`rope_ends_close_tracked`)은 호출 시점에 민감하다. 이 함수는 에피소드마다 밧줄의 두 끝 마디를
+"가장 멀리 떨어진 두 마디"로 처음 호출될 때 정하고(`env._rope_end_indices`), 그 뒤로는 그 마디 번호를 계속 쓴다. 리셋 사건
+`reset_rope_end_tracking`이 리셋 때 이 캐시를 지운다. 공식 생성기와 공식 평가기는 모두 **첫 행동을 실행한 뒤** 처음으로 성공
+판정을 부르는데, 리셋 직후에 부르면 밧줄이 아직 자리 잡기 전이라 다른 마디(예를 들어 0번·11번 대신 1번·10번)가 끝으로 잡히고
+같은 공식 수식이 다른 성공 결과를 낸다(2026-10-27 Codex 감사). tmg가 지키는 규칙은 다음과 같다. 생성에서는 공식
+`MultiWaypoint.execute` 안의 `success` 값을 읽기만 하고 성공 판정을 따로 부르지 않는다(추종 반복문도 공식 `execute`를 그대로 쓴다).
+Isaac Lab 평가를 만들 때도 성공 판정은 첫 행동 뒤부터 매 걸음 부르고, 리셋 직후에는 부르지 않으며, 리셋 사건이 캐시를 지우도록
+그대로 둔다. 이 규칙은 `configs/experiment/generator/softmimicgen/task/rope.yaml`의 `success_term`에 적혀 있다.
+
 소스 해시는 `configs/experiment/generator/{softmimicgen,dexmimicgen}.yaml`의 `graft_hashes`에 있다. 아직 `null`인 항목은
 첫 청크 실행이 설치된 해시를 로그에 찍으니, 그 값을 적어 고정한다. 고정 뒤에는 패키지가 바뀌면 청크가 시작하지 않는다.
 
