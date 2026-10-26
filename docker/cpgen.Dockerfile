@@ -36,6 +36,13 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     && uv pip install --python /opt/venv/bin/python --no-build-isolation 'git+https://github.com/facebookresearch/pytorch3d.git@v0.7.7' \
     && uv pip install --python /opt/venv/bin/python --no-deps -e /opt/src/mimicgen -e /opt/src/cpgen -e /opt/src/cpgen_envs \
     && uv pip install --python /opt/venv/bin/python --no-build-isolation -e /opt/src/curobo
+# imported by demo_aug.generate at load time (not needed for generation itself): the openai client of the LLM
+# segmentation utilities, wandb, and robosuite_task_zoo for cpgen_envs' kitchen environment
+ARG TASK_ZOO_COMMIT=74eab7f
+RUN --mount=type=cache,target=/root/.cache/uv \
+    git clone -q https://github.com/ARISE-Initiative/robosuite-task-zoo /opt/src/robosuite_task_zoo && git -C /opt/src/robosuite_task_zoo checkout -q $TASK_ZOO_COMMIT \
+    && uv pip install --python /opt/venv/bin/python --no-deps -e /opt/src/robosuite_task_zoo \
+    && uv pip install --python /opt/venv/bin/python openai wandb
 WORKDIR /opt/tmg
 COPY pyproject.toml README.md ./
 COPY tmg/ tmg/
