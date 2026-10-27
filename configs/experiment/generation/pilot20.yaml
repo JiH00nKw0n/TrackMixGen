@@ -7,8 +7,9 @@ protocol:
   keep_failed: true
   max_num_failures: null
   guarantee: false                # fixed attempt count (successes are selected at the dataset stage)
-  select_src_per_subtask: true    # our standard, kept on purpose: MimicGen's templates use false (one source demo per
-  selection_strategy: random      # attempt) and nearest_neighbor_object for Square subtask 2 and Stack Three; see docs/GENERATORS.md 1.4
+  select_src_per_subtask: true    # current exploration value. The final evaluation must use MimicGen's template values: false
+  selection_strategy: random      # (one source demo per attempt) and nearest_neighbor_object for Square subtask 2 and Stack Three
+                                  # (needs per-subtask values in config_builder and regenerated pools); see docs/GENERATORS.md 1.4
   selection_strategy_kwargs: null
   action_noise: 0.05
   interpolation_steps: 5
