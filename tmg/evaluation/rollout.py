@@ -86,13 +86,20 @@ def make_env(env_name: str, observation: dict, robot: str, env_meta: dict | None
 
 
 def policy_input(obs: dict, observation: dict) -> dict:
-    """Policy input from a robomimic observation dict (images HWC uint8 -> CHW; state keys concatenated)."""
+    """Policy input from a robomimic observation dict (images -> CHW uint8; state keys concatenated).
+
+    Images arrive in one of two forms: raw robosuite frames, (H, W, 3) uint8 (``make_env``), or robomimic-processed
+    frames, (3, H, W) float32 in [0, 1] (``make_env_from_meta``: robomimic's ``EnvRobosuite.get_observation`` runs
+    ``ObsUtils.process_obs``, which scales and transposes). Both become the (3, H, W) uint8 the datasets store.
+    """
     out = {}
     for cam in observation.get("cameras") or []:
         img = np.asarray(obs[f"{cam}_image"])
         if img.dtype != np.uint8:
             img = (np.clip(img, 0, 1) * 255).astype(np.uint8) if img.max() <= 1.0 else img.astype(np.uint8)
-        out[f"observation.images.{cam}"] = np.ascontiguousarray(img.transpose(2, 0, 1))
+        if not (img.ndim == 3 and img.shape[0] == 3 and img.shape[-1] != 3):     # (H, W, 3) -> (3, H, W)
+            img = img.transpose(2, 0, 1)
+        out[f"observation.images.{cam}"] = np.ascontiguousarray(img)
     out["observation.state"] = np.concatenate([np.asarray(obs[k], dtype=np.float32).reshape(-1) for k in observation["robot_state"]])
     object_keys = list(observation.get("object_state") or [])
     if object_keys:

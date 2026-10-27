@@ -224,3 +224,17 @@ def test_adjusted_env_meta_keeps_controller_and_sets_scene_and_cameras():
     low = adjusted_env_meta(meta, "Coffee_OURS", [], None)
     assert low["env_kwargs"]["use_camera_obs"] is False and "camera_names" not in low["env_kwargs"]
     assert meta["env_kwargs"]["use_camera_obs"] is False                                            # input not modified
+
+
+def test_policy_input_accepts_both_image_layouts():
+    import numpy as np
+
+    from tmg.evaluation.rollout import policy_input
+
+    observation = {"cameras": ["agentview"], "robot_state": ["robot0_eef_pos"]}
+    hwc = (np.random.default_rng(0).random((84, 84, 3)) * 255).astype(np.uint8)
+    raw = policy_input({"agentview_image": hwc, "robot0_eef_pos": np.zeros(3)}, observation)
+    processed = policy_input({"agentview_image": hwc.transpose(2, 0, 1).astype(np.float32) / 255.0, "robot0_eef_pos": np.zeros(3)}, observation)
+    assert raw["observation.images.agentview"].shape == (3, 84, 84)
+    assert np.array_equal(raw["observation.images.agentview"], hwc.transpose(2, 0, 1))
+    assert np.abs(processed["observation.images.agentview"].astype(int) - raw["observation.images.agentview"].astype(int)).max() <= 1
