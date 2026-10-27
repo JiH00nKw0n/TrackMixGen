@@ -1,0 +1,10 @@
+defaults:
+  - pool_lowdim
+  - _self_
+# Diagnostic variant of `pool_lowdim` (2026-10-27): one source demonstration per attempt, as MimicGen's official
+# templates do (`select_src_per_subtask: false`), instead of our per-subtask choice. Same attempts, chunking and
+# seeds as `pool_lowdim`, so the only difference is the source selection. Used to test why Three Piece Assembly at
+# the D2 scene generated 10.3% (paper 31.3%); see docs/GENERATORS.md section 1.4.
+name: pool_lowdim_onesrc
+protocol:
+  select_src_per_subtask: false
