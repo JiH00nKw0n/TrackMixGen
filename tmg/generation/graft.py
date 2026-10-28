@@ -185,9 +185,11 @@ class Graft:
         body = self.node.body
         if not isinstance(body[-1], ast.Return) or body[-1].value is None:
             raise GraftError(f"{self.label}: function does not end with a valued return")
-        value = body[-1].value
-        body[-1] = ast.Return(value=ast.Name(id=name, ctx=ast.Load()))
-        body.insert(len(body) - 1, ast.Assign(targets=[ast.Name(id=name, ctx=ast.Store())], value=value))
+        original = body[-1]
+        value = original.value
+        assign = ast.copy_location(ast.Assign(targets=[ast.Name(id=name, ctx=ast.Store())], value=value, type_comment=None), original)
+        body[-1] = ast.copy_location(ast.Return(value=ast.Name(id=name, ctx=ast.Load())), original)
+        body.insert(len(body) - 1, assign)
         self.edits.append(f"final return value bound to '{name}'")
         return self
 
