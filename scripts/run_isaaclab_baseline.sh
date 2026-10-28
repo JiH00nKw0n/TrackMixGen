@@ -13,7 +13,8 @@
 # Variables: CLUSTER (ada), GPU (0), SOFT_TASKS ("rope towel jenga"), DEX_TASKS ("pick_place"), SEEDS ("202601 202602 202603"),
 #   POLICY (diffusion_policy), SIZE (1000), VAL_PARALLEL (2: checkpoints validated at a time, each one Isaac Sim),
 #   TEST_SHARDS (3: parallel shards of the 300 test scenes), SEED_PARALLEL (1: training runs at a time),
-#   ONLY_GENERATION (1: stop after the datasets), BUNDLE_NAME (results folder name under <data root>/reports).
+#   ONLY_GENERATION (1: stop after the datasets), BUNDLE_NAME (results folder name under <result root>/reports),
+#   TMG_RESULTS_ROOT (persistent summaries and driver logs; defaults to the data root).
 set -uo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 CLUSTER=${CLUSTER:-ada}; GPU=${GPU:-0}; SOFT_TASKS=${SOFT_TASKS-"rope towel jenga"}; DEX_TASKS=${DEX_TASKS-"pick_place"}
@@ -22,7 +23,8 @@ VAL_PARALLEL=${VAL_PARALLEL:-2}; TEST_SHARDS=${TEST_SHARDS:-3}; SEED_PARALLEL=${
 SEQUENTIAL_TASKS=${SEQUENTIAL_TASKS:-0}
 SCENE=ours; METHOD=none; GENERATION=pool_isaac; OBSERVATION=image
 DATA_ROOT=$(make -s -C "$REPO" print-data-root CLUSTER="$CLUSTER")
-LOG=$DATA_ROOT/logs/isaaclab_baseline; mkdir -p "$LOG"
+RESULTS_ROOT=${TMG_RESULTS_ROOT:-$DATA_ROOT}
+LOG=$RESULTS_ROOT/logs/isaaclab_baseline; mkdir -p "$LOG"
 BUNDLE_NAME=${BUNDLE_NAME:-isaaclab_baseline_$(date +%Y%m%d)}
 log() { echo "[driver $(date '+%F %T')] $*" | tee -a "$LOG/driver.log"; }
 fail() { log "$1 FAILED (see $2)"; echo "$1" >> "$LOG/FAILURES"; }
@@ -30,10 +32,22 @@ fail() { log "$1 FAILED (see $2)"; echo "$1" >> "$LOG/FAILURES"; }
 JOBS=""
 for t in $SOFT_TASKS; do JOBS="$JOBS softmimicgen:isaaclab-soft:$t"; done
 for t in $DEX_TASKS; do JOBS="$JOBS dexmimicgen:isaaclab-dex:$t"; done
+ALL_JOBS=$JOBS
 dataset_of() { echo "$DATA_ROOT/datasets/$1/$2/$SCENE/$METHOD/$GENERATION/$OBSERVATION/n${SIZE}_seed0.hdf5"; }
 resets_of() { echo "$DATA_ROOT/resets/$1/$2/$SCENE/val25_test300_seed202600.json"; }
 run_of() { echo "$DATA_ROOT/runs/$1/$2/$SCENE/$METHOD/$GENERATION/$OBSERVATION/$POLICY/seed$3"; }
 M() { make -s -C "$REPO" "$@"; }
+
+collect_bundle() {
+  local args=() job gen image task
+  for job in $ALL_JOBS; do
+    IFS=: read -r gen image task <<< "$job"
+    args+=(--job "$gen/$task/$SCENE/$METHOD/$GENERATION/$OBSERVATION")
+  done
+  python3 "$REPO/scripts/collect_results.py" --data-root "$DATA_ROOT" --out "$RESULTS_ROOT/reports/$BUNDLE_NAME" \
+    --policy "$POLICY" --seeds $SEEDS "${args[@]}" --logs "$LOG" "$@" > "$LOG/collect.log" 2>&1 \
+    || { fail "collect" "$LOG/collect.log"; return 1; }
+}
 
 generation_lane() {
   for job in $JOBS; do
@@ -89,20 +103,19 @@ log "start: cluster $CLUSTER, GPU $GPU, jobs:$JOBS, seeds: $SEEDS, policy $POLIC
 if [ -f "$LOG/FAILURES" ]; then mv "$LOG/FAILURES" "$LOG/FAILURES.$(date +%Y%m%d_%H%M%S)"; fi
 if [ -f "$LOG/DONE" ]; then mv "$LOG/DONE" "$LOG/DONE.$(date +%Y%m%d_%H%M%S)"; fi
 if [ "$SEQUENTIAL_TASKS" = 1 ]; then
-  ALL_JOBS=$JOBS
   for one_job in $ALL_JOBS; do
     JOBS=$one_job
     generation_lane
     if [ "${ONLY_GENERATION:-0}" != 1 ]; then policy_lane; fi
+    # Persist completed task summaries before starting the next task. Raw data and weights stay in DATA_ROOT.
+    collect_bundle --no-tar || true
   done
   JOBS=$ALL_JOBS
 else
   generation_lane &
   if [ "${ONLY_GENERATION:-0}" = 1 ]; then wait; else policy_lane & wait; fi
 fi
-log "collecting results into $DATA_ROOT/reports/$BUNDLE_NAME"
-python3 "$REPO/scripts/collect_results.py" --data-root "$DATA_ROOT" --out "$DATA_ROOT/reports/$BUNDLE_NAME" --policy $POLICY --seeds $SEEDS \
-  $(for job in $JOBS; do IFS=: read -r gen image task <<< "$job"; echo "--job $gen/$task/$SCENE/$METHOD/$GENERATION/$OBSERVATION"; done) \
-  --logs "$LOG" > "$LOG/collect.log" 2>&1 && log "bundle: $DATA_ROOT/reports/$BUNDLE_NAME.tar.gz" || fail "collect" "$LOG/collect.log"
+log "collecting results into $RESULTS_ROOT/reports/$BUNDLE_NAME"
+collect_bundle && log "bundle: $RESULTS_ROOT/reports/$BUNDLE_NAME.tar.gz"
 if [ -f "$LOG/FAILURES" ]; then log "FAILURES: $(tr '\n' ';' < "$LOG/FAILURES")"; exit 1; fi
 echo "ISAACLAB_BASELINE_DONE $(date)" > "$LOG/DONE"; log "done"
