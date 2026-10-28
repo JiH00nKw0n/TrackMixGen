@@ -159,22 +159,32 @@ def install(root, image):
             "torch==2.7.0+cu128", "torchvision==0.22.0+cu128", "torchaudio==2.7.0+cu128")
     pip("--no-deps", "-e", REPO)
     pip("hydra-core>=1.3,<1.4", "omegaconf>=2.3,<2.4", "pyyaml", "scipy", "msgpack", "websockets")
+    verify_installation(root, image)
+    print("INSTALLED", image, flush=True)
+
+
+def verify_installation(root, image):
+    """Check the installed pins and source revisions without reinstalling or importing Isaac Sim."""
+    uv = root / "bin/uv"
+    python = root / "envs" / image / "bin/python"
     evidence = root / "install-records"
     evidence.mkdir(exist_ok=True)
     with (evidence / f"{image}.freeze.txt").open("w") as output:
-        run([uv, "pip", "freeze", "--python", python], env=env, stdout=output)
+        run([uv, "pip", "freeze", "--python", python], stdout=output)
     with (evidence / f"{image}.check.txt").open("w") as output:
-        run([uv, "pip", "check", "--python", python], env=env, stdout=output, stderr=subprocess.STDOUT)
+        run([uv, "pip", "check", "--python", python], stdout=output, stderr=subprocess.STDOUT)
     expected = ({"torch": "2.8.0+cu128", "torchvision": "0.23.0+cu128", "lerobot": "0.6.1"}
                 if image == "train" else
                 {"isaacsim": "5.1.0", "torch": "2.7.0+cu128", "torchvision": "0.22.0+cu128",
                  "torchaudio": "2.7.0+cu128", "qpsolvers": "4.8.1" if image == "isaaclab-soft" else "4.3.1"})
     actual = json.loads(subprocess.check_output([
-        str(python), "-c", ("import sys,json,importlib.metadata as m; "
-        "print(json.dumps({'python':list(sys.version_info[:3]),'packages':"
-        "{n:m.version(n) for n in sys.argv[1:]}}))"), *expected], text=True))
+        str(python), "-c", ("import sys,json,importlib.metadata as m; from packaging.version import Version; "
+        "expected=json.loads(sys.argv[1]); actual={n:m.version(n) for n in expected}; "
+        "print(json.dumps({'python':list(sys.version_info[:3]),'packages':actual,"
+        "'passed':all(Version(actual[n])==Version(v) for n,v in expected.items())}))"),
+        json.dumps(expected)], text=True))
     actual["expected_packages"] = expected
-    actual["passed"] = (actual["packages"] == expected
+    actual["passed"] = (actual["passed"]
                         and actual["python"][:2] == ([3, 12] if image == "train" else [3, 11]))
     actual["source_commits"] = {}
     for source in (root / "src" / image).glob("*/.git"):
@@ -183,12 +193,13 @@ def install(root, image):
     (evidence / f"{image}.versions.json").write_text(json.dumps(actual, indent=2))
     if not actual["passed"]:
         raise RuntimeError(f"installed versions differ from the original pins: {actual}")
-    print("INSTALLED", image, flush=True)
+    print("VERIFIED", image, flush=True)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("stage", choices=["tools", "graphics", "isaaclab-soft", "isaaclab-dex", "train"])
+    parser.add_argument("stage", choices=["tools", "graphics", "isaaclab-soft", "isaaclab-dex", "train", "verify"])
+    parser.add_argument("--image", choices=["isaaclab-soft", "isaaclab-dex", "train"])
     args = parser.parse_args()
     root = Path(os.environ.get("TMG_NATIVE_ROOT") or "~/.local/share/tmg-native").expanduser().resolve()
     root.mkdir(parents=True, exist_ok=True)
@@ -196,6 +207,10 @@ def main():
         tools(root)
     elif args.stage == "graphics":
         graphics(root)
+    elif args.stage == "verify":
+        if not args.image:
+            parser.error("verify requires --image")
+        verify_installation(root, args.image)
     else:
         install(root, args.stage)
 
