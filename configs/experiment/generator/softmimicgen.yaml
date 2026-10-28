@@ -7,8 +7,8 @@ package: softmimicgen.datagen           # official datagen package (DataGenerato
 commit: c9d146ba57358a544167de8ebe946caaac8f6220
 isaaclab_commit: 25c69e088fa8122ad189b3a566d38ef24fa74d6f
 source_repo: masoudmoghani/SoftMimicGen   # Hugging Face dataset repo of the annotated source demonstrations
-source_root: ${oc.env:TMG_ISAACLAB_SRC,/opt/src/IsaacLab}
-script: scripts/imitation_learning/isaaclab_mimic/generate_dataset.py
+source_root: ${oc.env:TMG_SOFTMIMICGEN_SRC,/opt/src/SoftMimicGen}   # SoftMimicGen's own copy of the script: it imports
+script: scripts/imitation_learning/isaaclab_mimic/generate_dataset.py   # softmimicgen.envs/.datagen and softmimicgen_tasks
 kit_args: "--/renderer/multiGpu/enabled=false --/renderer/activeGpu=0"
 extra_args: []
 # Source text hashes of the grafted functions (sha256 of inspect.getsource). null = not pinned yet: the first chunk

@@ -35,7 +35,7 @@ COPY tmg/ tmg/
 COPY configs/ configs/
 RUN --mount=type=cache,target=/root/.cache/uv uv pip install --python /opt/venv/bin/python --no-deps -e /opt/tmg \
     && uv pip install --python /opt/venv/bin/python 'hydra-core>=1.3,<1.4' 'omegaconf>=2.3,<2.4' pyyaml scipy msgpack websockets
-ENV TMG_DATA_ROOT=/data TMG_IMAGE=tmg/isaaclab-soft TMG_REVISION=$TMG_REVISION TMG_ISAACLAB_SRC=/opt/src/IsaacLab \
+ENV TMG_DATA_ROOT=/data TMG_IMAGE=tmg/isaaclab-soft TMG_REVISION=$TMG_REVISION TMG_ISAACLAB_SRC=/opt/src/IsaacLab TMG_SOFTMIMICGEN_SRC=/opt/src/SoftMimicGen \
     HF_HUB_DISABLE_TELEMETRY=1
 LABEL org.opencontainers.image.revision=$TMG_REVISION
 VOLUME ["/data"]

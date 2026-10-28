@@ -72,7 +72,9 @@ class IsaacLabGenerator(SyntheticDataGenerator):
         task = self.task
         args = ["--headless", "--enable_cameras", "--device", str(self.cluster_device()), "--num_envs", "1",
                 "--generation_num_trials", str(chunk.attempts), "--input_file", str(self.source_path()),
-                "--output_file", str(folder / GENERATED), "--seed", str(chunk.seed)]
+                "--output_file", str(folder / GENERATED)]
+        # the official scripts have no --seed: the chunk seed is written into env_cfg.datagen_config.seed by the
+        # entrypoint's setup_env_config wrapper (the value the script seeds random, numpy and torch with)
         if task.get("camera_env"):
             args += ["--task", str(task["camera_env"])]
         args += [str(a) for a in (self.generator_cfg.get("extra_args") or [])]
