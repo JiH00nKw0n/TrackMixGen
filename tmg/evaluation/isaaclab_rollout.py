@@ -18,10 +18,12 @@ success termination taken out of the config and called by hand. Each scene of th
 
 Every episode row also stores the initial placement read after the reset (rigid objects: position and quaternion in
 the environment frame; deformable objects: mean nodal position), for later analysis of success against the scene.
-Isaac Sim is started once per process and closed at the end.
+Isaac Sim is started once per process and closed when the interpreter exits (``atexit``), after ``tmg eval`` has
+written its summary and validation row.
 """
 from __future__ import annotations
 
+import atexit
 import importlib
 import random
 import time
@@ -50,7 +52,9 @@ def launch_app(generator_cfg: dict, device: str):
     if generator_cfg.get("kit_args"):
         argv += ["--kit_args", str(generator_cfg["kit_args"])]
     args = parser.parse_args(argv)
-    return AppLauncher(args).app
+    app = AppLauncher(args).app
+    atexit.register(app.close)
+    return app
 
 
 def import_task_modules(generator_cfg: dict, task: dict) -> None:
@@ -162,28 +166,25 @@ def play_isaaclab(plain: dict, todo: list[dict], checkpoint: str, horizon: int, 
     """Play the scenes of ``todo`` and hand each episode row to ``record`` (see the module docstring)."""
     task, obs_cfg, ev = plain["task"], plain["observation"], plain["evaluation"]
     device = str((plain.get("cluster") or {}).get("device", "cuda:0"))
-    app = launch_app(plain["generator"], device)
+    launch_app(plain["generator"], device)           # stays up until the interpreter exits
+    import_task_modules(plain["generator"], task)
+    env, success_term, task_id = build_env(plain, device)
+    print(f"[tmg] Isaac Lab environment {task_id} on {device}; success term {getattr(success_term.func, '__name__', success_term.func)} "
+          f"called after every step", flush=True)
+    url = f"ws://{ev['server']['host']}:{ev['server']['port']}"
     try:
-        import_task_modules(plain["generator"], task)
-        env, success_term, task_id = build_env(plain, device)
-        print(f"[tmg] Isaac Lab environment {task_id} on {device}; success term {getattr(success_term.func, '__name__', success_term.func)} "
-              f"called after every step", flush=True)
-        url = f"ws://{ev['server']['host']}:{ev['server']['port']}"
-        try:
-            with PolicyClient(url) as policy:
-                info = policy.info()
-                check_server(info, checkpoint)
-                if info["cameras"] != list(obs_cfg.get("cameras") or []):
-                    raise RuntimeError(f"policy cameras {info['cameras']} differ from observation={obs_cfg['name']} ({obs_cfg.get('cameras')})")
-                if bool(info.get("env_state_dim", 0)) != bool(obs_cfg.get("object_state")):
-                    raise RuntimeError(f"policy env_state_dim {info.get('env_state_dim', 0)} does not match observation={obs_cfg['name']}")
-                for s in todo:
-                    seed = episode_seed(int(ev["seed"]), int(plain.get("training_seed", 0)), s["index"])
-                    t0 = time.time()
-                    r = run_episode(env, success_term, policy, s, task, obs_cfg, horizon=horizon, seed=seed)
-                    record({"reset_index": s["index"], "split": s["split"], "scene_seed": int(s["seed"]), **r, "policy_seed": seed,
-                            "checkpoint": checkpoint, "seconds": round(time.time() - t0, 2)})
-        finally:
-            env.close()
+        with PolicyClient(url) as policy:
+            info = policy.info()
+            check_server(info, checkpoint)
+            if info["cameras"] != list(obs_cfg.get("cameras") or []):
+                raise RuntimeError(f"policy cameras {info['cameras']} differ from observation={obs_cfg['name']} ({obs_cfg.get('cameras')})")
+            if bool(info.get("env_state_dim", 0)) != bool(obs_cfg.get("object_state")):
+                raise RuntimeError(f"policy env_state_dim {info.get('env_state_dim', 0)} does not match observation={obs_cfg['name']}")
+            for s in todo:
+                seed = episode_seed(int(ev["seed"]), int(plain.get("training_seed", 0)), s["index"])
+                t0 = time.time()
+                r = run_episode(env, success_term, policy, s, task, obs_cfg, horizon=horizon, seed=seed)
+                record({"reset_index": s["index"], "split": s["split"], "scene_seed": int(s["seed"]), **r, "policy_seed": seed,
+                        "checkpoint": checkpoint, "seconds": round(time.time() - t0, 2)})
     finally:
-        app.close()
+        env.close()
