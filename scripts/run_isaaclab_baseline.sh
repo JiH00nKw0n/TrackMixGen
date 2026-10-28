@@ -43,7 +43,8 @@ fail() { log "$1 FAILED (see $2)"; echo "$1" >> "$LOG/FAILURES"; }
 JOBS=""
 for t in $SOFT_TASKS; do JOBS="$JOBS softmimicgen:isaaclab-soft:$t"; done
 for t in $DEX_TASKS; do JOBS="$JOBS dexmimicgen:isaaclab-dex:$t"; done
-for t in ${AUTODATA_TASKS-"microwave bottle_door"}; do JOBS="$JOBS autodata:isaaclab-autodata:$t"; done
+AUTODATA_TASKS=${AUTODATA_TASKS-"microwave bottle_door"}      # assign first: a quoted default inside ${...} is one word
+for t in $AUTODATA_TASKS; do JOBS="$JOBS autodata:isaaclab-autodata:$t"; done
 ALL_JOBS=$JOBS
 dataset_of() { echo "$DATA_ROOT/datasets/$1/$2/$SCENE/$METHOD/$GENERATION/$OBSERVATION/n${SIZE}_seed0.hdf5"; }
 resets_of() { echo "$DATA_ROOT/resets/$1/$2/$SCENE/val25_test300_seed202600.json"; }

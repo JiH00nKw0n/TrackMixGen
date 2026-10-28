@@ -182,7 +182,7 @@ def test_runtime_captures_and_resizes_frames_from_any_observation_group(tmp_path
     rt._frames = {"robot_pov_cam_rgb": []}
 
     class Env:
-        obs_buf = {"policy": {"left_eef_pos": np.zeros((1, 3))},
+        obs_buf = {"policy": {"left_eef_pos": np.zeros((1, 3))},  # noqa: RUF012  test stub
                    "camera_obs": {"robot_pov_cam_rgb": (np.random.default_rng(3).random((1, 512, 512, 3)) * 255).astype(np.uint8)}}
 
     rt.capture_frames(Env(), 0)
