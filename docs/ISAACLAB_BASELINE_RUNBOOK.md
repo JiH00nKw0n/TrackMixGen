@@ -328,5 +328,14 @@ python3 scripts/collect_results.py --data-root <data_root> --out <data_root>/rep
 - `docker: Error response from daemon: could not select device driver`는 NVIDIA Container Toolkit이 없다는 뜻이다. 설치 뒤 도커를 다시 시작한다.
 - Isaac Sim이 뜨지 않고 EULA를 묻는 로그가 나오면 이미지 환경 변수 `ACCEPT_EULA=Y`가 빠진 것이다. 이미지를 다시 빌드한다.
 - `policy server on port N did not come up`은 포트가 이미 쓰이고 있다는 뜻이다. `scripts/task_policy_pipeline.sh`의 두 번째 인자로 다른 시작 포트를 준다.
+- Isaac Sim 로그에 `Failed to create any GPU devices`와 `vkCreateInstance failed`가 나오면 컨테이너 안에서 Vulkan이 GPU를 못 찾은 것이다.
+  이미지는 NVIDIA 도커 런타임(`--runtime=nvidia`, `NVIDIA_DRIVER_CAPABILITIES=all`)으로 돌아야 드라이버의 Vulkan 드라이버 파일
+  (`/etc/vulkan/icd.d/nvidia_icd.json`)이 컨테이너에 들어온다. 3.3절의 `nvidia-ctk runtime configure`가 그 런타임을 등록한다. 다음 명령이
+  GPU 이름을 출력해야 한다.
+
+  ```bash
+  docker run --rm --runtime=nvidia -e NVIDIA_VISIBLE_DEVICES=all -e NVIDIA_DRIVER_CAPABILITIES=all --entrypoint vulkaninfo tmg/isaaclab-soft:latest --summary | grep deviceName
+  ```
+
 - 디스크 여유가 `min_free_disk_gib`(50 GB) 아래로 떨어지면 생성이 시작하지 않는다. 공간을 확보하거나 `ada.yaml`의 값을 바꾼다.
 - 생성 청크가 실패하면 풀 폴더의 `logs/seed<N>.log`에 원인이 있고 `DONE.json`은 생기지 않는다. 원인을 고친 뒤 같은 `make generate`를 다시 실행하면 끝난 청크는 유지된다.
