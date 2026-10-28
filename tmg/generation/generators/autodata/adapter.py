@@ -12,8 +12,9 @@ environment per process. What differs from the Isaac Lab adapter:
   nearest-neighbour selection, action noise, interpolation steps) is the official one.
 - The grafts target AutoData's anchors (``runtime.py`` of this package); the chunk process is the Isaac Lab
   entrypoint with ``runtime_module`` set to that module.
-- Cameras: the Arena GR1 head camera (``robot_pov_cam_rgb``, 512x512) is recorded with ``--enable_cameras``; the
-  dataset step resizes it to the task's ``image_size``.
+- Cameras: the Arena GR1 head camera (``robot_pov_cam_rgb``, 512x512) lives in a ``camera_obs`` group that Isaac Lab's
+  recorder does not store, so the runtime captures it per step from ``env.obs_buf``, resizes it to ``image_size`` and
+  writes ``records/images_%06d.npz`` for successful attempts; ``tmg dataset`` reads the images from there.
 
 Outputs of a chunk are the same as the Isaac Lab adapter's (``generated.hdf5``, ``records/``, ``result.json`` from
 AutoData itself).
@@ -79,9 +80,14 @@ class AutoDataGenerator(IsaacLabGenerator):
             records_dir=str(folder / RECORDS_DIR), expected_outputs=[str(folder / RECORDS_DIR / ATTEMPTS_JSONL)],
             extra={"package": self.package, "soft": False, "runtime_module": RUNTIME_MODULE,
                    "script": str(root / str(g["script"])), "script_args": args, "layout": self.layout_dict(),
-                   "graft_hashes": dict(g.get("graft_hashes") or {}), "camera_module": None, "env_name": task["env_name"]})
+                   "graft_hashes": dict(g.get("graft_hashes") or {}), "camera_module": None, "env_name": task["env_name"],
+                   "cameras": list(task.get("cameras") or []), "image_size": list(task.get("image_size") or [])})
         (folder / "chunk_args.json").write_text(json.dumps(args, indent=1))
         return spec
 
     def chunk_command(self, spec: ChunkSpec, spec_path: Path) -> list[str]:
         return [sys.executable, "-m", ENTRYPOINT, "--spec", str(spec_path)]
+
+    def demo_layout(self) -> dict:
+        """As the Isaac Lab adapter, but the images come from our records (Isaac Lab's recorder keeps no camera group)."""
+        return {**super().demo_layout(), "images_from_records": True}

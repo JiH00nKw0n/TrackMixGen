@@ -47,7 +47,8 @@ def test_autodata_chunk_spec(tmp_path, monkeypatch):
     written = yaml.safe_load((tmp_path / "c" / DESCRIPTOR).read_text())
     assert written["generation_policy"]["seed"] == 30002 and written["generation_policy"]["guarantee_success"] is True
     assert spec.extra["layout"]["arm_action_dims"] == {"left": [0, 7], "right": [7, 14]} and spec.extra["layout"]["hand_prefixes"] is None
-    assert gen.demo_layout()["image_key"] == "{cam}"
+    assert gen.demo_layout()["image_key"] == "{cam}" and gen.demo_layout()["images_from_records"] is True
+    assert spec.extra["cameras"] == ["robot_pov_cam_rgb"] and spec.extra["image_size"] == [128, 128]
 
 
 def test_graft_anchors_on_autodata_shaped_functions(tmp_path, monkeypatch):
@@ -165,3 +166,28 @@ def test_success_term_helpers_handle_classes_and_functions():
         params = {}  # noqa: RUF012  test stub
 
     reset_success_term(FnCfg(), [0])      # plain function: nothing to reset, no error
+
+
+def test_runtime_captures_and_resizes_frames_from_any_observation_group(tmp_path):
+    from tmg.generation.generators.autodata.runtime import AutoDataRuntime
+    from tmg.generation.generators.isaaclab.runtime import IsaacLabLayout
+
+    class Method:
+        labels = "executed"
+        follower_factory = None
+
+    layout = IsaacLabLayout(eefs=["left", "right"], arm_action_dims={"left": (0, 7), "right": (7, 14)}, hand_prefixes=None,
+                            hand_term=None, measure_links=None)
+    rt = AutoDataRuntime(Method(), layout, chunk_seed=1, records_dir=None, cameras=["robot_pov_cam_rgb"], image_size=[128, 128])
+    rt._frames = {"robot_pov_cam_rgb": []}
+
+    class Env:
+        obs_buf = {"policy": {"left_eef_pos": np.zeros((1, 3))},
+                   "camera_obs": {"robot_pov_cam_rgb": (np.random.default_rng(3).random((1, 512, 512, 3)) * 255).astype(np.uint8)}}
+
+    rt.capture_frames(Env(), 0)
+    rt.capture_frames(Env(), 0)
+    assert len(rt._frames["robot_pov_cam_rgb"]) == 2 and rt._frames["robot_pov_cam_rgb"][0].shape == (128, 128, 3)
+    with pytest.raises(KeyError):
+        AutoDataRuntime(Method(), layout, 1, None, cameras=["missing"], image_size=None)._frames.update(missing=[]) or \
+            AutoDataRuntime(Method(), layout, 1, None, cameras=["missing"], image_size=None).capture_frames(Env(), 0)

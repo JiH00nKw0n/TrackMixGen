@@ -57,11 +57,22 @@ def reset_success_term(success_term, env_ids) -> None:
 
 
 class AutoDataRuntime(IsaacLabRuntime):
-    """Callbacks for ``autodata_core`` (see the module docstring)."""
+    """Callbacks for ``autodata_core`` (see the module docstring).
 
-    def __init__(self, method, layout: IsaacLabLayout, chunk_seed: int, records_dir: Path | None):
+    Images: Isaac Lab's recorder stores the ``policy`` observation group only, and Arena keeps its head camera in a
+    ``camera_obs`` group, so the generated hdf5 has no images. The runtime therefore reads the camera frames itself from
+    ``env.obs_buf`` right before each step (the observation the policy will see), resizes them to the task's image size
+    and, for a successful attempt, writes ``records/images_%06d.npz`` (one ``(T, H, W, 3)`` uint8 array per camera).
+    ``tmg dataset`` reads them from there (``demo_layout()['images_from_records']``).
+    """
+
+    def __init__(self, method, layout: IsaacLabLayout, chunk_seed: int, records_dir: Path | None,
+                 cameras=(), image_size=None):
         super().__init__(method, layout, chunk_seed, records_dir)
         self._datastream = None
+        self.cameras = [str(c) for c in (cameras or [])]
+        self.image_size = tuple(int(v) for v in image_size) if image_size else None
+        self._frames: dict[str, list[np.ndarray]] = {}
 
     # attempt boundaries --------------------------------------------------------------------------
     def begin_attempt(self, generator, env_id: int, initial_state, success_term=None) -> None:
@@ -74,9 +85,33 @@ class AutoDataRuntime(IsaacLabRuntime):
         self._datastream = generator.datastream
         self._env = generator.datastream.get_env()
         generator._tmg_selected = {}
+        self._frames = {cam: [] for cam in self.cameras}
         if success_term is not None:
             reset_success_term(success_term, [env_id])      # Arena's class-based term keeps progress state per env
         self._install_label_wrapper(generator.datastream, env_id)
+
+    def end_attempt(self, generator, env_id: int, results: dict) -> None:
+        super().end_attempt(generator, env_id, results)
+        if self.records_dir is not None and results.get("success") and self._frames and all(self._frames.values()):
+            np.savez_compressed(Path(self.records_dir) / f"images_{self.rec.attempt:06d}.npz",
+                                **{cam: np.stack(frames) for cam, frames in self._frames.items()})
+        self._frames = {}
+
+    def capture_frames(self, env, env_id: int) -> None:
+        """Read the task's cameras from ``env.obs_buf`` (any observation group) for the current step."""
+        if not self.cameras:
+            return
+        from tmg.data.images import resize_frames
+
+        groups = getattr(env, "obs_buf", None) or {}
+        for cam in self.cameras:
+            group = next((g for g in groups.values() if isinstance(g, dict) and cam in g), None)
+            if group is None:
+                raise KeyError(f"camera {cam!r} is in no observation group ({list(groups)}); was the environment built with cameras?")
+            frame = _np(group[cam][env_id])
+            if frame.dtype != np.uint8:
+                frame = (np.clip(frame, 0, 1) * 255).astype(np.uint8) if frame.max() <= 1.0 else frame.astype(np.uint8)
+            self._frames[cam].append(resize_frames(frame, self.image_size) if self.image_size else frame)
 
     def _install_label_wrapper(self, datastream, env_id: int) -> None:
         import torch
@@ -126,6 +161,7 @@ class AutoDataRuntime(IsaacLabRuntime):
                              action_noise=float(getattr(spec, "action_noise", 0.0)), mix=None)
 
     def record_command(self, multi_waypoint, datastream, env_id: int, play_action) -> None:
+        self.capture_frames(datastream.get_env(), env_id)       # pre-step observation, paired with this step's action
         targets = {eef: _np(w.pose) for eef, w in multi_waypoint.waypoints.items()}
         grippers = {}
         for eef, w in multi_waypoint.waypoints.items():
@@ -188,5 +224,7 @@ def install_from_spec(spec: dict, namespace: dict | None = None) -> dict:
                             soft_object_subtasks={})
     layout.arm_action_dims = {k: tuple(v) for k, v in layout.arm_action_dims.items()}
     method = build_method(spec["method"], chunk_seed=int(spec["chunk"]["seed"]))
-    runtime = AutoDataRuntime(method, layout, chunk_seed=int(spec["chunk"]["seed"]), records_dir=Path(spec["records_dir"]))
+    runtime = AutoDataRuntime(method, layout, chunk_seed=int(spec["chunk"]["seed"]), records_dir=Path(spec["records_dir"]),
+                              cameras=spec["extra"].get("cameras") or spec["task"].get("cameras") or [],
+                              image_size=spec["extra"].get("image_size") or spec["task"].get("image_size"))
     return install(runtime, dict(spec["extra"].get("graft_hashes") or {}))

@@ -44,8 +44,8 @@ import numpy as np
 from tmg.config import dump_yaml, resolved
 from tmg.core.chunks import CHUNKS_DIR, POOL_DONE, chunk_is_done, read_json, write_json
 from tmg.core.provenance import write_provenance
-from tmg.data.images import resize_frames
 from tmg.core.records import RECORDS_DIR, read_attempts
+from tmg.data.images import resize_frames
 
 SIDECAR = "DATASET.json"
 
@@ -59,11 +59,13 @@ class DemoLayout:
     actions_key: str = "actions"      # dataset of the generator's action labels
     states_key: str | None = "states" # simulator states, or None when the generator keeps none in that layout
     labels_from_records: bool = False # pre-noise labels in ``records/labels_%06d.npz`` instead of the attempt npz
+    images_from_records: bool = False # camera frames in ``records/images_%06d.npz`` (AutoData: the recorder keeps no camera group)
     success_only_file: bool = True    # the file lists successes in attempt order
 
     @classmethod
     def from_mapping(cls, m: dict) -> DemoLayout:
-        return cls(**{k: m[k] for k in ("demo_glob", "image_key", "actions_key", "states_key", "labels_from_records", "success_only_file") if k in m})
+        return cls(**{k: m[k] for k in ("demo_glob", "image_key", "actions_key", "states_key", "labels_from_records", "images_from_records",
+                                        "success_only_file") if k in m})
 
 
 MIMICGEN_LAYOUT = DemoLayout(demo_glob="*/demo.hdf5", image_key="{cam}_image")
@@ -171,13 +173,26 @@ def write_dataset(path: Path, chosen: list[dict], *, pool: Path, observation: di
                 z = np.load(Path(pool) / CHUNKS_DIR / c["chunk"] / RECORDS_DIR / f"attempt_{c['attempt']:06d}.npz")
                 g = data.create_group(f"demo_{j}")
                 obs = g.create_group("obs")
+                frames_npz = None
+                if cameras and layout.images_from_records:
+                    frames_path = Path(pool) / CHUNKS_DIR / c["chunk"] / RECORDS_DIR / f"images_{c['attempt']:06d}.npz"
+                    if not frames_path.exists():
+                        raise DatasetError(f"{c['chunk']}/{c['demo_key']}: no recorded images {frames_path.name}")
+                    frames_npz = np.load(frames_path)
                 for cam in cameras:
                     key = layout.image_key.format(cam=cam)
-                    stored = next((k for k in (key, f"camera_obs/{cam}") if k in demo["obs"]), None)   # Arena records a camera_obs group
-                    if stored is None:
-                        raise DatasetError(f"{c['chunk']}/{c['demo_key']}: camera {cam} not in the pool; generate with "
-                                           f"generation.protocol.camera_names set (e.g. generation=pilot20_images)")
-                    arr = np.asarray(demo["obs"][stored])
+                    if frames_npz is not None:
+                        if cam not in frames_npz:
+                            raise DatasetError(f"{c['chunk']}/{c['demo_key']}: camera {cam} not in the recorded images")
+                        arr = np.asarray(frames_npz[cam])
+                    else:
+                        stored = next((k for k in (key, f"camera_obs/{cam}") if k in demo["obs"]), None)
+                        if stored is None:
+                            raise DatasetError(f"{c['chunk']}/{c['demo_key']}: camera {cam} not in the pool; generate with "
+                                               f"generation.protocol.camera_names set (e.g. generation=pilot20_images)")
+                        arr = np.asarray(demo["obs"][stored])
+                    if len(arr) != c["n_steps"]:
+                        raise DatasetError(f"{c['chunk']}/{c['demo_key']}: {len(arr)} image frames vs {c['n_steps']} recorded steps")
                     if observation.get("image_size") and tuple(arr.shape[1:3]) != tuple(int(v) for v in observation["image_size"]):
                         arr = resize_frames(arr, observation["image_size"])     # e.g. Arena's 512x512 head camera -> 128x128
                     image_shape = list(arr.shape[1:])
