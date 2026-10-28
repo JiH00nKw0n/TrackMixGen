@@ -171,8 +171,28 @@ def install(root, image):
         # pins alone leaves recent pytest/IPython/wheel/Hugging Face releases with incompatible requirements.
         pip("packaging==23.0", "click==8.1.7", "idna==3.10", "psutil==5.9.8",
             "pytest", "ipython", "wheel", "transformers", "huggingface_hub")
+        prune_unused_httpx2(root, python)
     verify_installation(root, image)
     print("INSTALLED", image, flush=True)
+
+
+def prune_unused_httpx2(root, python):
+    """A newer Hugging Face install can leave this incompatible dependency after the resolver downgrades it."""
+    code = """
+import importlib.metadata as m
+import json
+from packaging.requirements import Requirement
+users = []
+for dist in m.distributions():
+    for text in dist.requires or []:
+        req = Requirement(text)
+        if req.name == 'httpx2' and (req.marker is None or req.marker.evaluate({'extra': ''})):
+            users.append(dist.metadata['Name'])
+print(json.dumps(users))
+"""
+    users = json.loads(subprocess.check_output([str(python), "-c", code], text=True))
+    if not users:
+        run([root / "bin/uv", "pip", "uninstall", "--python", python, "httpx2"])
 
 
 def verify_installation(root, image):
