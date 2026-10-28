@@ -1,0 +1,3 @@
+# The Arena task's own reset distribution: nothing is overridden.
+name: official
+override_bounds: false

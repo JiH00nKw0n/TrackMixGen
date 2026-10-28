@@ -32,6 +32,7 @@ from collections.abc import Callable
 
 import numpy as np
 
+from tmg.data.images import resize_frames
 from tmg.evaluation.client import PolicyClient
 from tmg.evaluation.rollout import check_server, episode_seed, policy_input
 from tmg.generation.simulators.isaaclab import apply_scene
@@ -57,8 +58,32 @@ def launch_app(generator_cfg: dict, device: str):
     return app
 
 
+def register_arena_environment(generator_cfg: dict, task: dict, device: str, seed: int | None = None) -> None:
+    """AutoData tasks: register the Arena environment through Arena's callback, as AutoData's own script does
+    (``--task <name> --device <d> --num_envs 1 --enable_cameras`` plus the task's ``env_args``)."""
+    import sys
+
+    callback = importlib.import_module(str(generator_cfg["external_callback"]).rsplit(".", 1)[0])
+    fn = getattr(callback, str(generator_cfg["external_callback"]).rsplit(".", 1)[1])
+    argv = ["--task", str(task["env_name"]), "--device", str(device), "--num_envs", "1", "--enable_cameras"]
+    if seed is not None:
+        argv += ["--seed", str(int(seed))]
+    argv += [str(a) for a in (task.get("env_args") or [])]
+    saved = sys.argv
+    try:
+        sys.argv = [saved[0], *argv]
+        remaining = fn()
+        if remaining:
+            raise RuntimeError(f"the Arena registration callback did not consume {remaining}")
+    finally:
+        sys.argv = saved
+    print(f"[tmg] Arena environment {task['env_name']} registered ({argv})", flush=True)
+
+
 def import_task_modules(generator_cfg: dict, task: dict) -> None:
     """Register the generator's environments (``<package root>.envs``, the task packages, the camera module)."""
+    if generator_cfg.get("external_callback"):      # AutoData / Arena: registered by register_arena_environment
+        return
     root = str(generator_cfg["package"]).split(".")[0]          # softmimicgen | isaaclab_mimic
     importlib.import_module(f"{root}.envs")
     if "--enable_pinocchio" in [str(a) for a in (generator_cfg.get("extra_args") or [])]:
@@ -75,22 +100,42 @@ def import_task_modules(generator_cfg: dict, task: dict) -> None:
 
 def build_env(plain: dict, device: str):
     """The evaluation environment and the success term (see the module docstring)."""
+    import inspect
+
     import gymnasium as gym
     from isaaclab_tasks.utils import parse_env_cfg
 
     task = plain["task"]
+    autodata = bool(plain["generator"].get("external_callback"))
     task_id = str(task.get("camera_env") or task["env_name"])
     env_cfg = parse_env_cfg(task_id, device=str(device), num_envs=1)
     env_cfg.observations.policy.concatenate_terms = False
-    env_cfg.terminations.time_out = None
-    env_cfg.recorders = None
     success_term = env_cfg.terminations.success
     env_cfg.terminations.success = None
+    if autodata:
+        # as AutoData's setup_env_config: no terminations at all, and the Pink IK action with the shared URDF conversion
+        env_cfg.terminations = None
+        try:
+            from autodata_interfaces.env.pink_ik_action import PinkInverseKinematicsActionSharedUrdf
+            from isaaclab.envs.mdp.actions.pink_actions_cfg import PinkInverseKinematicsAction
+        except ImportError:
+            PinkInverseKinematicsActionSharedUrdf = PinkInverseKinematicsAction = None
+        if PinkInverseKinematicsAction is not None:
+            for action_cfg in vars(env_cfg.actions).values():
+                if getattr(action_cfg, "class_type", None) in (PinkInverseKinematicsAction,
+                                                                 f"{PinkInverseKinematicsAction.__module__}:{PinkInverseKinematicsAction.__name__}"):
+                    action_cfg.class_type = PinkInverseKinematicsActionSharedUrdf
+    else:
+        env_cfg.terminations.time_out = None
+    env_cfg.recorders = None
     if task.get("eval_episode_length_s"):
         env_cfg.episode_length_s = max(float(env_cfg.episode_length_s), float(task["eval_episode_length_s"]))
     applied = apply_scene(env_cfg, plain["scene"], str(task["name"]))
     print(f"[tmg] scene {plain['scene'].get('name')}: {'ranges applied ' + str(applied) if applied else 'official ranges kept'}", flush=True)
     env = gym.make(task_id, cfg=env_cfg).unwrapped
+    if inspect.isclass(success_term.func):        # class-based term (Arena's TaskSuccessTerm): one instance for the whole run
+        success_term.func = success_term.func(cfg=success_term, env=env)
+        print(f"[tmg] success term instantiated: {type(success_term.func).__name__}", flush=True)
     return env, success_term, task_id
 
 
@@ -125,13 +170,26 @@ def initial_placement(env) -> dict:
     return out
 
 
-def observation_input(obs_policy: dict, observation: dict) -> dict:
-    """Policy input from the ``policy`` observation group of one environment (tensors with a leading batch of 1)."""
+def observation_input(obs_dict: dict, observation: dict) -> dict:
+    """Policy input from one environment's observation dict (groups of tensors with a leading batch of 1).
+
+    Cameras are looked up in the ``policy`` group first and then in any other group (Arena records its head camera in a
+    ``camera_obs`` group); frames larger than ``observation.image_size`` are resized with the dataset's resize.
+    """
+    policy = obs_dict.get("policy", obs_dict)
     flat = {}
     for cam in observation.get("cameras") or []:
-        flat[cam] = _to_numpy(obs_policy[cam])[0]
+        group = policy if cam in policy else next((g for g in obs_dict.values() if isinstance(g, dict) and cam in g), None)
+        if group is None:
+            raise KeyError(f"camera {cam!r} is in no observation group ({list(obs_dict)})")
+        frame = _to_numpy(group[cam])[0]
+        if frame.dtype != np.uint8:
+            frame = (np.clip(frame, 0, 1) * 255).astype(np.uint8) if frame.max() <= 1.0 else frame.astype(np.uint8)
+        if observation.get("image_size"):
+            frame = resize_frames(frame, observation["image_size"])
+        flat[cam] = frame
     for key in observation["robot_state"]:
-        flat[key] = _to_numpy(obs_policy[key])[0].astype(np.float32)
+        flat[key] = _to_numpy(policy[key])[0].astype(np.float32)
     return policy_input(flat, observation, image_key="{cam}")
 
 
@@ -147,7 +205,7 @@ def run_episode(env, success_term, policy: PolicyClient, scene: dict, task: dict
         width = int(env.action_manager.total_action_dim)
         success, steps = False, 0
         for steps in range(1, horizon + 1):
-            action = policy.act(observation_input(obs_dict["policy"], observation))
+            action = policy.act(observation_input(obs_dict, observation))
             if action.size != width:
                 raise RuntimeError(f"policy action has {action.size} values, the environment takes {width}")
             actions = torch.as_tensor(np.asarray(action, dtype=np.float32), device=env.device).view(1, width)
@@ -167,6 +225,8 @@ def play_isaaclab(plain: dict, todo: list[dict], checkpoint: str, horizon: int, 
     task, obs_cfg, ev = plain["task"], plain["observation"], plain["evaluation"]
     device = str((plain.get("cluster") or {}).get("device", "cuda:0"))
     launch_app(plain["generator"], device)           # stays up until the interpreter exits
+    if plain["generator"].get("external_callback"):
+        register_arena_environment(plain["generator"], task, device, seed=int(ev["seed"]))
     import_task_modules(plain["generator"], task)
     env, success_term, task_id = build_env(plain, device)
     print(f"[tmg] Isaac Lab environment {task_id} on {device}; success term {getattr(success_term.func, '__name__', success_term.func)} "

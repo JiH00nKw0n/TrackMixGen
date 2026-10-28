@@ -35,10 +35,13 @@ def fetch(task: dict, generator: dict, *, force: bool = False) -> dict:
     if task.get("source_url"):
         print(f"[tmg] downloading {task['source_url']} -> {dest}", flush=True)
         download_url(str(task["source_url"]), dest)
-    elif task.get("source_file") and generator.get("source_repo"):
+    elif task.get("source_file") and (task.get("source_repo") or generator.get("source_repo")):
         from tmg.generation.generators.mimicgen.sources import download
 
-        download(str(generator["source_repo"]), str(task["source_file"]), dest)
+        repo = str(task.get("source_repo") or generator["source_repo"])
+        revision = task.get("source_revision")
+        print(f"[tmg] downloading {repo}/{task['source_file']}{' @ ' + str(revision) if revision else ''} -> {dest}", flush=True)
+        download(repo, str(task["source_file"]), dest, revision=str(revision) if revision else None)
     else:
         raise KeyError(f"task {task['name']!r} needs source_url, or source_file with generator.source_repo")
     with __import__("h5py").File(dest, "r") as f:

@@ -26,13 +26,13 @@ def file_md5(path: Path) -> str:
     return digest.hexdigest()
 
 
-def download(repo_id: str, filename: str, dest: Path) -> Path:
-    """Download one file of a Hugging Face dataset repo to ``dest`` (written atomically, no overwrite prompt)."""
+def download(repo_id: str, filename: str, dest: Path, revision: str | None = None) -> Path:
+    """Download one file of a Hugging Face dataset repo (at ``revision`` when given) to ``dest`` (written atomically)."""
     from huggingface_hub import hf_hub_download
 
     dest.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=str(dest.parent)) as tmp:
-        got = hf_hub_download(repo_id=repo_id, filename=filename, repo_type="dataset", cache_dir=tmp)
+        got = hf_hub_download(repo_id=repo_id, filename=filename, repo_type="dataset", cache_dir=tmp, revision=revision)
         partial = dest.with_suffix(dest.suffix + ".partial")
         shutil.move(str(Path(got).resolve()), str(partial))
         partial.replace(dest)

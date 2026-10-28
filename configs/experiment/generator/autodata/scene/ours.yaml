@@ -1,0 +1,3 @@
+# Our scene equals the Arena task's own reset distribution (the Isaac Lab tasks keep the ranges of their papers).
+name: ours
+override_bounds: false

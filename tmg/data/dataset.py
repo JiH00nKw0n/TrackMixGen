@@ -44,6 +44,7 @@ import numpy as np
 from tmg.config import dump_yaml, resolved
 from tmg.core.chunks import CHUNKS_DIR, POOL_DONE, chunk_is_done, read_json, write_json
 from tmg.core.provenance import write_provenance
+from tmg.data.images import resize_frames
 from tmg.core.records import RECORDS_DIR, read_attempts
 
 SIDECAR = "DATASET.json"
@@ -172,10 +173,13 @@ def write_dataset(path: Path, chosen: list[dict], *, pool: Path, observation: di
                 obs = g.create_group("obs")
                 for cam in cameras:
                     key = layout.image_key.format(cam=cam)
-                    if key not in demo["obs"]:
+                    stored = next((k for k in (key, f"camera_obs/{cam}") if k in demo["obs"]), None)   # Arena records a camera_obs group
+                    if stored is None:
                         raise DatasetError(f"{c['chunk']}/{c['demo_key']}: camera {cam} not in the pool; generate with "
                                            f"generation.protocol.camera_names set (e.g. generation=pilot20_images)")
-                    arr = np.asarray(demo["obs"][key])
+                    arr = np.asarray(demo["obs"][stored])
+                    if observation.get("image_size") and tuple(arr.shape[1:3]) != tuple(int(v) for v in observation["image_size"]):
+                        arr = resize_frames(arr, observation["image_size"])     # e.g. Arena's 512x512 head camera -> 128x128
                     image_shape = list(arr.shape[1:])
                     obs.create_dataset(key, data=arr.astype(np.uint8), compression="gzip", compression_opts=1,
                                        chunks=(1, *arr.shape[1:]))

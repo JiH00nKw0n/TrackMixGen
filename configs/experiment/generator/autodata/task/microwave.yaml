@@ -1,0 +1,27 @@
+name: microwave
+display_name: GR1 Microwave Opening
+env_name: gr1_open_microwave                 # Arena environment name = gym id registered by the external callback
+camera_env: null
+camera_module: null
+task_descriptor: autodata_examples/tasks/gr1_open_microwave.yaml   # in the AutoData checkout; the chunk gets a copy with its seed
+source: ${paths.sources}/autodata/microwave/source.hdf5
+source_repo: nvidia/Arena-GR1-Manipulation-Task                   # Hugging Face dataset repo
+source_file: arena_gr1_manipulation_dataset_annotated.hdf5
+source_revision: arena_v0.2_lab_v3.0
+num_sources: 10
+subtasks: [right reach the door handle, right open the door; left hold still]
+reference_objects: [microwave, microwave]
+horizon: 250                        # the task's own episode length: 5 s at 50 Hz
+eval_episode_length_s: 5.0
+env_args: []                        # extra Arena options after "--" (embodiment gr1_pink is the default)
+cameras: [robot_pov_cam_rgb]        # Arena head camera, recorded at 512x512 and resized to image_size by `tmg dataset`
+image_size: [128, 128]
+robot_state: [left_eef_pos, left_eef_quat, right_eef_pos, right_eef_quat, hand_joint_state]
+object_state: []
+instruction: open the microwave door with the right hand
+# Official generation settings (autodata_examples/tasks/gr1_open_microwave.yaml @ 835f4aab), used unchanged except that the
+# chunk guarantees its success count: a source per subtask (select_src_per_subtask true), nearest_neighbor_object (nn_k 3),
+# action noise 0.005, interpolation 5 (right arm) and 0 (left arm), term offset [10, 20] on the first right subtask.
+policy_overrides:
+  bc_rnn: {crop_shape: null}
+  diffusion_policy: {crop_shape: null}

@@ -154,6 +154,43 @@ class Graft:
         self.edits.append(f"before final return: {code.strip()}")
         return self
 
+    def _find_returns(self):
+        """``[(statement list, index)]`` of every ``return`` of the function in document order (nested functions excluded)."""
+        hits = []
+        for stmts in _iter_bodies(self.node):
+            for i, stmt in enumerate(stmts):
+                if isinstance(stmt, ast.Return):
+                    hits.append((stmts, i))
+        # _iter_bodies yields outer bodies before nested ones; document order is the source line order
+        return sorted(hits, key=lambda h: (getattr(h[0][h[1]], "lineno", 0), getattr(h[0][h[1]], "col_offset", 0)))
+
+    def insert_before_return(self, code: str, occurrence: int, expected_returns: int | None = None) -> Graft:
+        """Insert statement ``code`` before the ``occurrence``-th ``return`` (document order).
+
+        Args:
+            expected_returns: when given, the function must have exactly this many returns (guards the anchor).
+        """
+        hits = self._find_returns()
+        if expected_returns is not None and len(hits) != expected_returns:
+            raise GraftError(f"{self.label}: expected {expected_returns} return statements, found {len(hits)}")
+        if occurrence >= len(hits):
+            raise GraftError(f"{self.label}: no return #{occurrence} (found {len(hits)})")
+        stmts, i = hits[occurrence]
+        stmts.insert(i, self._parse_stmt(code))
+        self.edits.append(f"before return #{occurrence}: {code.strip()}")
+        return self
+
+    def name_final_return(self, name: str) -> Graft:
+        """Rewrite the final ``return <expr>`` as ``<name> = <expr>; return <name>`` so the value gets an anchor."""
+        body = self.node.body
+        if not isinstance(body[-1], ast.Return) or body[-1].value is None:
+            raise GraftError(f"{self.label}: function does not end with a valued return")
+        value = body[-1].value
+        body[-1] = ast.Return(value=ast.Name(id=name, ctx=ast.Load()))
+        body.insert(len(body) - 1, ast.Assign(targets=[ast.Name(id=name, ctx=ast.Store())], value=value))
+        self.edits.append(f"final return value bound to '{name}'")
+        return self
+
     # compile --------------------------------------------------------------------------------------
     def compile(self, extra_globals: dict) -> Callable:
         """Compile the edited function with the original globals plus ``extra_globals``.
@@ -168,7 +205,7 @@ class Graft:
         code = compile(module, filename, "exec")
         namespace = dict(self.func.__globals__)
         namespace.update(extra_globals)
-        exec(code, namespace)
+        exec(code, namespace)  # noqa: S102  the edited official function is compiled back into its own globals
         new = namespace[self.node.name]
         new.__qualname__ = getattr(self.func, "__qualname__", self.node.name)
         new.__tmg_graft__ = {"label": self.label, "hash": self.hash, "edits": list(self.edits)}

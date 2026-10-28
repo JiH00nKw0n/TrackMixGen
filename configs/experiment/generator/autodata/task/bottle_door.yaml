@@ -1,0 +1,27 @@
+name: bottle_door
+display_name: GR1 Bottle Placement and Door Closing
+env_name: put_item_in_fridge_and_close_door
+camera_env: null
+camera_module: null
+task_descriptor: autodata_examples/tasks/gr1_put_and_close_door.yaml
+source: ${paths.sources}/autodata/bottle_door/source.hdf5
+source_repo: nvidia/Arena-GR1-Manipulation-PlaceItemCloseDoor-Task
+source_file: ranch_bottle_into_fridge/ranch_bottle_into_fridge_annotated.hdf5
+source_revision: arena_v0.2_lab_v3.0
+num_sources: 5
+subtasks: [right grasp the bottle, right place it on the shelf, right reach the door, right close the door; left support, left hold]
+reference_objects: [ranch_dressing_hope_robolab, refrigerator, refrigerator, refrigerator]
+horizon: 500                        # the task's own episode length: 10 s at 50 Hz
+eval_episode_length_s: 10.0
+env_args: []
+cameras: [robot_pov_cam_rgb]
+image_size: [128, 128]
+robot_state: [left_eef_pos, left_eef_quat, right_eef_pos, right_eef_quat, hand_joint_state]
+object_state: []
+instruction: put the bottle in the refrigerator and close the door
+# Official generation settings (autodata_examples/tasks/gr1_put_and_close_door.yaml @ 835f4aab), used unchanged except that
+# the chunk guarantees its success count: a source per subtask, nearest_neighbor_object (nn_k 3), action noise 0.003,
+# interpolation 5 (right arm) and 0 (left arm), term offsets [0, 0].
+policy_overrides:
+  bc_rnn: {crop_shape: null}
+  diffusion_policy: {crop_shape: null}
