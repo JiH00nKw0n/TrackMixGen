@@ -26,7 +26,7 @@ def check_dataset(path, output):
         for key in ('actions', 'actions_pre_noise', 'actions_executed'):
             x = demo[key][:]
             assert x.shape == (n,36) and np.isfinite(x).all(), (key,x.shape)
-        images = demo['obs/robot_pov_cam_rgb_image']
+        images = demo['obs/robot_pov_cam_rgb']
         assert images.shape == (n,128,128,3) and images.dtype == np.uint8, images.shape
         samples = images[np.unique(np.linspace(0,n-1,min(3,n)).astype(int))]
         assert all(float(frame.std()) > 1 for frame in samples), 'blank camera images'

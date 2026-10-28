@@ -59,3 +59,23 @@ def test_arena_runtime_uses_its_own_lab_and_package_paths(tmp_path, monkeypatch)
     assert actual==py
     assert env['TMG_ISAACLAB_SRC']==str(root/'src/isaaclab-arena/IsaacLab')
     assert env['TMG_ARENA_SRC']==str(root/'src/isaaclab-arena/IsaacLab-Arena')
+
+
+def test_preflight_checks_real_dataset_keys_and_rejects_invalid_actions(tmp_path):
+    import importlib.util
+    import h5py
+    import numpy as np
+    from pathlib import Path
+    repo=Path(__file__).resolve().parents[2]
+    spec=importlib.util.spec_from_file_location('arena_preflight',repo/'scripts/arena_preflight.py')
+    mod=importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+    path=tmp_path/'dataset.hdf5'
+    with h5py.File(path,'w') as f:
+        d=f.create_group('data/demo_0')
+        for key in ('actions','actions_pre_noise','actions_executed'):
+            d.create_dataset(key,data=np.zeros((3,36),dtype=np.float32))
+        o=d.create_group('obs'); o.create_dataset('robot_state',data=np.zeros((3,36)))
+        o.create_dataset('robot_pov_cam_rgb',data=np.random.default_rng(1).integers(0,256,(3,128,128,3),dtype=np.uint8))
+    assert mod.check_dataset(path,tmp_path)['nonblank_camera']
+    with h5py.File(path,'r+') as f: f['data/demo_0/actions'][0,0]=np.nan
+    with pytest.raises(AssertionError): mod.check_dataset(path,tmp_path)
