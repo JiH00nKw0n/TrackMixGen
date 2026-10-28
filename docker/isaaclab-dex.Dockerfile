@@ -26,9 +26,10 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     && uv pip install --python /opt/venv/bin/python h5py 'robomimic @ git+https://github.com/ARISE-Initiative/robomimic.git@v0.4.0' \
     && uv pip install --python /opt/venv/bin/python 'osqp==0.6.7.post3' 'qpsolvers==4.3.1' \
     && uv pip install --python /opt/venv/bin/python --index-url https://download.pytorch.org/whl/cu128 'torch==2.7.0+cu128' 'torchvision==0.22.0+cu128' 'torchaudio==2.7.0+cu128'
-# Isaac Sim 5.1 pins a few helper packages exactly (packaging, click, idna, psutil, Pillow); later installs pulled newer
-# ones, so they are restored last and `pip check` stays clean apart from the fork's own pillow line (Soft).
-RUN --mount=type=cache,target=/root/.cache/uv uv pip install --python /opt/venv/bin/python pillow==11.3.0 packaging==23.0 click==8.1.7 idna==3.10 psutil==5.9.8
+# Pillow follows Isaac Sim's exact pin (isaacsim-kernel 5.1: Pillow==11.3.0). Isaac Sim also pins packaging, click, idna and
+# psutil exactly, but those old versions break huggingface_hub and httpx (the source downloads), so they stay at the versions
+# the other packages resolved; `pip check` lists those four isaacsim lines, which the 2026-10-28 generation run showed harmless.
+RUN --mount=type=cache,target=/root/.cache/uv uv pip install --python /opt/venv/bin/python pillow==11.3.0
 # Kit (pip isaacsim) writes its cache, data and logs under the package folder; the containers run as the host user,
 # so those folders must be writable. Vulkan (libvulkan1) plus the driver libraries that NVIDIA_DRIVER_CAPABILITIES=all
 # mounts give Kit a GPU device inside docker (`--gpus all`).

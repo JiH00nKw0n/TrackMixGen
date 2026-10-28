@@ -235,8 +235,9 @@ Isaac Lab 평가를 만들 때도 성공 판정은 첫 행동 뒤부터 매 걸�
   있어야 한다. 이미지 빌드 때 내려받아 넣는다.
 - Pillow 버전 충돌. SoftMimicGen의 Isaac Lab 포크(`source/isaaclab/setup.py`)는 `pillow==11.2.1`을 고정하고, Isaac Sim 5.1
   (`isaacsim-kernel`)은 `Pillow==11.3.0`을 고정한다. 공식 Isaac Lab 3c6e67bb(Dex 이미지)도 11.3.0이므로 포크의 값은 옛 Isaac Lab 배포판의
-  고정값일 뿐이다. 두 이미지 모두 시뮬레이터의 값 11.3.0을 쓰고, Isaac Sim이 함께 고정하는 packaging 23.0, click 8.1.7, idna 3.10,
-  psutil 5.9.8도 마지막 층에서 되돌린다(`pip check`에는 Soft 포크의 pillow 줄 하나만 남는다).
+  고정값일 뿐이다. 두 이미지 모두 시뮬레이터의 값 11.3.0을 쓴다. Isaac Sim이 함께 고정하는 packaging 23.0, click 8.1.7, idna 3.10, psutil 5.9.8은
+  되돌리지 않는다. 그 옛 버전은 원본 내려받기에 쓰는 huggingface_hub와 httpx의 요구와 충돌하고, 새 버전으로 생성 시범 실행이 정상
+  동작했기 때문이다. 그래서 `pip check`에는 Isaac Sim의 그 네 줄과 Soft 포크의 pillow 줄이 남지만 동작에는 영향이 없다.
 
 ### 2.2 Isaac Lab 과제의 정책 평가 (`tmg eval`, 2026-10-28)
 

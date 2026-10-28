@@ -37,9 +37,10 @@ RUN --mount=type=cache,target=/root/.cache/huggingface \
     && test -f /opt/src/SoftMimicGen/source/softmimicgen_assets/data/Props/Rope/Rope.usd
 # The SoftMimicGen Isaac Lab fork pins pillow==11.2.1 while isaacsim-kernel 5.1 requires Pillow==11.3.0; the simulator's
 # pin wins (the fork's value is only an older Isaac Lab release's pin, and the Dex image runs stock Isaac Lab at 11.3.0).
-# Isaac Sim 5.1 pins a few helper packages exactly (packaging, click, idna, psutil, Pillow); later installs pulled newer
-# ones, so they are restored last and `pip check` stays clean apart from the fork's own pillow line (Soft).
-RUN --mount=type=cache,target=/root/.cache/uv uv pip install --python /opt/venv/bin/python pillow==11.3.0 packaging==23.0 click==8.1.7 idna==3.10 psutil==5.9.8
+# Pillow follows Isaac Sim's exact pin (isaacsim-kernel 5.1: Pillow==11.3.0). Isaac Sim also pins packaging, click, idna and
+# psutil exactly, but those old versions break huggingface_hub and httpx (the source downloads), so they stay at the versions
+# the other packages resolved; `pip check` lists those four isaacsim lines, which the 2026-10-28 generation run showed harmless.
+RUN --mount=type=cache,target=/root/.cache/uv uv pip install --python /opt/venv/bin/python pillow==11.3.0
 # Kit (pip isaacsim) writes its cache, data and logs under the package folder; the containers run as the host user,
 # so those folders must be writable. Vulkan (libvulkan1) plus the driver libraries that NVIDIA_DRIVER_CAPABILITIES=all
 # mounts give Kit a GPU device inside docker (`--gpus all`).
