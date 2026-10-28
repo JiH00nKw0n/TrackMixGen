@@ -39,7 +39,11 @@ fail() { log "$1 FAILED (see $2)"; echo "$1" >> "$LOG/FAILURES"; }
 # generator/task pairs in run order (Soft first, then Dex; the two images are never needed at the same time in one lane)
 JOBS=""
 for t in $SOFT_TASKS; do JOBS="$JOBS softmimicgen:isaaclab-soft:$t"; done
-for t in $DEX_TASKS; do JOBS="$JOBS dexmimicgen:isaaclab-dex:$t"; done
+for t in $DEX_TASKS; do
+  image=isaaclab-dex
+  case "$t" in bottle_placement_door_closing|microwave_opening) image=isaaclab-arena ;; esac
+  JOBS="$JOBS dexmimicgen:$image:$t"
+done
 ALL_JOBS=$JOBS
 task_config_exists() { [ -f "$REPO/configs/experiment/generator/$1/task/$2.yaml" ]; }
 dataset_of() { echo "$DATA_ROOT/datasets/$1/$2/$SCENE/$METHOD/$GENERATION/$OBSERVATION/n${SIZE}_seed0.hdf5"; }

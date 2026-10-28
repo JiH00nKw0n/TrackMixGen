@@ -143,7 +143,7 @@ def main():
     t = sub.add_parser('task')
     t.add_argument('--root', type=Path, required=True)
     t.add_argument('--generator', choices=['softmimicgen', 'dexmimicgen'], required=True)
-    t.add_argument('--task', choices=['rope', 'towel', 'jenga', 'pick_place'], required=True)
+    t.add_argument('--task', choices=['rope', 'towel', 'jenga', 'pick_place', 'bottle_placement_door_closing', 'microwave_opening'], required=True)
     t.add_argument('--policies', nargs='+', choices=['bc_rnn', 'diffusion_policy'], required=True)
     t.add_argument('--seeds', nargs='+', type=int, required=True)
     a = p.parse_args()

@@ -1,0 +1,20 @@
+# Official Arena on Isaac Sim 5.1 / Isaac Lab 2.3. Source revisions are pinned in bootstrap_native.py.
+name: microwave_opening
+display_name: GR1 Microwave Opening
+env_name: gr1_open_microwave
+arena_environment: gr1_open_microwave
+arena_args: [--embodiment, gr1_pink]
+runtime_image: isaaclab-arena
+generation_source_root: ${oc.env:TMG_ARENA_SRC,/opt/src/IsaacLab-Arena}
+generation_script: isaaclab_arena/scripts/imitation_learning/generate_dataset.py
+simulation_device: cpu
+source: ${paths.sources}/dexmimicgen/microwave_opening/source.hdf5
+source_url: https://huggingface.co/datasets/nvidia/Arena-GR1-Manipulation-Task/resolve/cfe61f5b6f4433281db60a6ec335b1e298ca0cfb/arena_gr1_manipulation_dataset_annotated.hdf5
+num_sources: 10
+horizon: 600
+eval_episode_length_s: 30.0
+cameras: [robot_pov_cam_rgb]
+image_size: [128, 128]
+robot_state: [left_eef_pos, left_eef_quat, right_eef_pos, right_eef_quat, hand_joint_state]
+object_state: []
+instruction: open the microwave door

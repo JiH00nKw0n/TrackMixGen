@@ -70,7 +70,7 @@ class IsaacLabGenerator(SyntheticDataGenerator):
         self.require_generation_config()
         folder.mkdir(parents=True, exist_ok=True)
         task = self.task
-        args = ["--headless", "--enable_cameras", "--device", str(self.cluster_device()), "--num_envs", "1",
+        args = ["--headless", "--enable_cameras", "--device", str(task.get("simulation_device") or self.cluster_device()), "--num_envs", "1",
                 "--generation_num_trials", str(chunk.attempts), "--input_file", str(self.source_path()),
                 "--output_file", str(folder / GENERATED)]
         # the official scripts have no --seed: the chunk seed is written into env_cfg.datagen_config.seed by the
@@ -81,12 +81,17 @@ class IsaacLabGenerator(SyntheticDataGenerator):
         kit = self.generator_cfg.get("kit_args")
         if kit:
             args += ["--kit_args", str(kit)]
+        if task.get("arena_environment"):
+            args += ["--mimic", "--seed", str(chunk.seed), "--placement_seed", str(chunk.seed),
+                     str(task["arena_environment"]), *list(task.get("arena_args") or [])]
+        script = Path(task.get("generation_source_root") or self.generator_cfg["source_root"]) / (
+            task.get("generation_script") or self.generator_cfg["script"])
         spec = ChunkSpec(
             chunk={"index": chunk.index, "seed": chunk.seed, "attempts": chunk.attempts}, generator=self.generator_cfg["name"],
             task=task, scene=self.scene_dict(), method=self.method,
             protocol=self.protocol, generator_config="", folder=str(folder), records_dir=str(folder / RECORDS_DIR),
             expected_outputs=[str(folder / RECORDS_DIR / ATTEMPTS_JSONL)],
-            extra={"package": self.package, "soft": self.soft_objects, "script": str(Path(self.generator_cfg["source_root"]) / self.generator_cfg["script"]),
+            extra={"package": self.package, "soft": self.soft_objects, "script": str(script),
                    "script_args": args, "layout": self.layout_dict(), "graft_hashes": dict(self.generator_cfg.get("graft_hashes") or {}),
                    "camera_module": task.get("camera_module"), "env_name": task.get("env_name")})
         (folder / "chunk_args.json").write_text(json.dumps(args, indent=1))

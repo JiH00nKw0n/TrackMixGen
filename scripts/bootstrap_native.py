@@ -59,7 +59,18 @@ def download(url, dest):
     partial.replace(dest)
 
 
-def checkout(url, path, revision, *, soft_pillow_patch=False):
+def align_arena_starlette(path):
+    """Reconcile Lab metadata with Isaac Sim 5.1's fixed FastAPI 0.115.7 requirement."""
+    original = subprocess.check_output(['git', '-C', str(path), 'show', 'HEAD:source/isaaclab/setup.py'], text=True)
+    assert original.count('starlette==0.49.1') == 1
+    aligned = original.replace('starlette==0.49.1', 'starlette==0.45.3')
+    target = path / 'source/isaaclab/setup.py'
+    if target.read_text() not in (original, aligned):
+        raise RuntimeError(f'refusing to replace other edits in {target}')
+    target.write_text(aligned)
+
+
+def checkout(url, path, revision, *, soft_pillow_patch=False, arena_starlette_patch=False):
     if not path.exists():
         run(["git", "clone", "--filter=blob:none", url, path])
     dirty = subprocess.check_output(["git", "-C", str(path), "status", "--porcelain"], text=True)
@@ -68,6 +79,9 @@ def checkout(url, path, revision, *, soft_pillow_patch=False):
         if soft_pillow_patch and revision == SOFT_LAB_COMMIT and dirty == f" M {SOFT_PILLOW_FILE}\n":
             _, aligned = soft_pillow_contents(path)
             allowed = (path / SOFT_PILLOW_FILE).read_text() == aligned
+        if arena_starlette_patch and revision == ARENA_LAB_COMMIT and dirty == " M source/isaaclab/setup.py\n":
+            original = subprocess.check_output(['git', '-C', str(path), 'show', 'HEAD:source/isaaclab/setup.py'], text=True)
+            allowed = (path / 'source/isaaclab/setup.py').read_text() == original.replace('starlette==0.49.1', 'starlette==0.45.3')
         if not allowed:
             raise RuntimeError(f"refusing to replace modified checkout {path}")
     run(["git", "-C", path, "checkout", "--detach", revision])
@@ -188,7 +202,10 @@ def install(root, image):
             align_soft_pillow(lab)
             checkout("https://github.com/NVlabs/SoftMimicGen", src / "SoftMimicGen", SOFT_COMMIT)
         else:
-            checkout("https://github.com/isaac-sim/IsaacLab", lab, ARENA_LAB_COMMIT if image == "isaaclab-arena" else DEX_LAB_COMMIT)
+            checkout("https://github.com/isaac-sim/IsaacLab", lab, ARENA_LAB_COMMIT if image == "isaaclab-arena" else DEX_LAB_COMMIT,
+                     arena_starlette_patch=image == "isaaclab-arena")
+            if image == "isaaclab-arena":
+                align_arena_starlette(lab)
         for name in ["isaaclab", "isaaclab_assets", "isaaclab_tasks", "isaaclab_mimic"]:
             pip("--no-build-isolation", "-e", lab / "source" / name)
         if image == "isaaclab-soft":
@@ -217,7 +234,8 @@ def install(root, image):
         # Resolve unpinned helper packages together with the exact Isaac Sim requirements. Installing the
         # pins alone leaves recent pytest/IPython/wheel/Hugging Face releases with incompatible requirements.
         pip("packaging==23.0", "click==8.1.7", "idna==3.10", "psutil==5.9.8",
-            "pytest", "ipython", "wheel", "transformers", "huggingface_hub")
+            "pytest", "ipython", "wheel", "transformers", "huggingface_hub",
+            *(["fastapi==0.115.7", "starlette==0.45.3"] if image == "isaaclab-arena" else []))
         prune_unused_httpx2(root, python)
     verify_installation(root, image)
     print("INSTALLED", image, flush=True)

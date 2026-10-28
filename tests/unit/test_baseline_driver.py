@@ -70,3 +70,23 @@ with open(str(p)+'.lock','w') as f:
     assert not (log/'DONE').exists()
     assert set((log/'BLOCKED_TASKS').read_text().splitlines()) == {
         'dexmimicgen/bottle_placement_door_closing', 'dexmimicgen/microwave_opening'}
+
+    # All five real tasks must dispatch both policies and all three seeds.
+    tasks = [('softmimicgen','rope'),('softmimicgen','towel'),('dexmimicgen','pick_place'),
+             ('dexmimicgen','bottle_placement_door_closing'),('dexmimicgen','microwave_opening')]
+    for gen, task in tasks:
+        cfg=repo/f'configs/experiment/generator/{gen}/task/{task}.yaml'
+        cfg.parent.mkdir(parents=True,exist_ok=True); cfg.write_text(f'name: {task}\n')
+        ds=data/f'datasets/{gen}/{task}/ours/none/pool_isaac/image/n1000_seed0.hdf5'
+        ds.parent.mkdir(parents=True,exist_ok=True); ds.touch()
+        rs=data/f'resets/{gen}/{task}/ours/val25_test300_seed202600.json'
+        rs.parent.mkdir(parents=True,exist_ok=True); rs.touch()
+    state.write_text(json.dumps({'active':0,'peak':0,'calls':[]}))
+    env['SOFT_TASKS']='rope towel'
+    env['DEX_TASKS']='pick_place bottle_placement_door_closing microwave_opening'
+    result=subprocess.run(['bash',str(scripts/source.name)],env=env,capture_output=True,text=True,timeout=30)
+    assert result.returncode == 0, result.stdout+result.stderr
+    calls=json.loads(state.read_text())
+    assert len(calls['calls'])==30 and calls['peak']==2
+    assert 'dexmimicgen:isaaclab-arena:bottle_placement_door_closing' in result.stdout
+    assert 'dexmimicgen:isaaclab-arena:microwave_opening' in result.stdout

@@ -79,8 +79,12 @@ def build_env(plain: dict, device: str):
     from isaaclab_tasks.utils import parse_env_cfg
 
     task = plain["task"]
-    task_id = str(task.get("camera_env") or task["env_name"])
-    env_cfg = parse_env_cfg(task_id, device=str(device), num_envs=1)
+    if task.get("arena_environment"):
+        from tmg.generation.simulators.isaaclab_tasks.arena import build_registered
+        task_id, env_cfg = build_registered(task, seed=int(plain["evaluation"]["seed"]))
+    else:
+        task_id = str(task.get("camera_env") or task["env_name"])
+        env_cfg = parse_env_cfg(task_id, device=str(device), num_envs=1)
     env_cfg.observations.policy.concatenate_terms = False
     env_cfg.terminations.time_out = None
     env_cfg.recorders = None
@@ -165,7 +169,13 @@ def run_episode(env, success_term, policy: PolicyClient, scene: dict, task: dict
 def play_isaaclab(plain: dict, todo: list[dict], checkpoint: str, horizon: int, record: Callable[[dict], None]) -> None:
     """Play the scenes of ``todo`` and hand each episode row to ``record`` (see the module docstring)."""
     task, obs_cfg, ev = plain["task"], plain["observation"], plain["evaluation"]
-    device = str((plain.get("cluster") or {}).get("device", "cuda:0"))
+    device = str(task.get("simulation_device") or (plain.get("cluster") or {}).get("device", "cuda:0"))
+    if task.get("arena_environment"):
+        import tempfile
+        from pathlib import Path
+        temp_root = Path(plain["paths"]["root"]) / "arena_runtime_tmp" if "root" in plain["paths"] else Path(tempfile.gettempdir())
+        temp_root.mkdir(parents=True, exist_ok=True)
+        tempfile.tempdir = tempfile.mkdtemp(prefix="arena-eval-", dir=temp_root)
     launch_app(plain["generator"], device)           # stays up until the interpreter exits
     import_task_modules(plain["generator"], task)
     env, success_term, task_id = build_env(plain, device)
