@@ -66,7 +66,7 @@ class AutoDataGenerator(IsaacLabGenerator):
                 "--embodiment", str(root / str(g["embodiment"])), "--input_file", str(self.source_path()),
                 "--output_file", str(folder / GENERATED), "--result_file", str(folder / "result.json"),
                 "--generation_num_trials", str(chunk.attempts), "--num_envs", "1", "--device", str(self.cluster_device()),
-                "--headless", "--viz", "none", "--enable_cameras"]
+                "--viz", "none", "--enable_cameras"]       # Isaac Lab 3.0's AppLauncher has --viz none instead of --headless
         args += [str(a) for a in (g.get("extra_args") or [])]
         if g.get("kit_args"):
             args += ["--kit_args", str(g["kit_args"])]

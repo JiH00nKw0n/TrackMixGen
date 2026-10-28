@@ -49,7 +49,9 @@ def launch_app(generator_cfg: dict, device: str):
 
     parser = argparse.ArgumentParser()
     AppLauncher.add_app_launcher_args(parser)
-    argv = ["--headless", "--enable_cameras", "--device", str(device)]
+    known = set(parser._option_string_actions)
+    # Isaac Lab 2.x: --headless; Isaac Lab 3.0 (AutoData stack): --viz none
+    argv = (["--headless"] if "--headless" in known else ["--viz", "none"]) + ["--enable_cameras", "--device", str(device)]
     if generator_cfg.get("kit_args"):
         argv += ["--kit_args", str(generator_cfg["kit_args"])]
     args = parser.parse_args(argv)

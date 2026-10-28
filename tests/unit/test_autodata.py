@@ -41,6 +41,7 @@ def test_autodata_chunk_spec(tmp_path, monkeypatch):
     args = spec.extra["script_args"]
     assert args[args.index("--env_name") + 1] == "gr1_open_microwave" and args[args.index("--alg") + 1] == "dexmimicgen"
     assert args[args.index("--generation_num_trials") + 1] == "250" and "--enable_cameras" in args and "--seed" not in args[:args.index("--")]
+    assert "--headless" not in args and args[args.index("--viz") + 1] == "none"
     assert args[args.index("--") + 1:] == ["--seed", "30002"]
     assert spec.extra["runtime_module"] == RUNTIME_MODULE and spec.extra["package"] == "autodata_core"
     written = yaml.safe_load((tmp_path / "c" / DESCRIPTOR).read_text())
