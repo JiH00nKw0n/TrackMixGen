@@ -9,6 +9,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import urllib.request
 from pathlib import Path
 
@@ -47,9 +48,12 @@ def checkout(url, path, revision):
 def tools(root):
     uv = root / "bin/uv"
     if not uv.exists():
-        installer = root / "downloads/install-uv.sh"
-        download("https://astral.sh/uv/install.sh", installer)
-        run(["sh", installer], env=dict(os.environ, UV_INSTALL_DIR=str(root / "bin"), UV_NO_MODIFY_PATH="1"))
+        bootstrap = root / "tools/bootstrap"
+        if not (bootstrap / "bin/python").exists():
+            run([sys.executable, "-m", "venv", bootstrap])
+        run([bootstrap / "bin/python", "-m", "pip", "install", "uv"])
+        uv.parent.mkdir(parents=True, exist_ok=True)
+        uv.symlink_to(bootstrap / "bin/uv")
     if not shutil.which("make") and not (root / "tools/usr/bin/make").exists():
         folder = root / "downloads/deb"
         folder.mkdir(parents=True, exist_ok=True)
