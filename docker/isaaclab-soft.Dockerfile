@@ -11,7 +11,7 @@ ENV DEBIAN_FRONTEND=noninteractive PYTHONUNBUFFERED=1 ACCEPT_EULA=Y OMNI_KIT_ACC
 RUN apt-get update && apt-get install -y --no-install-recommends \
       python3.11 python3.11-venv python3.11-dev git curl ca-certificates build-essential cmake ninja-build \
       libgl1 libglu1-mesa libxt6 libxrandr2 libxinerama1 libxcursor1 libxi6 libglib2.0-0 libsm6 libxext6 ffmpeg \
-      libvulkan1 vulkan-tools \
+      libvulkan1 vulkan-tools libegl1 libgbm1 libdrm2 libgles2 \
     && rm -rf /var/lib/apt/lists/*
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh && ln -s /root/.local/bin/uv /usr/local/bin/uv
 RUN uv venv --python python3.11 --seed /opt/venv
@@ -30,6 +30,11 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     && uv pip install --python /opt/venv/bin/python -e /opt/src/rapprentice qpsolvers==4.8.1 h5py huggingface_hub \
     && for p in softmimicgen softmimicgen_assets softmimicgen_tasks; do uv pip install --python /opt/venv/bin/python --no-build-isolation -e /opt/src/SoftMimicGen/source/$p; done \
     && uv pip install --python /opt/venv/bin/python --index-url https://download.pytorch.org/whl/cu128 'torch==2.7.0+cu128' 'torchvision==0.22.0+cu128' 'torchaudio==2.7.0+cu128'
+# SoftMimicGen's USD assets (rope, towel, jenga, robots; about 220 MB) come from its Hugging Face dataset repo, into
+# source/softmimicgen_assets/data as softmimicgen.sh installs them (SOFTMIMICGEN_ASSETS_DATA_DIR)
+RUN --mount=type=cache,target=/root/.cache/huggingface \
+    HF_HUB_DISABLE_TELEMETRY=1 hf download masoudmoghani/SoftMimicGen --include "data/*" --repo-type dataset --local-dir /opt/src/SoftMimicGen/source/softmimicgen_assets \
+    && test -f /opt/src/SoftMimicGen/source/softmimicgen_assets/data/Props/Rope/Rope.usd
 # Kit (pip isaacsim) writes its cache, data and logs under the package folder; the containers run as the host user,
 # so those folders must be writable. Vulkan (libvulkan1) plus the driver libraries that NVIDIA_DRIVER_CAPABILITIES=all
 # mounts give Kit a GPU device inside docker (`--gpus all`).

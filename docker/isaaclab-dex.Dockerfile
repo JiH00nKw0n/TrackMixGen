@@ -10,7 +10,7 @@ ENV DEBIAN_FRONTEND=noninteractive PYTHONUNBUFFERED=1 ACCEPT_EULA=Y OMNI_KIT_ACC
 RUN apt-get update && apt-get install -y --no-install-recommends \
       python3.11 python3.11-venv python3.11-dev git curl ca-certificates build-essential cmake ninja-build \
       libgl1 libglu1-mesa libxt6 libxrandr2 libxinerama1 libxcursor1 libxi6 libglib2.0-0 libsm6 libxext6 ffmpeg \
-      libvulkan1 vulkan-tools \
+      libvulkan1 vulkan-tools libegl1 libgbm1 libdrm2 libgles2 \
     && rm -rf /var/lib/apt/lists/*
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh && ln -s /root/.local/bin/uv /usr/local/bin/uv
 RUN uv venv --python python3.11 --seed /opt/venv
