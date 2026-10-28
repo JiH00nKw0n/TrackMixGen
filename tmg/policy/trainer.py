@@ -44,7 +44,6 @@ from tmg.data.loader import FrameDataset, TrajectoryStore, collate, compute_stat
 from tmg.policy.ema import EMA
 from tmg.policy.io import make_io
 from tmg.policy.lerobot_policies import build_policy
-from tmg.policy.storage import prune_training_states
 
 CHECKPOINTS_DIR = "checkpoints"
 PRETRAINED_DIR = "pretrained_model"
@@ -165,8 +164,7 @@ def train(cfg) -> dict:
     seed_everything(int(plain["seed"]))
 
     observation = str(plain["observation"]["name"])
-    store = TrajectoryStore.load(Path(plain["dataset"]["path"]), action_key=str(training.get("action_key", "actions")),
-                                 image_cache=str(training.get("cache", "ram")))
+    store = TrajectoryStore.load(Path(plain["dataset"]["path"]), action_key=str(training.get("action_key", "actions")))
     features = dataset_features(store, observation)
     policy = build_policy(policy_cfg, features, device, observation)
     policy.train()
@@ -238,8 +236,6 @@ def train(cfg) -> dict:
                 folder = save_checkpoint(run_dir, update=update, epoch=epoch, policy=policy, ema=ema, io=io,
                                          optimizer=optimizer, scheduler=scheduler, loss=row["loss"])
                 checkpoints.append(str(folder))
-                if training.get("keep_training_states", "all") == "last":
-                    prune_training_states(run_dir, folder)
                 print(f"[tmg] checkpoint {folder}", flush=True)
                 if validation_cmd:
                     run_validation_command(str(validation_cmd), run_dir=run_dir, checkpoint=folder)

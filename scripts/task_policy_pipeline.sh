@@ -29,7 +29,7 @@ port_busy() { python3 -c "import socket,sys; s=socket.socket(); s.settimeout(1);
 
 log "train -> $RUN"
 if [ "${SKIP_TRAIN:-0}" = 1 ]; then log "train skipped (SKIP_TRAIN=1)"; else
-make -s -C "$REPO" train $C OVERRIDES="dataset.size=$SIZE ${TRAIN_OVERRIDES:-}" || { log "TRAIN FAILED"; exit 1; }
+make -s -C "$REPO" train $C || { log "TRAIN FAILED"; exit 1; }
 fi
 log "validate checkpoints ($VAL_PARALLEL at a time)"
 i=0; pids=""
@@ -68,8 +68,4 @@ b = summary["by_split"].get("test") or summary["all"]
 print(f"RESULT {run.parts[-7]} {sel.name} horizon {summary.get('horizon')}: test success {b['n_success']}/{b['n']} = {b['success_rate']:.3f} "
       f"(95% CI {b['ci_low']:.3f}-{b['ci_high']:.3f})")
 PY
-if [ "${TMG_RETIRE_COMPLETED:-0}" = 1 ]; then
-  python3 "$REPO/scripts/retire_isaaclab_data.py" run --run "$RUN" \
-    --resets "$DATA_ROOT/resets/$GENERATOR/$TASK/$SCENE/val25_test300_seed202600.json" || exit 1
-fi
 log "done"

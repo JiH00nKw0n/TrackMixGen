@@ -14,19 +14,13 @@
 #   POLICY (diffusion_policy), SIZE (1000), VAL_PARALLEL (2: checkpoints validated at a time, each one Isaac Sim),
 #   TEST_SHARDS (3: parallel shards of the 300 test scenes), SEED_PARALLEL (1: training runs at a time),
 #   ONLY_GENERATION (1: stop after the datasets), BUNDLE_NAME (results folder name under <result root>/reports),
-#   TMG_RESULTS_ROOT (persistent summaries and driver logs; defaults to the data root),
-#   POLICIES (space-separated policies, defaults to POLICY), TMG_RETIRE_COMPLETED (1: verify all evaluations,
-#   keep selected weights and evidence, remove completed task bulk data; requires SEQUENTIAL_TASKS=1).
+#   TMG_RESULTS_ROOT (persistent summaries and driver logs; defaults to the data root).
 set -uo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 CLUSTER=${CLUSTER:-ada}; GPU=${GPU:-0}; SOFT_TASKS=${SOFT_TASKS-"rope towel jenga"}; DEX_TASKS=${DEX_TASKS-"pick_place"}
 SEEDS=${SEEDS:-"202601 202602 202603"}; POLICY=${POLICY:-diffusion_policy}; SIZE=${SIZE:-1000}
-POLICIES=${POLICIES:-$POLICY}
 VAL_PARALLEL=${VAL_PARALLEL:-2}; TEST_SHARDS=${TEST_SHARDS:-3}; SEED_PARALLEL=${SEED_PARALLEL:-1}
 SEQUENTIAL_TASKS=${SEQUENTIAL_TASKS:-0}
-if [ "${TMG_RETIRE_COMPLETED:-0}" = 1 ] && [ "$SEQUENTIAL_TASKS" != 1 ]; then
-  echo 'Storage retirement requires SEQUENTIAL_TASKS=1' >&2; exit 1
-fi
 SCENE=ours; METHOD=none; GENERATION=pool_isaac; OBSERVATION=image
 DATA_ROOT=$(make -s -C "$REPO" print-data-root CLUSTER="$CLUSTER")
 RESULTS_ROOT=${TMG_RESULTS_ROOT:-$DATA_ROOT}
@@ -50,11 +44,9 @@ collect_bundle() {
     IFS=: read -r gen image task <<< "$job"
     args+=(--job "$gen/$task/$SCENE/$METHOD/$GENERATION/$OBSERVATION")
   done
-  for policy in $POLICIES; do
-    python3 "$REPO/scripts/collect_results.py" --data-root "$DATA_ROOT" --out "$RESULTS_ROOT/reports/$BUNDLE_NAME/$policy" \
-      --policy "$policy" --seeds $SEEDS "${args[@]}" --logs "$LOG" "$@" > "$LOG/collect_$policy.log" 2>&1 \
-      || { fail "collect $policy" "$LOG/collect_$policy.log"; return 1; }
-  done
+  python3 "$REPO/scripts/collect_results.py" --data-root "$DATA_ROOT" --out "$RESULTS_ROOT/reports/$BUNDLE_NAME" \
+    --policy "$POLICY" --seeds $SEEDS "${args[@]}" --logs "$LOG" "$@" > "$LOG/collect.log" 2>&1 \
+    || { fail "collect" "$LOG/collect.log"; return 1; }
 }
 
 generation_lane() {
@@ -78,20 +70,17 @@ generation_lane() {
 
 policy_task() {   # all seeds of one task, SEED_PARALLEL at a time; each seed has its own block of 40 ports
   local gen=$1 image=$2 task=$3 port=$4
-  local POLICY seed
-  for POLICY in $POLICIES; do
   for seed in $SEEDS; do
     while [ "$(jobs -rp | wc -l)" -ge "$SEED_PARALLEL" ]; do wait -n || true; done
     local run; run=$(run_of $gen $task $seed)
     if compgen -G "$run/eval/test_h*/*/eval_summary.json" > /dev/null; then log "[$gen/$task seed $seed] test result exists, skipped"; continue; fi
-    log "[$gen/$task $POLICY seed $seed] train, validate, select, test (ports $port..$((port + 39)))"
+    log "[$gen/$task seed $seed] train, validate, select, test (ports $port..$((port + 39)))"
     SKIP=0; [ -f "$run/train_result.json" ] && SKIP=1
     CLUSTER=$CLUSTER GPU=$GPU GENERATOR=$gen IMAGE=$image SCENE=$SCENE METHOD=$METHOD GENERATION=$GENERATION OBSERVATION=$OBSERVATION \
       POLICY=$POLICY SEED=$seed SIZE=$SIZE VAL_PARALLEL=$VAL_PARALLEL TEST_SHARDS=$TEST_SHARDS SKIP_TRAIN=$SKIP \
-      "$REPO/scripts/task_policy_pipeline.sh" $task $port > "$LOG/policy_${gen}_${task}_${POLICY}_seed$seed.log" 2>&1 \
-      || fail "policy $gen/$task $POLICY seed $seed" "$LOG/policy_${gen}_${task}_${POLICY}_seed$seed.log" &
+      "$REPO/scripts/task_policy_pipeline.sh" $task $port > "$LOG/policy_${gen}_${task}_seed$seed.log" 2>&1 \
+      || fail "policy $gen/$task seed $seed" "$LOG/policy_${gen}_${task}_seed$seed.log" &
     port=$((port + 40)); sleep 30
-  done
   done
   wait
 }
@@ -110,30 +99,16 @@ policy_lane() {
   log "policy lane done"
 }
 
-log "start: cluster $CLUSTER, GPU $GPU, jobs:$JOBS, seeds: $SEEDS, policies $POLICIES"
+log "start: cluster $CLUSTER, GPU $GPU, jobs:$JOBS, seeds: $SEEDS, policy $POLICY"
 if [ -f "$LOG/FAILURES" ]; then mv "$LOG/FAILURES" "$LOG/FAILURES.$(date +%Y%m%d_%H%M%S)"; fi
 if [ -f "$LOG/DONE" ]; then mv "$LOG/DONE" "$LOG/DONE.$(date +%Y%m%d_%H%M%S)"; fi
 if [ "$SEQUENTIAL_TASKS" = 1 ]; then
   for one_job in $ALL_JOBS; do
     JOBS=$one_job
-    IFS=: read -r gen image task <<< "$one_job"
-    marker="$DATA_ROOT/retired/$gen/$task.json"
-    if [ -f "$marker" ]; then
-      python3 - "$marker" "$POLICIES" "$SEEDS" <<'PY' || exit 1
-import json, sys
-r = json.load(open(sys.argv[1]))
-if r['status'] != 'removed' or not set(sys.argv[2].split()) <= set(r.get('policies', [])) or not set(map(int, sys.argv[3].split())) <= set(r.get('seeds', [])):
-    raise SystemExit('Retired data cannot be reused for new/incomplete policies or seeds')
-PY
-      log "[$gen/$task] completed and retired, preserved results reused"; continue
-    fi
     generation_lane
     if [ "${ONLY_GENERATION:-0}" != 1 ]; then policy_lane; fi
     # Persist completed task summaries before starting the next task. Raw data and weights stay in DATA_ROOT.
-    if collect_bundle --no-tar && [ "${TMG_RETIRE_COMPLETED:-0}" = 1 ] && [ "${ONLY_GENERATION:-0}" != 1 ]; then
-      python3 "$REPO/scripts/retire_isaaclab_data.py" task --root "$DATA_ROOT" --generator "$gen" --task "$task" \
-        --policies $POLICIES --seeds $SEEDS >> "$LOG/storage.log" 2>&1 || fail "retire $gen/$task" "$LOG/storage.log"
-    fi
+    collect_bundle --no-tar || true
   done
   JOBS=$ALL_JOBS
 else
@@ -141,6 +116,6 @@ else
   if [ "${ONLY_GENERATION:-0}" = 1 ]; then wait; else policy_lane & wait; fi
 fi
 log "collecting results into $RESULTS_ROOT/reports/$BUNDLE_NAME"
-collect_bundle && log "bundles: $RESULTS_ROOT/reports/$BUNDLE_NAME"
+collect_bundle && log "bundle: $RESULTS_ROOT/reports/$BUNDLE_NAME.tar.gz"
 if [ -f "$LOG/FAILURES" ]; then log "FAILURES: $(tr '\n' ';' < "$LOG/FAILURES")"; exit 1; fi
 echo "ISAACLAB_BASELINE_DONE $(date)" > "$LOG/DONE"; log "done"

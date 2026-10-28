@@ -4,8 +4,8 @@ runtime: native
 image: tmg/isaaclab-soft:latest
 sif: null
 data_root: null
-workers: 2
-max_workers: 2
+workers: 1
+max_workers: 1
 threads_per_worker: 4
 min_free_disk_gib: 50
 device: cuda:0

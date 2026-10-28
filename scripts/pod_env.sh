@@ -5,6 +5,5 @@ export PATH="$TMG_NATIVE_ROOT/bin:$TMG_NATIVE_ROOT/tools/usr/bin:$PATH"
 export CLUSTER=pod
 export VAL_PARALLEL="${VAL_PARALLEL:-1}"
 export TEST_SHARDS="${TEST_SHARDS:-1}"
-export SEED_PARALLEL="${SEED_PARALLEL:-2}"
+export SEED_PARALLEL=1
 export SEQUENTIAL_TASKS=1
-export TRAIN_OVERRIDES="${TRAIN_OVERRIDES:-training.cache=hdf5 training.keep_training_states=last training.num_threads=4}"
