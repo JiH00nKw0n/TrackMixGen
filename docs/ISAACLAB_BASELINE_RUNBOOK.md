@@ -38,7 +38,10 @@
 때까지 돈다는 뜻이다(성공 250개짜리 청크 4개). 실패 시도도 모두 기록되므로 생성 성공률은 기록에서 계산한다.
 
 정책은 영상 Diffusion Policy 하나다(`configs/experiment/policy/diffusion_policy.yaml`, 10만 갱신, 배치 64, 체크포인트 1만 갱신마다).
-관측은 과제의 카메라 두 대(128×128)와 로봇 상태다. 체크포인트 선택은 검증 25장면 성공률이 가장 높은 것(동률이면 이른 것)이다.
+관측은 과제의 카메라 두 대(128×128)와 로봇 상태다. 영상 자르기와 평가 상한은 과제의 공식 정책 설정을 따른다. Rope와 Towel은
+SoftMimicGen 공식 Diffusion Policy 설정대로 자르지 않고 상한은 250걸음과 220걸음이며, Pick Place는 Isaac Lab GR1 영상 설정의 비율
+(변의 90%)대로 116×116으로 자르고 상한은 환경 길이인 400걸음이다. 체크포인트 선택은 검증 25장면 성공률이 가장 높은 것(동률이면
+이른 것)이다.
 
 ## 2. 요구 사항
 
@@ -331,7 +334,7 @@ Dex Pick Place의 공식 문서 기준 생성 1,000개는 RTX 6000 Ada에서 약
 - Microwave Opening과 Bottle Placement and Door Closing은 NVIDIA AutoData(Isaac Lab Arena)의 DexMimicGen 과제다. 순정 Isaac Lab 기반인
   지금의 Dex 이미지로는 돌릴 수 없고, AutoData 기반 이미지와 연동을 준비 중이다. 준비되면 이 안내서를 갱신한다.
 - Isaac Lab의 Nut Pour와 Exhaust Pipe는 환경은 있지만 주석 달린 원본 시연 파일이 공개되어 있지 않아 쓰지 않는다.
-- 평가 상한은 Rope, Towel, Jenga 400걸음, Pick Place 600걸음이다(과제 파일의 `horizon`). 공식 평가 스크립트의 기본값 800과 다르다.
+- 평가 상한은 Rope 250, Towel 220, Pick Place 400걸음이다(과제 파일의 `horizon`). Rope와 Towel은 공식 설정의 롤아웃 상한이고, Pick Place는 환경 자체의 길이다.
 - 원본 시연 수는 Soft Towel은 내려받아야 안다. `<data_root>/sources/softmimicgen/<과제>/source.manifest.json`의 `demos`에 적힌다.
 - `docker: Error response from daemon: could not select device driver`는 NVIDIA Container Toolkit이 없다는 뜻이다. 설치 뒤 도커를 다시 시작한다.
 - Isaac Sim이 뜨지 않고 EULA를 묻는 로그가 나오면 이미지 환경 변수 `ACCEPT_EULA=Y`가 빠진 것이다. 이미지를 다시 빌드한다.

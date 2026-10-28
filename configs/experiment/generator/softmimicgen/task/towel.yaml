@@ -8,8 +8,8 @@ source_file: annotated_dataset/annotated_dataset_franka_towel.hdf5   # file in g
 num_sources: null                       # not checked against the file: the manifest written by `tmg sources` records the count
 subtasks: [grasp towel corner, fold towel]
 reference_objects: [object, object]
-horizon: 400                        # evaluation step limit (same as rope)
-eval_episode_length_s: 20.0         # the env's own limit is 10 s = 200 steps at 20 Hz; the evaluation must raise episode_length_s to cover the horizon
+horizon: 220                        # official rollout horizon of the task's robomimic configs
+eval_episode_length_s: 15.0         # the env's own limit is 10 s = 200 steps at 20 Hz; the evaluation must raise episode_length_s to cover the horizon
 cameras: [agentview_image, robot0_eye_in_hand_image]
 image_size: [128, 128]
 robot_state: [robot0_eef_pos, robot0_eef_quat, robot0_gripper_qpos]
@@ -19,3 +19,9 @@ instruction: fold the towel in half
 # one source per attempt (select_src_per_subtask False), selection registration_cost (nn_k 3), action noise 0.01,
 # interpolation steps 5 and 5, relative actions, failed attempts kept, generation_guarantee (trials count successes).
 success_term: {name: object_folded, first_call: after_first_action}
+# Official policy settings (softmimicgen_tasks/<task>/config/agents/robomimic/*.json @ c9d146ba): BC-RNN crops the 128x128
+# images to 76x76 (CropRandomizer), the Diffusion Policy uses NO crop randomizer; both train on agentview_image and
+# robot0_eye_in_hand_image with the three robot-state terms. The evaluation horizon below is the official rollout horizon.
+policy_overrides:
+  bc_rnn: {crop_shape: [76, 76]}
+  diffusion_policy: {crop_shape: null}

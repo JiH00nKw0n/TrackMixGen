@@ -75,11 +75,19 @@ def resolve_crop(params: dict, features: dict) -> dict:
     return params
 
 
-def build_config(policy_cfg: dict, features: dict, device: str, observation: str = "image") -> PreTrainedConfig:
-    """The LeRobot config object of ``policy_cfg['name']`` with our values and the dataset features."""
+def task_policy_overrides(task: dict, policy_name: str) -> dict:
+    """``task.policy_overrides.<policy name>``: per-task policy values taken from the task's official policy configs (for
+    example SoftMimicGen trains its image Diffusion Policy without a crop and its BC-RNN with a 76x76 crop on 128x128
+    images; Isaac Lab's GR1 image policies crop to 90% of the side). Empty when the task lists none."""
+    blocks = (task or {}).get("policy_overrides") or {}
+    return dict(blocks.get(policy_name) or {})
+
+
+def build_config(policy_cfg: dict, features: dict, device: str, observation: str = "image", overrides: dict | None = None) -> PreTrainedConfig:
+    """The LeRobot config object of ``policy_cfg['name']`` with our values, the task's overrides and the dataset features."""
     name = str(policy_cfg["name"])
     inputs, outputs = policy_features(features)
-    params = resolve_crop(policy_params(policy_cfg, observation), features)
+    params = resolve_crop({**policy_params(policy_cfg, observation), **(overrides or {})}, features)
     if name == "bc_rnn":
         from tmg.policy.bc_rnn import BCRNNConfig
 
@@ -115,10 +123,10 @@ def policy_class(name: str):
     raise ValueError(f"unknown policy {name!r}; known: {POLICIES}")
 
 
-def build_policy(policy_cfg: dict, features: dict, device: str, observation: str = "image"):
+def build_policy(policy_cfg: dict, features: dict, device: str, observation: str = "image", overrides: dict | None = None):
     """A freshly initialized policy (or, for π0, the pretrained hub weights named by ``params.pretrained_path``)."""
     name = str(policy_cfg["name"])
-    config = build_config(policy_cfg, features, device, observation)
+    config = build_config(policy_cfg, features, device, observation, overrides)
     cls = policy_class(name)
     pretrained = (policy_cfg.get("pretrained_path") or None)
     if pretrained:

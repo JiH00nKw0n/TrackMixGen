@@ -6,7 +6,7 @@ name: bc_rnn
 pretrained_path: null
 params:
   seq_length: 10                 # training sequence length = rollout hidden-state horizon
-  crop_shape: auto             # 76/84 of the image side: 76 for 84x84 (robomimic), 116 for 128x128 (Isaac Lab tasks)
+  crop_shape: [76, 76]           # robomimic/MimicGen image crop (84x84 -> 76x76); tasks with other official crops set task.policy_overrides
   num_keypoints: 32              # spatial softmax keypoints per camera
   visual_feature_dim: 64
   rnn_hidden_dim: 1000

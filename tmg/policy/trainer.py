@@ -43,7 +43,7 @@ from tmg.core.provenance import write_provenance
 from tmg.data.loader import FrameDataset, TrajectoryStore, collate, compute_stats
 from tmg.policy.ema import EMA
 from tmg.policy.io import make_io
-from tmg.policy.lerobot_policies import build_policy
+from tmg.policy.lerobot_policies import build_policy, task_policy_overrides
 
 CHECKPOINTS_DIR = "checkpoints"
 PRETRAINED_DIR = "pretrained_model"
@@ -166,7 +166,10 @@ def train(cfg) -> dict:
     observation = str(plain["observation"]["name"])
     store = TrajectoryStore.load(Path(plain["dataset"]["path"]), action_key=str(training.get("action_key", "actions")))
     features = dataset_features(store, observation)
-    policy = build_policy(policy_cfg, features, device, observation)
+    overrides = task_policy_overrides(plain["task"], str(policy_cfg["name"]))
+    if overrides:
+        print(f"[tmg] task policy overrides ({plain['task']['name']}): {overrides}", flush=True)
+    policy = build_policy(policy_cfg, features, device, observation, overrides)
     policy.train()
     config = policy.config
     io = make_io(str(policy_cfg["name"]), config, compute_stats(store), device)
