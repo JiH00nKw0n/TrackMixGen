@@ -98,3 +98,23 @@ def test_isaaclab_task_configs_compose_with_the_pool_isaac_generation(tmp_path, 
     soft = resolved(compose("dataset", ["generator=softmimicgen", "task=towel", "scene=ours", "method=none", "generation=pool_isaac", "observation=image"]))
     assert soft["observation"]["robot_state"] == ["robot0_eef_pos", "robot0_eef_quat", "robot0_gripper_qpos"]
     assert soft["observation"]["cameras"] == ["agentview_image", "robot0_eye_in_hand_image"]
+
+
+def test_trajectory_store_reads_isaaclab_camera_keys(tmp_path):
+    """Isaac Lab datasets store a camera under its own observation name (agentview_image), MimicGen under <cam>_image."""
+    import h5py
+
+    from tmg.data.loader import TrajectoryStore
+
+    path = tmp_path / "d.hdf5"
+    with h5py.File(path, "w") as f:
+        data = f.create_group("data")
+        data.attrs["cameras"] = json.dumps(["agentview_image"])
+        data.attrs["robot_state_keys"] = json.dumps(["robot0_eef_pos"])
+        data.attrs["object_state_keys"] = json.dumps([])
+        g = data.create_group("demo_0")
+        g.create_dataset("obs/agentview_image", data=np.zeros((4, 8, 8, 3), np.uint8))
+        g.create_dataset("obs/robot_state", data=np.zeros((4, 3), np.float32))
+        g.create_dataset("actions", data=np.zeros((4, 7), np.float32))
+    store = TrajectoryStore.load(path)
+    assert store.cameras == ["agentview_image"] and store.images["agentview_image"][0].shape == (4, 8, 8, 3)

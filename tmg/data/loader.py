@@ -71,7 +71,9 @@ class TrajectoryStore:
             for key in keys:
                 g = data[key]
                 for cam in cams:
-                    images[cam].append(np.asarray(g["obs"][f"{cam}_image"], dtype=np.uint8))
+                    # the dataset stores a camera under the generator's own obs key: MimicGen "<cam>_image", Isaac Lab "<cam>"
+                    key = cam if cam in g["obs"] else f"{cam}_image"
+                    images[cam].append(np.asarray(g["obs"][key], dtype=np.uint8))
                 state.append(np.asarray(g["obs"]["robot_state"], dtype=np.float32))
                 if env_state is not None:
                     env_state.append(np.asarray(g["obs"]["object_state"], dtype=np.float32))
