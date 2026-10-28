@@ -18,7 +18,7 @@ REPO = Path(__file__).resolve().parents[1]
 
 def runtime_environment(image: str, data_root: str) -> tuple[Path, dict[str, str]]:
     """Return an environment's interpreter and process-local paths, without changing the host."""
-    if image not in {"isaaclab-soft", "isaaclab-dex", "train"}:
+    if image not in {"isaaclab-soft", "isaaclab-dex", "isaaclab-arena", "train"}:
         raise ValueError(f"native runtime does not support {image!r}")
     root = Path(os.environ.get("TMG_NATIVE_ROOT") or "~/.local/share/tmg-native").expanduser().resolve()
     venv = root / "envs" / image
@@ -42,6 +42,8 @@ def runtime_environment(image: str, data_root: str) -> tuple[Path, dict[str, str
             env[key] = value
     if image != "train":
         env["TMG_ISAACLAB_SRC"] = str(root / "src" / image / "IsaacLab")
+    if image == "isaaclab-arena":
+        env["TMG_ARENA_SRC"] = str(root / "src" / image / "IsaacLab-Arena")
     if image == "isaaclab-soft":
         env["TMG_SOFTMIMICGEN_SRC"] = str(root / "src" / image / "SoftMimicGen")
     return python, env

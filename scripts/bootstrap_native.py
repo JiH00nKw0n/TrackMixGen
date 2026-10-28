@@ -17,6 +17,8 @@ REPO = Path(__file__).resolve().parents[1]
 SOFT_COMMIT = "c9d146ba57358a544167de8ebe946caaac8f6220"
 SOFT_LAB_COMMIT = "25c69e088fa8122ad189b3a566d38ef24fa74d6f"
 DEX_LAB_COMMIT = "3c6e67bb5c7ada942a6d1884ab69338f57596f77"
+ARENA_COMMIT = "aad4f25f44cc439c363c2b60f1fd170dfd10d2a5"
+ARENA_LAB_COMMIT = "5528d986d8909825a29f3c97656108abf054a261"
 SOFT_PILLOW_FILE = "source/isaaclab/setup.py"
 
 
@@ -186,7 +188,7 @@ def install(root, image):
             align_soft_pillow(lab)
             checkout("https://github.com/NVlabs/SoftMimicGen", src / "SoftMimicGen", SOFT_COMMIT)
         else:
-            checkout("https://github.com/isaac-sim/IsaacLab", lab, DEX_LAB_COMMIT)
+            checkout("https://github.com/isaac-sim/IsaacLab", lab, ARENA_LAB_COMMIT if image == "isaaclab-arena" else DEX_LAB_COMMIT)
         for name in ["isaaclab", "isaaclab_assets", "isaaclab_tasks", "isaaclab_mimic"]:
             pip("--no-build-isolation", "-e", lab / "source" / name)
         if image == "isaaclab-soft":
@@ -203,6 +205,10 @@ def install(root, image):
         else:
             pip("h5py", "robomimic @ git+https://github.com/ARISE-Initiative/robomimic.git@v0.4.0",
                 "osqp==0.6.7.post3", "qpsolvers==4.3.1")
+        if image == "isaaclab-arena":
+            checkout("https://github.com/isaac-sim/IsaacLab-Arena", src / "IsaacLab-Arena", ARENA_COMMIT)
+            pip("qpsolvers==4.8.1", "onnxruntime", "lightwheel-sdk", "vuer[all]", "tenacity", "trimesh", "rtree")
+            pip("--no-deps", "-e", src / "IsaacLab-Arena")
         pip("--index-url", "https://download.pytorch.org/whl/cu128",
             "torch==2.7.0+cu128", "torchvision==0.22.0+cu128", "torchaudio==2.7.0+cu128")
     pip("--no-deps", "-e", REPO)
@@ -250,7 +256,7 @@ def verify_installation(root, image):
     expected = ({"torch": "2.8.0+cu128", "torchvision": "0.23.0+cu128", "lerobot": "0.6.1"}
                 if image == "train" else
                 {"isaacsim": "5.1.0", "torch": "2.7.0+cu128", "torchvision": "0.22.0+cu128",
-                 "torchaudio": "2.7.0+cu128", "qpsolvers": "4.8.1" if image == "isaaclab-soft" else "4.3.1"})
+                 "torchaudio": "2.7.0+cu128", "qpsolvers": "4.8.1" if image in {"isaaclab-soft", "isaaclab-arena"} else "4.3.1"})
     if image != "train":
         expected.update(packaging="23.0", click="8.1.7", idna="3.10", psutil="5.9.8",
                         pillow="11.3.0")
@@ -283,8 +289,8 @@ def verify_installation(root, image):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("stage", choices=["tools", "graphics", "isaaclab-soft", "isaaclab-dex", "train", "verify"])
-    parser.add_argument("--image", choices=["isaaclab-soft", "isaaclab-dex", "train"])
+    parser.add_argument("stage", choices=["tools", "graphics", "isaaclab-soft", "isaaclab-dex", "isaaclab-arena", "train", "verify"])
+    parser.add_argument("--image", choices=["isaaclab-soft", "isaaclab-dex", "isaaclab-arena", "train"])
     args = parser.parse_args()
     root = Path(os.environ.get("TMG_NATIVE_ROOT") or "~/.local/share/tmg-native").expanduser().resolve()
     root.mkdir(parents=True, exist_ok=True)
