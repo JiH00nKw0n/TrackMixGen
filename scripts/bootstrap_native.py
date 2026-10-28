@@ -126,14 +126,16 @@ def graphics(root):
     libs = root / "graphics/lib"
     libs.mkdir(parents=True, exist_ok=True)
     allowed = ("libGLX_nvidia", "libEGL_nvidia", "libGLES", "libnvoptix", "libnvidia-egl",
-               "libnvidia-gl", "libnvidia-gpucomp", "libnvidia-rtcore", "libnvidia-allocator", "libnvidia-tls")
+               "libnvidia-gl", "libnvidia-gpucomp", "libnvidia-rtcore", "libnvidia-allocator", "libnvidia-tls",
+               "libnvidia-ngx")
     for source in extracted.glob("lib*.so*"):
         if source.name.startswith(allowed) and source.is_file():
             target = libs / source.name
             if not target.exists():
                 target.symlink_to(source)
     for name, soname in {"libGLX_nvidia": "0", "libEGL_nvidia": "0", "libGLESv1_CM_nvidia": "1",
-                         "libGLESv2_nvidia": "2", "libnvoptix": "1", "libnvidia-allocator": "1"}.items():
+                         "libGLESv2_nvidia": "2", "libnvoptix": "1", "libnvidia-allocator": "1",
+                         "libnvidia-ngx": "1"}.items():
         source = libs / f"{name}.so.{version}"
         target = libs / f"{name}.so.{soname}"
         if source.exists() and not target.exists():
