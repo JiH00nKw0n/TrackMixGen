@@ -156,3 +156,27 @@ def test_egl_device_appended_to_cuda_visible_devices():
     assert egl.apply({"MUJOCO_EGL_DEVICE_ID": "8", "CUDA_VISIBLE_DEVICES": "7,8"})["CUDA_VISIBLE_DEVICES"] == "7,8"
     assert "CUDA_VISIBLE_DEVICES" not in egl.apply({"MUJOCO_EGL_DEVICE_ID": "8"})
     assert egl.apply({"CUDA_VISIBLE_DEVICES": "7"})["CUDA_VISIBLE_DEVICES"] == "7"
+
+
+def test_hdf5_frames_match_ram_with_padding_and_streamed_stats(tmp_path):
+    pool = make_pool(tmp_path)
+    out = tmp_path / 'dataset.hdf5'
+    write_dataset(out, select(candidates(pool), 4, seed=0), pool=pool, observation=IMAGE, meta={'label': 'pre_noise'})
+    ram = TrajectoryStore.load(out)
+    disk = TrajectoryStore.load(out, image_cache='hdf5')
+    a, b = FrameDataset(ram, obs_delta=[-2, 0, 1]), FrameDataset(disk, obs_delta=[-2, 0, 1])
+    for i in range(len(a)):
+        for key in a[i]:
+            np.testing.assert_array_equal(a[i][key], b[i][key])
+    for budget in (7, 20000):
+        sa, sb = compute_stats(ram, max_image_frames=budget), compute_stats(disk, max_image_frames=budget)
+        for key in sa:
+            for metric in sa[key]:
+                np.testing.assert_allclose(sa[key][metric], sb[key][metric], rtol=1e-6, atol=1e-6)
+        frames = np.concatenate(ram.images['agentview'])
+        if len(frames) > budget:
+            indices = np.sort(np.random.default_rng(0).choice(len(frames), budget, replace=False))
+            frames = frames[indices]
+        values = frames.astype(np.float32) / 255
+        np.testing.assert_allclose(sa['observation.images.agentview']['mean'].ravel(), values.mean((0, 1, 2)), atol=2e-6)
+        np.testing.assert_allclose(sa['observation.images.agentview']['std'].ravel(), values.std((0, 1, 2)), atol=2e-6)
