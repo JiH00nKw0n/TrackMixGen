@@ -123,6 +123,8 @@ def install(root, image):
     python = venv / "bin/python"
     env = dict(os.environ, UV_CACHE_DIR=str(root / "cache/uv"), UV_PYTHON_INSTALL_DIR=str(root / "python"),
                UV_LINK_MODE="hardlink", PATH=f"{root / 'bin'}:{os.environ.get('PATH', '')}")
+    env.setdefault("UV_HTTP_TIMEOUT", "180")
+    env.setdefault("UV_CONCURRENT_DOWNLOADS", "4")
     if not python.exists():
         run([uv, "venv", "--python", "3.12" if image == "train" else "3.11", "--seed", venv], env=env)
     def pip(*args):
