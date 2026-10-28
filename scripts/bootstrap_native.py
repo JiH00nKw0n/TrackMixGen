@@ -155,6 +155,10 @@ def install(root, image):
             pip("-e", src / "rapprentice", "qpsolvers==4.8.1", "h5py", "huggingface_hub")
             for name in ["softmimicgen", "softmimicgen_assets", "softmimicgen_tasks"]:
                 pip("--no-build-isolation", "-e", src / "SoftMimicGen/source" / name)
+            run([python, "-c", "from huggingface_hub import snapshot_download; import sys; "
+                 "snapshot_download('masoudmoghani/SoftMimicGen', repo_type='dataset', "
+                 "allow_patterns='data/*', local_dir=sys.argv[1])",
+                 src / "SoftMimicGen/source/softmimicgen_assets"], env=env)
         else:
             pip("h5py", "robomimic @ git+https://github.com/ARISE-Initiative/robomimic.git@v0.4.0",
                 "osqp==0.6.7.post3", "qpsolvers==4.3.1")
