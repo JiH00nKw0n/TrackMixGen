@@ -10,7 +10,8 @@
 # pools, datasets, checkpoints, validations and evaluations are kept and skipped on a rerun.
 #
 #   CLUSTER=ada scripts/run_isaaclab_baseline.sh
-# Variables: CLUSTER (ada), GPU (0), SOFT_TASKS ("rope towel jenga"), DEX_TASKS ("pick_place"), SEEDS ("202601 202602 202603"),
+# Variables: CLUSTER (ada), GPU (0), SOFT_TASKS ("rope towel"),
+#   DEX_TASKS ("pick_place bottle_placement_door_closing microwave_opening"), SEEDS ("202601 202602 202603"),
 #   POLICY (diffusion_policy), SIZE (1000), VAL_PARALLEL (2: checkpoints validated at a time, each one Isaac Sim),
 #   TEST_SHARDS (3: parallel shards of the 300 test scenes), SEED_PARALLEL (1: training runs at a time),
 #   ONLY_GENERATION (1: stop after the datasets), BUNDLE_NAME (results folder name under <result root>/reports),
@@ -19,7 +20,8 @@
 #   keep selected weights and evidence, remove completed task bulk data; requires SEQUENTIAL_TASKS=1).
 set -uo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-CLUSTER=${CLUSTER:-ada}; GPU=${GPU:-0}; SOFT_TASKS=${SOFT_TASKS-"rope towel jenga"}; DEX_TASKS=${DEX_TASKS-"pick_place"}
+CLUSTER=${CLUSTER:-ada}; GPU=${GPU:-0}; SOFT_TASKS=${SOFT_TASKS-"rope towel"}
+DEX_TASKS=${DEX_TASKS-"pick_place bottle_placement_door_closing microwave_opening"}
 SEEDS=${SEEDS:-"202601 202602 202603"}; POLICY=${POLICY:-diffusion_policy}; SIZE=${SIZE:-1000}
 POLICIES=${POLICIES:-$POLICY}
 VAL_PARALLEL=${VAL_PARALLEL:-2}; TEST_SHARDS=${TEST_SHARDS:-3}; SEED_PARALLEL=${SEED_PARALLEL:-1}
@@ -39,6 +41,7 @@ JOBS=""
 for t in $SOFT_TASKS; do JOBS="$JOBS softmimicgen:isaaclab-soft:$t"; done
 for t in $DEX_TASKS; do JOBS="$JOBS dexmimicgen:isaaclab-dex:$t"; done
 ALL_JOBS=$JOBS
+task_config_exists() { [ -f "$REPO/configs/experiment/generator/$1/task/$2.yaml" ]; }
 dataset_of() { echo "$DATA_ROOT/datasets/$1/$2/$SCENE/$METHOD/$GENERATION/$OBSERVATION/n${SIZE}_seed0.hdf5"; }
 resets_of() { echo "$DATA_ROOT/resets/$1/$2/$SCENE/val25_test300_seed202600.json"; }
 run_of() { echo "$DATA_ROOT/runs/$1/$2/$SCENE/$METHOD/$GENERATION/$OBSERVATION/$POLICY/seed$3"; }
@@ -48,6 +51,7 @@ collect_bundle() {
   local args=() job gen image task
   for job in $ALL_JOBS; do
     IFS=: read -r gen image task <<< "$job"
+    task_config_exists "$gen" "$task" || continue
     args+=(--job "$gen/$task/$SCENE/$METHOD/$GENERATION/$OBSERVATION")
   done
   for policy in $POLICIES; do
@@ -60,6 +64,7 @@ collect_bundle() {
 generation_lane() {
   for job in $JOBS; do
     IFS=: read -r gen image task <<< "$job"
+    task_config_exists "$gen" "$task" || continue
     local common="GENERATOR=$gen IMAGE=$image TASK=$task CLUSTER=$CLUSTER"
     if [ -f "$(dataset_of $gen $task)" ] && [ -f "$(resets_of $gen $task)" ]; then log "[$gen/$task] dataset and resets exist, generation skipped"; continue; fi
     log "[$gen/$task] sources"
@@ -100,6 +105,7 @@ policy_lane() {
   local port=8800
   for job in $JOBS; do
     IFS=: read -r gen image task <<< "$job"
+    task_config_exists "$gen" "$task" || continue
     until [ -f "$(dataset_of $gen $task)" ] && [ -f "$(resets_of $gen $task)" ]; do
       grep -q "pool $gen/$task\|dataset $gen/$task\|sources $gen/$task\|resets $gen/$task" "$LOG/FAILURES" 2>/dev/null && { log "[$gen/$task] generation failed, policies skipped"; continue 2; }
       sleep 120
@@ -113,10 +119,19 @@ policy_lane() {
 log "start: cluster $CLUSTER, GPU $GPU, jobs:$JOBS, seeds: $SEEDS, policies $POLICIES"
 if [ -f "$LOG/FAILURES" ]; then mv "$LOG/FAILURES" "$LOG/FAILURES.$(date +%Y%m%d_%H%M%S)"; fi
 if [ -f "$LOG/DONE" ]; then mv "$LOG/DONE" "$LOG/DONE.$(date +%Y%m%d_%H%M%S)"; fi
+if [ -f "$LOG/BLOCKED_TASKS" ]; then mv "$LOG/BLOCKED_TASKS" "$LOG/BLOCKED_TASKS.$(date +%Y%m%d_%H%M%S)"; fi
+for job in $ALL_JOBS; do
+  IFS=: read -r gen image task <<< "$job"
+  if ! task_config_exists "$gen" "$task"; then
+    log "[$gen/$task] BLOCKED: task integration is not implemented; no generation, training or evaluation started"
+    echo "$gen/$task" >> "$LOG/BLOCKED_TASKS"
+  fi
+done
 if [ "$SEQUENTIAL_TASKS" = 1 ]; then
   for one_job in $ALL_JOBS; do
     JOBS=$one_job
     IFS=: read -r gen image task <<< "$one_job"
+    task_config_exists "$gen" "$task" || continue
     marker="$DATA_ROOT/retired/$gen/$task.json"
     if [ -f "$marker" ]; then
       python3 - "$marker" "$POLICIES" "$SEEDS" <<'PY' || exit 1
@@ -143,4 +158,5 @@ fi
 log "collecting results into $RESULTS_ROOT/reports/$BUNDLE_NAME"
 collect_bundle && log "bundles: $RESULTS_ROOT/reports/$BUNDLE_NAME"
 if [ -f "$LOG/FAILURES" ]; then log "FAILURES: $(tr '\n' ';' < "$LOG/FAILURES")"; exit 1; fi
+if [ -f "$LOG/BLOCKED_TASKS" ]; then log "INCOMPLETE: requested tasks remain in $LOG/BLOCKED_TASKS"; exit 2; fi
 echo "ISAACLAB_BASELINE_DONE $(date)" > "$LOG/DONE"; log "done"

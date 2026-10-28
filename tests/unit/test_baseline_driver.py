@@ -13,6 +13,9 @@ def test_two_policies_share_dataset_and_use_at_most_two_slots(tmp_path):
     scripts.mkdir(parents=True)
     source = Path(__file__).resolve().parents[2]/'scripts/run_isaaclab_baseline.sh'
     shutil.copyfile(source, scripts/source.name)
+    task_config = repo/'configs/experiment/generator/softmimicgen/task/rope.yaml'
+    task_config.parent.mkdir(parents=True)
+    task_config.write_text('name: rope\n')
     data = tmp_path/'data'
     ds = data/'datasets/softmimicgen/rope/ours/none/pool_isaac/image/n1000_seed0.hdf5'
     ds.parent.mkdir(parents=True)
@@ -57,3 +60,13 @@ with open(str(p)+'.lock','w') as f:
     assert {(p,k) for p,k,_ in s['calls']} == {(p,k) for p in ['bc_rnn','diffusion_policy'] for k in ['202601','202602','202603']}
     assert len({port for _,_,port in s['calls']})==6
     assert 'generation skipped' in result.stdout
+
+    # A requested but unimplemented task must remain visible and prevent a false
+    # campaign-complete marker, without running a physical job for that task.
+    env['DEX_TASKS'] = 'bottle_placement_door_closing microwave_opening'
+    result=subprocess.run(['bash',str(scripts/source.name)],env=env,capture_output=True,text=True,timeout=20)
+    assert result.returncode == 2, result.stdout+result.stderr
+    log=Path(env['TMG_RESULTS_ROOT'])/'logs/isaaclab_baseline'
+    assert not (log/'DONE').exists()
+    assert set((log/'BLOCKED_TASKS').read_text().splitlines()) == {
+        'dexmimicgen/bottle_placement_door_closing', 'dexmimicgen/microwave_opening'}
