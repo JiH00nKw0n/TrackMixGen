@@ -14,14 +14,24 @@
 #   POLICY (diffusion_policy), SIZE (1000), VAL_PARALLEL (2: checkpoints validated at a time, each one Isaac Sim),
 #   TEST_SHARDS (3: parallel shards of the 300 test scenes), SEED_PARALLEL (1: training runs at a time),
 #   ONLY_GENERATION (1: stop after the datasets), BUNDLE_NAME (results folder name under <result root>/reports),
-#   TMG_RESULTS_ROOT (persistent summaries and driver logs; defaults to the data root).
+#   TMG_RESULTS_ROOT (persistent summaries and driver logs; defaults to the data root),
+#   GENERATION (pool_isaac), TRAIN_OVERRIDES (extra `tmg train` overrides), EVAL_EXTRA (extra `tmg eval` overrides),
+#   MINI (1: an end-to-end check at toy scale: 20-success pools, 10-demo datasets, 200 training updates, 6 evaluation
+#   scenes per split; same code path and files as the real run, finishes in about two hours per task).
 set -uo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 CLUSTER=${CLUSTER:-ada}; GPU=${GPU:-0}; SOFT_TASKS=${SOFT_TASKS-"rope towel"}; DEX_TASKS=${DEX_TASKS-"pick_place"}
 SEEDS=${SEEDS:-"202601 202602 202603"}; POLICY=${POLICY:-diffusion_policy}; SIZE=${SIZE:-1000}
 VAL_PARALLEL=${VAL_PARALLEL:-2}; TEST_SHARDS=${TEST_SHARDS:-3}; SEED_PARALLEL=${SEED_PARALLEL:-1}
 SEQUENTIAL_TASKS=${SEQUENTIAL_TASKS:-0}
-SCENE=ours; METHOD=none; GENERATION=pool_isaac; OBSERVATION=image
+GENERATION=${GENERATION:-pool_isaac}; TRAIN_OVERRIDES=${TRAIN_OVERRIDES:-}; EVAL_EXTRA=${EVAL_EXTRA:-}
+if [ "${MINI:-0}" = 1 ]; then
+  GENERATION=pilot20; SIZE=10; VAL_PARALLEL=1; TEST_SHARDS=2
+  TRAIN_OVERRIDES="training.by_policy.diffusion_policy.image.updates=200 training.updates_per_epoch=100 training.checkpoint_every_epochs=2 $TRAIN_OVERRIDES"
+  EVAL_EXTRA="max_scenes=6 $EVAL_EXTRA"
+  BUNDLE_NAME=${BUNDLE_NAME:-isaaclab_mini_$(date +%Y%m%d)}
+fi
+SCENE=ours; METHOD=none; OBSERVATION=image
 DATA_ROOT=$(make -s -C "$REPO" print-data-root CLUSTER="$CLUSTER")
 RESULTS_ROOT=${TMG_RESULTS_ROOT:-$DATA_ROOT}
 LOG=$RESULTS_ROOT/logs/isaaclab_baseline; mkdir -p "$LOG"
@@ -78,6 +88,7 @@ policy_task() {   # all seeds of one task, SEED_PARALLEL at a time; each seed ha
     SKIP=0; [ -f "$run/train_result.json" ] && SKIP=1
     CLUSTER=$CLUSTER GPU=$GPU GENERATOR=$gen IMAGE=$image SCENE=$SCENE METHOD=$METHOD GENERATION=$GENERATION OBSERVATION=$OBSERVATION \
       POLICY=$POLICY SEED=$seed SIZE=$SIZE VAL_PARALLEL=$VAL_PARALLEL TEST_SHARDS=$TEST_SHARDS SKIP_TRAIN=$SKIP \
+      TRAIN_OVERRIDES="$TRAIN_OVERRIDES" EXTRA="$EVAL_EXTRA" \
       "$REPO/scripts/task_policy_pipeline.sh" $task $port > "$LOG/policy_${gen}_${task}_seed$seed.log" 2>&1 \
       || fail "policy $gen/$task seed $seed" "$LOG/policy_${gen}_${task}_seed$seed.log" &
     port=$((port + 40)); sleep 30
@@ -99,7 +110,7 @@ policy_lane() {
   log "policy lane done"
 }
 
-log "start: cluster $CLUSTER, GPU $GPU, jobs:$JOBS, seeds: $SEEDS, policy $POLICY"
+log "start: cluster $CLUSTER, GPU $GPU, jobs:$JOBS, seeds: $SEEDS, policy $POLICY, generation $GENERATION, size $SIZE${MINI:+, MINI mode}"
 if [ -f "$LOG/FAILURES" ]; then mv "$LOG/FAILURES" "$LOG/FAILURES.$(date +%Y%m%d_%H%M%S)"; fi
 if [ -f "$LOG/DONE" ]; then mv "$LOG/DONE" "$LOG/DONE.$(date +%Y%m%d_%H%M%S)"; fi
 if [ "$SEQUENTIAL_TASKS" = 1 ]; then

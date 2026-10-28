@@ -6,7 +6,8 @@
 #   validation ports <first port>+<checkpoint index>, test shards from <first port>+20)
 # Variables: CLUSTER (a100), GPU (CUDA device for the train image, 1), GENERATOR (mimicgen), IMAGE (simulator image of the
 # rollouts, robosuite), METHOD (none), GENERATION (pool_lowdim), OBSERVATION (low_dim), POLICY (bc_rnn), SEED (1), SCENE (ours),
-# SIZE (dataset demos, 1000), VAL_PARALLEL (5), TEST_SHARDS (6), SKIP_TRAIN (1: the run is already trained).
+# SIZE (dataset demos, 1000), VAL_PARALLEL (5), TEST_SHARDS (6), SKIP_TRAIN (1: the run is already trained),
+# TRAIN_OVERRIDES (extra `tmg train` overrides), EXTRA (extra `tmg eval` overrides, e.g. max_scenes=6).
 set -uo pipefail
 TASK=$1; PORT0=$2
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
@@ -29,7 +30,8 @@ port_busy() { python3 -c "import socket,sys; s=socket.socket(); s.settimeout(1);
 
 log "train -> $RUN"
 if [ "${SKIP_TRAIN:-0}" = 1 ]; then log "train skipped (SKIP_TRAIN=1)"; else
-make -s -C "$REPO" train $C || { log "TRAIN FAILED"; exit 1; }
+make -s -C "$REPO" train GENERATOR=$GENERATOR TASK=$TASK SCENE=$SCENE METHOD=$METHOD GENERATION=$GENERATION OBSERVATION=$OBSERVATION POLICY=$POLICY SEED=$SEED CLUSTER=$CLUSTER \
+  OVERRIDES="dataset.size=$SIZE ${TRAIN_OVERRIDES:-}" || { log "TRAIN FAILED"; exit 1; }
 fi
 log "validate checkpoints ($VAL_PARALLEL at a time)"
 i=0; pids=""
