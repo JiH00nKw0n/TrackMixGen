@@ -311,6 +311,24 @@ Arena에 전달된다. 기록 그라프트는 AutoData의 자리(`initial_state`
 
 이 절의 내용은 코드와 설정을 기준으로 적었고, Isaac 서버의 시범 실행 결과는 2.6절에 덧붙인다.
 
+## 2.6 AutoData 시범 실행 결과 (2026-10-28, Isaac 서버)
+
+전자레인지 과제를 `tmg/isaaclab-autodata` 이미지로 돌려 세 가지 공식 쪽 문제를 찾아 어댑터에서 처리했다. 측정한 사실이다.
+
+- AutoData 스크립트는 Arena의 클래스형 성공 판정(`TaskSuccessTerm`)을 함수처럼 바로 불러 생성자 인자 오류가 난다. Isaac Lab 3.0의
+  `initialize_success_term`으로 생성 전에 인스턴스를 만들고, 시도마다 `reset_success_term`으로 환경의 진행 상태를 지운다.
+- Isaac Lab 3.0의 앱 실행기는 `--headless`와 `--enable_cameras` 플래그가 없다(`--viz none`과 생성자 인자 `enable_cameras`). 어댑터와 평가기는
+  실행기가 아는 쪽을 고른다.
+- Isaac Lab 기록기는 `policy` 관측 그룹만 저장하므로 Arena의 머리 카메라(`camera_obs` 그룹, 512×512)는 공식 `generated.hdf5`에 없다.
+  기록 그라프트가 매 걸음 행동 직전에 카메라를 읽어 128×128로 줄여 두고, 성공한 시도의 영상을 `records/images_%06d.npz`로 쓴다.
+
+그 뒤 생성은 20회 시도에 성공 20회(100%), 1,020초(Isaac Sim 시작 포함, 시도당 약 50초)였고, 고정 장면 시드 파일, 데이터셋(시연 10개,
+984걸음, 128×128 한 카메라), 200갱신 학습까지 정상이었다. 평가기 검증 결과는 이 절에 덧붙인다.
+
+Towel의 공식 agentview 카메라는 300×300이고 손목 카메라는 128×128이다. 정책은 카메라 영상을 쌓아 쓰므로 데이터셋 단계에서 과제의
+`image_size`(128×128)로 줄이며(`tmg/data/images.py`), 평가기도 같은 함수로 실시간 영상을 줄인다. 2026-10-28 MINI 전체 실행에서 이
+크기 차이로 Towel 학습이 실패해 찾은 것이다.
+
 ## 3. CP-Gen (kevin-thankyou-lin/cpgen@1e7c1fc4)
 
 CP-Gen은 원본 구간을 다시 재생하지 않는다. 시도마다 주석된 키포인트 제약을 새 물체 자세에 맞춰 다시 풀고(제약 걸음),
