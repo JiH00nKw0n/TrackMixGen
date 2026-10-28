@@ -16,7 +16,7 @@ def test_native_make_dispatches_without_docker(tmp_path):
     executable.write_text(
         f"#!{sys.executable}\nimport json,os,sys\n"
         f"open({str(output)!r},'w').write(json.dumps(dict(args=sys.argv[1:],data=os.environ['TMG_DATA_ROOT'],"
-        "source=os.environ['TMG_ISAACLAB_SRC'])))\n"
+        "source=os.environ['TMG_ISAACLAB_SRC'],soft_source=os.environ['TMG_SOFTMIMICGEN_SRC'])))\n"
     )
     executable.chmod(0o755)
     data = tmp_path / "data"
@@ -27,6 +27,7 @@ def test_native_make_dispatches_without_docker(tmp_path):
     assert call["args"] == ["-m", "tmg", "sources", "generator=softmimicgen", "task=rope"]
     assert call["data"] == str(data)
     assert call["source"] == str(root / "src/isaaclab-soft/IsaacLab")
+    assert call["soft_source"] == str(root / "src/isaaclab-soft/SoftMimicGen")
 
 
 def test_runtime_paths_keep_native_root_but_translate_containers(tmp_path):

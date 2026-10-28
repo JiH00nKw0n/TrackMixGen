@@ -42,6 +42,8 @@ def runtime_environment(image: str, data_root: str) -> tuple[Path, dict[str, str
             env[key] = value
     if image != "train":
         env["TMG_ISAACLAB_SRC"] = str(root / "src" / image / "IsaacLab")
+    if image == "isaaclab-soft":
+        env["TMG_SOFTMIMICGEN_SRC"] = str(root / "src" / image / "SoftMimicGen")
     return python, env
 
 

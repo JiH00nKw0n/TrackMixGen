@@ -51,7 +51,7 @@ def tools(root):
         bootstrap = root / "tools/bootstrap"
         if not (bootstrap / "bin/python").exists():
             run([sys.executable, "-m", "venv", bootstrap])
-        run([bootstrap / "bin/python", "-m", "pip", "install", "uv"])
+        run([bootstrap / "bin/python", "-m", "pip", "--isolated", "install", "--no-user", "uv"])
         uv.parent.mkdir(parents=True, exist_ok=True)
         uv.symlink_to(bootstrap / "bin/uv")
     if not shutil.which("make") and not (root / "tools/usr/bin/make").exists():
