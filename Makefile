@@ -40,9 +40,11 @@ CONTAINER_TMP ?= $(or $(call cluster_value,container_tmp),$(DATA_ROOT)/tmp/conta
 PREP        = mkdir -p $(DATA_ROOT) $(CONTAINER_TMP) $(PREP_EXTRA)
 GEN_ARGS    = generator=$(GENERATOR) task=$(TASK) scene=$(SCENE) method=$(METHOD) generation=$(GENERATION) cluster=$(CLUSTER) $(OVERRIDES)
 REVISION   := $(shell git -C $(REPO) rev-parse --short HEAD 2>/dev/null || echo unknown)
-# the Isaac Lab images (SoftMimicGen, DexMimicGen) run Isaac Sim: GPU for generation, resets and evaluation
+# the Isaac Lab images (SoftMimicGen, DexMimicGen) run Isaac Sim: GPU for generation, resets and evaluation. Kit needs
+# Vulkan; the NVIDIA runtime with NVIDIA_DRIVER_CAPABILITIES=all mounts the driver's Vulkan ICD (/etc/vulkan/icd.d/
+# nvidia_icd.json) into the container, which  alone did not on the Isaac server (2026-10-28)
 ifneq (,$(filter isaaclab-%,$(IMAGE)))
-DOCKER_GPU = --gpus all
+DOCKER_GPU = --runtime=nvidia --gpus all -e NVIDIA_VISIBLE_DEVICES=all -e NVIDIA_DRIVER_CAPABILITIES=all
 SING_NV    = --nv
 DOCKER_VOL_EXTRA = --shm-size 8g
 endif
