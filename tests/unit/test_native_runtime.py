@@ -1,9 +1,9 @@
 """Native dispatch must preserve host paths and never stop a server it did not start."""
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -52,7 +52,8 @@ esac
     fake_make.chmod(0o755)
     env = dict(os.environ, PATH=f"{binary}:{os.environ['PATH']}", RUN=f"{tmp_path}/data/run/seed202601",
                CKPT=f"{tmp_path}/data/run/seed202601/checkpoints/0010000", TASK="rope", CLUSTER="pod")
-    result = subprocess.run(["bash", "scripts/evaluate_checkpoint.sh"], cwd=REPO, env=env, capture_output=True)
+    result = subprocess.run(["bash", "scripts/evaluate_checkpoint.sh"], cwd=REPO, env=env,
+                            capture_output=True, check=False)
     assert result.returncode != 0
     assert "serve-detached" in calls.read_text()
     assert "serve-stop" not in calls.read_text()

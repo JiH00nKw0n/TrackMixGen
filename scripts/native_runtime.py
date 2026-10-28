@@ -6,12 +6,12 @@ import argparse
 import fcntl
 import json
 import os
-from pathlib import Path
 import re
 import signal
 import socket
 import subprocess
 import time
+from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -65,7 +65,8 @@ def server(args):
     with (folder / f"{args.name}.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         previous = json.loads(record.read_text()) if record.exists() else None
-        alive = previous and process_identity(previous["pid"]) == previous["start_ticks"]
+        alive = (previous and previous.get("start_ticks") is not None
+                 and process_identity(previous["pid"]) == previous["start_ticks"])
         if args.action == "serve-stop":
             if alive:
                 os.killpg(previous["pid"], signal.SIGTERM)
@@ -90,8 +91,8 @@ def server(args):
             proc = subprocess.Popen(command, env=env, cwd=REPO, stdin=subprocess.DEVNULL,
                                     stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
         ticks = process_identity(proc.pid)
-        record.write_text(json.dumps(dict(pid=proc.pid, start_ticks=ticks, command=command,
-                                         started_at=time.time()), indent=2))
+        record.write_text(json.dumps({"pid": proc.pid, "start_ticks": ticks, "command": command,
+                                     "started_at": time.time()}, indent=2))
         if ticks is None:
             raise RuntimeError(f"policy server exited at launch; see {folder / (args.name + '.log')}")
 

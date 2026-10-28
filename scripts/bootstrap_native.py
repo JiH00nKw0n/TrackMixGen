@@ -6,11 +6,11 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
 import re
 import shutil
 import subprocess
 import urllib.request
+from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 SOFT_COMMIT = "c9d146ba57358a544167de8ebe946caaac8f6220"
@@ -72,6 +72,7 @@ def graphics(root):
     url = f"https://download.nvidia.com/XFree86/Linux-x86_64/{version}/{package.name}"
     download(url, package)
     extracted = root / "graphics" / version
+    extracted.parent.mkdir(parents=True, exist_ok=True)
     if not (extracted / f"libGLX_nvidia.so.{version}").exists():
         run(["sh", package, "--extract-only", "--target", extracted])
     libs = root / "graphics/lib"
@@ -91,16 +92,17 @@ def graphics(root):
             target.symlink_to(source.name)
     icd = root / "graphics/nvidia_icd.json"
     icd.write_text(json.dumps({"file_format_version": "1.0.0", "ICD": {
-        "library_path": str(libs / "libGLX_nvidia.so.0"), "api_version": "1.3.0"}}, indent=2))
+        "library_path": str(libs / "libEGL_nvidia.so.0"), "api_version": "1.3.0"}}, indent=2))
     egl = root / "graphics/nvidia_egl.json"
     egl.write_text(json.dumps({"file_format_version": "1.0.0", "ICD": {
         "library_path": str(libs / "libEGL_nvidia.so.0")}}, indent=2))
     env = {"LD_LIBRARY_PATH": str(libs), "VK_DRIVER_FILES": str(icd), "VK_ICD_FILENAMES": str(icd),
            "__EGL_VENDOR_LIBRARY_FILENAMES": str(egl)}
     (root / "graphics/environment.json").write_text(json.dumps(env, indent=2))
-    digest = hashlib.file_digest(package.open("rb"), "sha256").hexdigest()
+    with package.open("rb") as downloaded:
+        digest = hashlib.file_digest(downloaded, "sha256").hexdigest()
     (root / "graphics/provenance.json").write_text(json.dumps(
-        dict(driver_version=version, download=url, sha256=digest, kernel_driver_changed=False), indent=2))
+        {"driver_version": version, "download": url, "sha256": digest, "kernel_driver_changed": False}, indent=2))
     run(["python3", REPO / "scripts/probe_native_graphics.py"], env=dict(os.environ, **env))
 
 

@@ -18,7 +18,7 @@ class InstanceInfo(c.Structure):
 
 
 def main():
-    c.CDLL("libGLX_nvidia.so.0")
+    c.CDLL("libEGL_nvidia.so.0")
     vk = c.CDLL("libvulkan.so.1")
     app = ApplicationInfo(0, None, b"tmg-probe", 1, b"none", 1, (1 << 22) | (2 << 12))
     info = InstanceInfo(1, None, 0, c.pointer(app), 0, None, 0, None)
