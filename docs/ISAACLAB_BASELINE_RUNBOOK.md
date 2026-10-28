@@ -9,8 +9,8 @@
 ## 차례
 
 1. 돌리는 과제와 공식 설정. 네 과제의 생성기 설정값과 원본 시연 수를 적는다.
-2. 요구 사항. 컴퓨터, 드라이버, 도커, 디스크, 네트워크 조건을 적는다.
-3. 준비. 저장소 받기, 데이터 경로 정하기, 이미지 세 개 빌드, 동작 확인 순서를 적는다.
+2. 요구 사항. 운영체제, 드라이버, 도커, 디스크, 네트워크 조건을 적는다.
+3. 준비. 드라이버 확인, git과 Docker 설치, NVIDIA Container Toolkit 설치, 저장소 받기, 데이터 폴더와 머신 설정, 이미지 세 개 빌드, 동작 확인을 순서대로 적는다.
 4. 실행. 전체 실행 명령과 진행 상황을 보는 방법, 중단 뒤 재시작 방법을 적는다.
 5. 결과 파일. 결과 묶음의 폴더 구조와 각 파일이 담는 내용, 수치를 읽는 방법을 적는다.
 6. 난수와 재현성. 어떤 시드가 어디에 쓰이고 무엇이 같게 유지되는지 적는다.
@@ -42,56 +42,157 @@ Pick Place(사람형 로봇이 물체를 집어 상자에 넣기)다. DexMimicGe
 
 ## 2. 요구 사항
 
+- 운영체제. Ubuntu 22.04 또는 24.04를 기준으로 적었다. 아래 명령은 모두 이 두 버전에서 그대로 쓸 수 있다.
 - NVIDIA GPU 한 장. 이 문서는 RTX PRO 6000 Ada(메모리 48 GB)를 기준으로 동시 실행 개수를 정했다. Isaac Sim 한 프로세스가 GPU
   메모리를 약 5에서 14 GB 쓰고, 학습 프로세스가 약 10 GB를 쓴다.
-- NVIDIA 드라이버 570 이상(이미지가 CUDA 12.8 기반이다). `nvidia-smi`로 확인한다.
-- Docker 24 이상과 NVIDIA Container Toolkit. `docker run --rm --gpus all nvidia/cuda:12.8.1-base-ubuntu22.04 nvidia-smi`가 GPU를 보여야 한다.
+- NVIDIA 드라이버 570 이상(이미지가 CUDA 12.8 기반이다). `nvidia-smi` 출력의 "Driver Version"으로 확인한다.
+- Docker 24 이상과 NVIDIA Container Toolkit. 설치 방법은 3절에 있다.
 - 디스크 약 300 GB. 이미지 세 개가 약 60 GB, 네 과제의 풀(영상 포함)과 데이터셋이 과제당 약 20에서 40 GB, 학습 체크포인트가
   시드당 약 5 GB다.
 - 인터넷. 이미지 빌드에 GitHub, PyPI, NVIDIA의 pip 저장소(pypi.nvidia.com)가 필요하고, 원본 시연 내려받기에 Hugging Face(Soft)와
   Isaac 자산 서버 omniverse-content-production.s3-us-west-2.amazonaws.com(Dex)이 필요하다. Isaac Sim은 첫 실행 때 자산을
   자산 서버에서 받는다.
-- 호스트에 Python 3이 있어야 한다(결과 묶음 스크립트는 표준 라이브러리만 쓴다). 그 밖의 모든 것은 이미지 안에서 돈다.
+- 호스트에 git, make, Python 3이 있어야 한다(결과 묶음 스크립트는 표준 라이브러리만 쓴다). 그 밖의 모든 것은 이미지 안에서 돈다.
+- 저장소 `https://github.com/JiH00nKw0n/TrackMixGen`은 공개 저장소라서 GitHub 계정 없이 받을 수 있다.
 
 ## 3. 준비
 
-1. 저장소를 받는다.
+처음 받는 컴퓨터에서 아래 순서를 그대로 따른다. 이미 갖춘 단계는 건너뛴다. `sudo` 권한이 필요한 단계는 3.1부터 3.3까지다.
 
-   ```bash
-   git clone https://github.com/JiH00nKw0n/TrackMixGen.git && cd TrackMixGen
-   ```
+### 3.1 드라이버와 GPU 확인
 
-2. 데이터 경로를 정한다. `configs/machine/cluster/ada.yaml`의 `data_root`를 이 컴퓨터의 빈 폴더로 바꾼다(기본값 `/data/tmg_data`).
-   원본, 풀, 데이터셋, 학습 결과, 로그, 결과 묶음이 모두 이 폴더 아래에 생긴다. 같은 파일의 `workers`(동시에 돌 생성 프로세스 수,
-   기본 2)와 `device`(기본 `cuda:0`)도 여기서 바꾼다.
+```bash
+nvidia-smi
+```
 
-3. 이미지 세 개를 빌드한다. 저장소 최상위에서 실행하며, 각각 1에서 2시간 걸린다. 코드와 설정은 실행 때 컨테이너에 마운트되므로
-   저장소를 갱신해도 다시 빌드하지 않는다(의존 패키지가 바뀔 때만 다시 빌드한다).
+GPU 이름과 "Driver Version"이 나와야 한다. 570보다 낮으면 Ubuntu의 드라이버 저장소에서 올린다(예를 들어
+`sudo apt install nvidia-driver-570` 뒤 재부팅). 드라이버 설치는 이 문서의 범위 밖이므로 컴퓨터 관리자에게 맡긴다.
 
-   ```bash
-   make build IMAGE=isaaclab-soft
-   ```
+### 3.2 git, make, Docker 설치와 도커 그룹
 
-   ```bash
-   make build IMAGE=isaaclab-dex
-   ```
+```bash
+sudo apt-get update && sudo apt-get install -y git make python3 ca-certificates curl
+```
 
-   ```bash
-   make build IMAGE=train
-   ```
+Docker는 공식 저장소에서 설치한다. 다음 명령은 Docker 문서의 Ubuntu 설치 절차를 그대로 옮긴 것이다.
 
-4. 동작을 확인한다. 아래 명령은 Rope의 원본 3개를 내려받고, 성공 20개짜리 시범 생성을 한 번 돈다. 끝나면
-   `<data_root>/pools/softmimicgen/rope/ours/none/pilot20/DONE.json`이 생기고 그 안에 시도 수와 성공 수가 적힌다.
+```bash
+sudo install -m 0755 -d /etc/apt/keyrings && sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc && sudo chmod a+r /etc/apt/keyrings/docker.asc
+```
 
-   ```bash
-   make sources GENERATOR=softmimicgen IMAGE=isaaclab-soft TASK=rope CLUSTER=ada
-   ```
+```bash
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+```
 
-   ```bash
-   make generate GENERATOR=softmimicgen IMAGE=isaaclab-soft TASK=rope SCENE=ours METHOD=none GENERATION=pilot20 CLUSTER=ada
-   ```
+```bash
+sudo apt-get update && sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin
+```
 
-   첫 실행은 Isaac Sim이 자산을 내려받고 셰이더를 컴파일하느라 10분 넘게 걸릴 수 있다. 로그는 `<data_root>/pools/.../pilot20/logs/`에 있다.
+현재 사용자가 `sudo` 없이 도커를 쓰도록 그룹에 넣는다. 이 뒤에 한 번 로그아웃하고 다시 로그인해야 적용된다.
+
+```bash
+sudo usermod -aG docker $USER
+```
+
+다시 로그인한 뒤 다음이 오류 없이 돌아야 한다.
+
+```bash
+docker run --rm hello-world
+```
+
+### 3.3 NVIDIA Container Toolkit 설치
+
+컨테이너 안에서 GPU를 쓰게 하는 구성 요소다. 다음 명령은 NVIDIA 문서의 설치 절차를 그대로 옮긴 것이다.
+
+```bash
+curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+```
+
+```bash
+curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list > /dev/null
+```
+
+```bash
+sudo apt-get update && sudo apt-get install -y nvidia-container-toolkit && sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart docker
+```
+
+컨테이너에서 GPU가 보이는지 확인한다. 호스트의 `nvidia-smi`와 같은 표가 나와야 한다.
+
+```bash
+docker run --rm --gpus all nvidia/cuda:12.8.1-base-ubuntu22.04 nvidia-smi
+```
+
+### 3.4 저장소 받기
+
+작업 폴더는 어디든 된다. 아래는 홈 폴더 기준이다.
+
+```bash
+cd ~ && git clone https://github.com/JiH00nKw0n/TrackMixGen.git && cd TrackMixGen
+```
+
+이 문서가 맞는 버전인지 확인한다. 이 문서와 함께 넘긴 커밋 번호가 있으면 그 커밋으로 맞춘다(없으면 `main`의 최신을 쓴다).
+
+```bash
+git log --oneline -1
+```
+
+```bash
+git checkout <넘겨받은 커밋 번호>
+```
+
+이 뒤의 모든 명령은 저장소 최상위 폴더(`~/TrackMixGen`)에서 실행한다.
+
+### 3.5 데이터 폴더 만들기와 머신 설정
+
+실험 자료가 모두 들어갈 폴더를 만들고 현재 사용자 소유로 둔다(컨테이너는 현재 사용자 권한으로 돌아서 이 폴더에 쓴다). 기본 경로는
+`/data/tmg_data`이고, 다른 곳을 쓰려면 아래 두 곳의 경로를 함께 바꾼다.
+
+```bash
+sudo mkdir -p /data/tmg_data && sudo chown -R $USER:$USER /data/tmg_data
+```
+
+`configs/machine/cluster/ada.yaml`의 `data_root`를 그 경로로 맞춘다(기본값이 `/data/tmg_data`이므로 기본 경로를 쓰면 바꿀 것이 없다).
+같은 파일의 `workers`(동시에 돌 생성 프로세스 수, 기본 2)와 `device`(기본 `cuda:0`)도 여기서 바꾼다. 설정이 읽히는지 확인한다.
+아래 명령이 `/data/tmg_data`를 출력해야 한다.
+
+```bash
+make print-data-root CLUSTER=ada
+```
+
+### 3.6 이미지 세 개 빌드
+
+저장소 최상위에서 실행하며, 각각 1에서 2시간 걸리고 인터넷이 필요하다. 코드와 설정은 실행 때 컨테이너에 마운트되므로 저장소를
+갱신해도 다시 빌드하지 않는다(의존 패키지가 바뀔 때만 다시 빌드한다).
+
+```bash
+make build IMAGE=isaaclab-soft
+```
+
+```bash
+make build IMAGE=isaaclab-dex
+```
+
+```bash
+make build IMAGE=train
+```
+
+끝나면 `docker images`에 `tmg/isaaclab-soft`, `tmg/isaaclab-dex`, `tmg/train`이 보여야 한다.
+
+### 3.7 동작 확인
+
+아래 두 명령은 Rope의 원본 3개를 내려받고, 성공 20개짜리 시범 생성을 한 번 돈다. 끝나면
+`/data/tmg_data/pools/softmimicgen/rope/ours/none/pilot20/DONE.json`이 생기고 그 안에 시도 수와 성공 수가 적힌다.
+
+```bash
+make sources GENERATOR=softmimicgen IMAGE=isaaclab-soft TASK=rope CLUSTER=ada
+```
+
+```bash
+make generate GENERATOR=softmimicgen IMAGE=isaaclab-soft TASK=rope SCENE=ours METHOD=none GENERATION=pilot20 CLUSTER=ada
+```
+
+첫 실행은 Isaac Sim이 자산을 내려받고 셰이더를 컴파일하느라 10분 넘게 걸릴 수 있다. 로그는
+`/data/tmg_data/pools/softmimicgen/rope/ours/none/pilot20/logs/`에 있다. 여기까지 되면 4절의 전체 실행으로 넘어간다.
 
 ## 4. 실행
 
@@ -105,7 +206,7 @@ CLUSTER=ada nohup scripts/run_isaaclab_baseline.sh > /dev/null 2>&1 &
 데이터셋), 정책 줄기는 데이터셋이 생긴 과제부터 시드 3개를 차례로 학습하고 평가한다. 그래서 한 과제의 학습이 도는 동안 다음 과제의
 생성이 같은 GPU에서 함께 돈다.
 
-진행 상황은 `<data_root>/logs/isaaclab_baseline/driver.log`에 단계별로 적힌다. 단계별 상세 로그는 같은 폴더의
+아래에서 `<data_root>`는 3.5절에서 정한 데이터 폴더(기본 `/data/tmg_data`)다. 진행 상황은 `<data_root>/logs/isaaclab_baseline/driver.log`에 단계별로 적힌다. 단계별 상세 로그는 같은 폴더의
 `sources_*.log`, `pool_*.log`, `resets_*.log`, `dataset_*.log`, `policy_<생성기>_<과제>_seed<시드>.log`다. 실패한 단계는
 `FAILURES` 파일에 한 줄씩 쌓인다. 전부 끝나면 `DONE` 파일이 생기고 결과 묶음(5절)이 만들어진다.
 
