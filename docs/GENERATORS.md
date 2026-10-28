@@ -216,12 +216,13 @@ Isaac Lab 평가를 만들 때도 성공 판정은 첫 행동 뒤부터 매 걸�
 ### 2.1.0 공식 정책 설정과 우리 적용 (2026-10-29)
 
 과제별 공식 정책 설정 파일에서 읽은 값과 우리 적용은 다음과 같다. 정책 구조와 학습 예산은 생성기 전체가 공유하는 우리 설정을 쓰고,
-영상 전처리(자르기)와 평가 상한만 과제의 공식값을 따른다(`task.policy_overrides`, `task.horizon`).
+영상 자르기와 평가 상한은 과제별로 둔다(`task.policy_overrides`, `task.horizon`). 2026-10-29 결정으로 Isaac Lab 세 과제는 모두
+자르지 않고(Soft 공식 Diffusion Policy와 같다), MimicGen은 공식 76×76을 유지한다.
 
 | 과제 | 공식 BC-RNN (영상) | 공식 Diffusion Policy (영상) | 공식 평가 상한 | 우리 적용 |
 |---|---|---|---|---|
-| Soft Rope, Towel (`softmimicgen_tasks/<task>/config/agents/robomimic/*.json`) | 128×128 영상을 76×76으로 무작위 자르기, ResNet18과 SpatialSoftmax 32, 1,200에폭, 배치 16, 순서 10 | 자르기 없음, 관측 1단계, 행동 8단계, 예측 16단계, DDPM 100, EMA, U-Net [256, 512, 1024], 1,200에폭, 배치 16 | Rope 250걸음, Towel 220걸음 (성공 시 종료) | BC-RNN 76×76, Diffusion Policy 자르기 없음, 상한 250과 220 |
-| Dex GR1 Pick Place | 영상 설정 없음 (`bc_rnn_low_dim.json`만 있다) | 없음 | 환경 자체 길이 20초 = 400걸음 | Isaac Lab의 GR1 영상 설정(Nut Pour, Exhaust Pipe: 160×256을 144×236으로, 즉 변의 90%)의 비율을 따라 128×128을 116×116으로 자른다. 상한 400 |
+| Soft Rope, Towel (`softmimicgen_tasks/<task>/config/agents/robomimic/*.json`) | 128×128 영상을 76×76으로 무작위 자르기, ResNet18과 SpatialSoftmax 32, 1,200에폭, 배치 16, 순서 10 | 자르기 없음, 관측 1단계, 행동 8단계, 예측 16단계, DDPM 100, EMA, U-Net [256, 512, 1024], 1,200에폭, 배치 16 | Rope 250걸음, Towel 220걸음 (성공 시 종료) | 두 정책 모두 자르기 없음(2026-10-29 결정: Isaac Lab 과제는 한 규칙), 상한 250과 220 |
+| Dex GR1 Pick Place | 영상 설정 없음 (`bc_rnn_low_dim.json`만 있다) | 없음 | 환경 자체 길이 20초 = 400걸음 | 두 정책 모두 자르기 없음. 상한 400. (참고로 Isaac Lab의 다른 GR1 영상 설정은 160×256을 144×236으로, 변의 90%로 자른다) |
 | MimicGen 7과제 | 84×84를 76×76 | 같음 | 과제별 | 76×76 (기본값) |
 
 ### 2.1.1 컨테이너에서 Isaac Sim이 GPU를 잡기까지 (2026-10-28, Isaac 서버)

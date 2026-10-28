@@ -22,6 +22,8 @@ success_term: {name: object_folded, first_call: after_first_action}
 # Official policy settings (softmimicgen_tasks/<task>/config/agents/robomimic/*.json @ c9d146ba): BC-RNN crops the 128x128
 # images to 76x76 (CropRandomizer), the Diffusion Policy uses NO crop randomizer; both train on agentview_image and
 # robot0_eye_in_hand_image with the three robot-state terms. The evaluation horizon below is the official rollout horizon.
+# Decision 2026-10-29: the Isaac Lab tasks share one rule, no image crop for either policy (the official BC-RNN config's 76x76
+# crop is not followed, so that Rope, Towel and Pick Place use the same preprocessing); MimicGen keeps its official 76x76.
 policy_overrides:
-  bc_rnn: {crop_shape: [76, 76]}
+  bc_rnn: {crop_shape: null}
   diffusion_policy: {crop_shape: null}

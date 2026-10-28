@@ -15,9 +15,9 @@ image_size: [128, 128]
 robot_state: [left_eef_pos, left_eef_quat, right_eef_pos, right_eef_quat, hand_joint_state]
 object_state: []                    # low-dim training is not set up for the Isaac Lab tasks yet
 instruction: pick up the object with the right hand and place it in the bin
-# Isaac Lab has no official image policy config for GR1 pick-and-place (only bc_rnn_low_dim.json). Its GR1 image configs
-# (nut pouring, exhaust pipe) crop the 160x256 camera to 144x236, i.e. 90% of each side, so the image policies here use the
-# same ratio on our 128x128 cameras: crop_shape auto = 76/84 of the side = 116x116.
+# Isaac Lab has no official image policy config for GR1 pick-and-place (only bc_rnn_low_dim.json). Decision 2026-10-29: the
+# Isaac Lab tasks share one rule, no image crop (SoftMimicGen's official Diffusion Policy trains without one); MimicGen's
+# tasks keep the official 76x76 crop. (Isaac Lab's other GR1 image configs crop 160x256 to 144x236, 90% of the side.)
 policy_overrides:
-  bc_rnn: {crop_shape: auto}
-  diffusion_policy: {crop_shape: auto}
+  bc_rnn: {crop_shape: null}
+  diffusion_policy: {crop_shape: null}
