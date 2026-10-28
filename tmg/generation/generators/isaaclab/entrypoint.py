@@ -57,7 +57,7 @@ def install(namespace: dict, spec: dict) -> None:
     if spec["extra"].get("runtime_module"):      # another generator family (AutoData) installs its own grafts
         import importlib
 
-        info = importlib.import_module(str(spec["extra"]["runtime_module"])).install_from_spec(spec)
+        info = importlib.import_module(str(spec["extra"]["runtime_module"])).install_from_spec(spec, namespace)
         print(f"[tmg] grafts installed ({spec['extra']['runtime_module']}): {json.dumps(info, indent=1)}", flush=True)
         return
     layout = rt.IsaacLabLayout(**{k: (tuple(v) if k == "noise_draw_shapes" else v) for k, v in spec["extra"]["layout"].items()},

@@ -35,6 +35,7 @@ import numpy as np
 from tmg.data.images import resize_frames
 from tmg.evaluation.client import PolicyClient
 from tmg.evaluation.rollout import check_server, episode_seed, policy_input
+from tmg.generation.generators.autodata.runtime import reset_success_term
 from tmg.generation.simulators.isaaclab import apply_scene
 
 
@@ -136,7 +137,9 @@ def build_env(plain: dict, device: str):
     print(f"[tmg] scene {plain['scene'].get('name')}: {'ranges applied ' + str(applied) if applied else 'official ranges kept'}", flush=True)
     env = gym.make(task_id, cfg=env_cfg).unwrapped
     if inspect.isclass(success_term.func):        # class-based term (Arena's TaskSuccessTerm): one instance for the whole run
-        success_term.func = success_term.func(cfg=success_term, env=env)
+        from tmg.generation.generators.autodata.runtime import initialize_success_term
+
+        initialize_success_term(success_term, env)
         print(f"[tmg] success term instantiated: {type(success_term.func).__name__}", flush=True)
     return env, success_term, task_id
 
@@ -202,6 +205,7 @@ def run_episode(env, success_term, policy: PolicyClient, scene: dict, task: dict
     try:
         seed_everything(env, int(scene["seed"]))
         obs_dict, _ = env.reset()
+        reset_success_term(success_term, [0])        # class-based terms keep per-environment progress state
         initial = initial_placement(env)
         policy.reset(seed, task.get("instruction"))
         width = int(env.action_manager.total_action_dim)

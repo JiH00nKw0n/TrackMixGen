@@ -6,7 +6,7 @@ AutoData (``autodata_core``) keeps the algorithm of Isaac Lab Mimic but not its 
 
 | anchor                                                            | grafted statement                                        |
 |-------------------------------------------------------------------|----------------------------------------------------------|
-| after ``env_id_tensor, initial_state = await self._reset_environment_for_generation(...)`` | ``_tmg.begin_attempt(self, env_id, initial_state)`` |
+| after ``env_id_tensor, initial_state = await self._reset_environment_for_generation(...)`` | ``_tmg.begin_attempt(self, env_id, initial_state, success_term)`` (also resets the class-based success term's state for this env) |
 | before return #0 (planning failure)                               | ``_tmg.end_attempt(self, env_id, {"success": False})``    |
 | before return #1 (the final ``GenerationResult``)                 | ``_tmg.end_attempt(self, env_id, {"success": buffers.success})`` |
 
@@ -30,6 +30,32 @@ from tmg.generation.generators.isaaclab.runtime import IsaacLabLayout, IsaacLabR
 from tmg.generation.graft import Graft
 
 
+def initialize_success_term(success_term, env):
+    """Instantiate a class-based success term (Arena's ``TaskSuccessTerm``) once, with Isaac Lab's own helper when present.
+
+    AutoData's script passes ``env_cfg.terminations.success`` straight to the generator and calls ``func(env, **params)``;
+    for a class-based term that constructs the class with the wrong arguments (observed 2026-10-28). Isaac Lab 3.0's
+    ``isaaclab_mimic.datagen.success_term.initialize_success_term`` is what its own annotation script uses.
+    """
+    import inspect
+
+    try:
+        from isaaclab_mimic.datagen.success_term import initialize_success_term as official
+
+        return official(success_term, env)
+    except ImportError:
+        if inspect.isclass(success_term.func):
+            success_term.func = success_term.func(cfg=success_term, env=env)
+        return success_term
+
+
+def reset_success_term(success_term, env_ids) -> None:
+    """Reset the per-environment state of a class-based success term (no-op for plain functions)."""
+    fn = getattr(success_term, "func", None)
+    if fn is not None and not isinstance(fn, type) and hasattr(fn, "reset") and not callable(getattr(fn, "__func__", None)):
+        fn.reset(env_ids=env_ids)
+
+
 class AutoDataRuntime(IsaacLabRuntime):
     """Callbacks for ``autodata_core`` (see the module docstring)."""
 
@@ -38,7 +64,7 @@ class AutoDataRuntime(IsaacLabRuntime):
         self._datastream = None
 
     # attempt boundaries --------------------------------------------------------------------------
-    def begin_attempt(self, generator, env_id: int, initial_state) -> None:
+    def begin_attempt(self, generator, env_id: int, initial_state, success_term=None) -> None:
         import time
 
         self._attempt_t0 = time.time()
@@ -48,6 +74,8 @@ class AutoDataRuntime(IsaacLabRuntime):
         self._datastream = generator.datastream
         self._env = generator.datastream.get_env()
         generator._tmg_selected = {}
+        if success_term is not None:
+            reset_success_term(success_term, [env_id])      # Arena's class-based term keeps progress state per env
         self._install_label_wrapper(generator.datastream, env_id)
 
     def _install_label_wrapper(self, datastream, env_id: int) -> None:
@@ -116,7 +144,7 @@ def install(runtime: AutoDataRuntime, graft_hashes: dict) -> dict:
     wp = importlib.import_module("autodata_core.waypoint")
     DataGenerator, MultiWaypoint = dg.DataGenerator, wp.MultiWaypoint
     gen = Graft(DataGenerator.generate, expected_hash=graft_hashes.get("generate"), label="DataGenerator.generate")
-    gen.insert_after_assign("initial_state", "_tmg.begin_attempt(self, env_id, initial_state)")
+    gen.insert_after_assign("initial_state", "_tmg.begin_attempt(self, env_id, initial_state, success_term)")
     gen.insert_before_return('_tmg.end_attempt(self, env_id, {"success": False})', occurrence=0, expected_returns=2)
     gen.insert_before_return('_tmg.end_attempt(self, env_id, {"success": buffers.success})', occurrence=1, expected_returns=2)
     builder = Graft(DataGenerator.generate_eef_subtask_trajectory, expected_hash=graft_hashes.get("trajectory"),
@@ -133,9 +161,26 @@ def install(runtime: AutoDataRuntime, graft_hashes: dict) -> dict:
             "hashes": {"generate": gen.hash, "trajectory": builder.hash, "execute": exe.hash}}
 
 
-def install_from_spec(spec: dict) -> dict:
-    """Entry used by the chunk entrypoint: build the runtime from the chunk spec and install the grafts."""
+def install_from_spec(spec: dict, namespace: dict | None = None) -> dict:
+    """Entry used by the chunk entrypoint: build the runtime from the chunk spec, install the grafts, and wrap the script's
+    ``setup_async_generation`` so the success term is instantiated with the environment before generation starts."""
+    import functools
+
     from tmg.generation.method import build_method
+
+    if namespace is not None and callable(namespace.get("setup_async_generation")):
+        original = namespace["setup_async_generation"]
+
+        @functools.wraps(original)
+        def setup_async_generation(*args, **kwargs):
+            datastream = kwargs.get("datastream", args[0] if args else None)
+            term = kwargs.get("success_term", args[2] if len(args) > 2 else None)
+            if datastream is not None and term is not None:
+                initialize_success_term(term, datastream.get_env())
+                print(f"[tmg] success term ready: {type(term.func).__name__}", flush=True)
+            return original(*args, **kwargs)
+
+        namespace["setup_async_generation"] = setup_async_generation
 
     if spec["method"].get("mixing", {}).get("enabled") or spec["method"].get("tracking", {}).get("enabled"):
         raise NotImplementedError("the AutoData adapter supports method=none only (mixing and tracking are not wired to autodata_core yet)")

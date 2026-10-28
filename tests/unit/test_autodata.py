@@ -78,7 +78,7 @@ async def execute(self, datastream, success_term, env_id=0):
     mod = importlib.import_module("ad_shaped")
     sys.modules.pop("ad_shaped", None)
     g = Graft(mod.generate, expected_hash=None, label="generate")
-    g.insert_after_assign("initial_state", "_tmg.begin(self, env_id, initial_state)")
+    g.insert_after_assign("initial_state", "_tmg.begin(self, env_id, initial_state, success_term)")
     g.insert_before_return("_tmg.end(False)", occurrence=0, expected_returns=2)
     g.insert_before_return("_tmg.end(buffers.success)", occurrence=1, expected_returns=2)
     code = ast.unparse(g.node)
@@ -135,3 +135,33 @@ def test_autodata_task_configs_and_driver_jobs():
         assert cfg["task"]["cameras"] == ["robot_pov_cam_rgb"] and cfg["task"]["image_size"] == [128, 128]
         assert cfg["task"]["policy_overrides"]["diffusion_policy"] == {"crop_shape": None}
     assert json.dumps(OFFICIAL)   # sanity: fixture serializable
+
+
+def test_success_term_helpers_handle_classes_and_functions():
+    from tmg.generation.generators.autodata.runtime import initialize_success_term, reset_success_term
+
+    class Term:
+        def __init__(self, cfg, env):
+            self.cfg, self.env, self.resets = cfg, env, []
+
+        def __call__(self, env, **params):
+            return [True]
+
+        def reset(self, env_ids=None):
+            self.resets.append(list(env_ids))
+
+    class Cfg:
+        func = Term
+        params = {}  # noqa: RUF012  test stub
+
+    cfg = Cfg()
+    initialize_success_term(cfg, env="E")
+    assert isinstance(cfg.func, Term) and cfg.func.env == "E"
+    reset_success_term(cfg, [0])
+    assert cfg.func.resets == [[0]]
+
+    class FnCfg:
+        func = staticmethod(lambda env, **p: [False])
+        params = {}  # noqa: RUF012  test stub
+
+    reset_success_term(FnCfg(), [0])      # plain function: nothing to reset, no error
