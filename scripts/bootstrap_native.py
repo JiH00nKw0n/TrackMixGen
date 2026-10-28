@@ -162,6 +162,9 @@ def install(root, image):
             "torch==2.7.0+cu128", "torchvision==0.22.0+cu128", "torchaudio==2.7.0+cu128")
     pip("--no-deps", "-e", REPO)
     pip("hydra-core>=1.3,<1.4", "omegaconf>=2.3,<2.4", "pyyaml", "scipy", "msgpack", "websockets")
+    if image != "train":
+        # Later editable installs can replace these exact Isaac Sim 5.1 requirements.
+        pip("packaging==23.0", "click==8.1.7", "idna==3.10", "psutil==5.9.8")
     verify_installation(root, image)
     print("INSTALLED", image, flush=True)
 
@@ -174,12 +177,21 @@ def verify_installation(root, image):
     evidence.mkdir(exist_ok=True)
     with (evidence / f"{image}.freeze.txt").open("w") as output:
         run([uv, "pip", "freeze", "--python", python], stdout=output)
-    with (evidence / f"{image}.check.txt").open("w") as output:
-        run([uv, "pip", "check", "--python", python], stdout=output, stderr=subprocess.STDOUT)
+    check = subprocess.run([str(uv), "pip", "check", "--python", str(python)],
+                           check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    (evidence / f"{image}.check.txt").write_text(check.stdout)
+    issues = [line.strip() for line in check.stdout.splitlines() if line.strip().startswith("The package `")]
+    # The pinned Soft Isaac Lab fork explicitly requires Pillow 11.2.1, while Isaac Sim 5.1 requires 11.3.0.
+    # Preserve the original Docker install order's effective version and report the conflict, never hide it.
+    known = ["The package `isaacsim-kernel` requires `pillow==11.3.0`, but `11.2.1` is installed"]
+    original_pillow_conflict = image == "isaaclab-soft" and check.returncode != 0 and issues == known
     expected = ({"torch": "2.8.0+cu128", "torchvision": "0.23.0+cu128", "lerobot": "0.6.1"}
                 if image == "train" else
                 {"isaacsim": "5.1.0", "torch": "2.7.0+cu128", "torchvision": "0.22.0+cu128",
                  "torchaudio": "2.7.0+cu128", "qpsolvers": "4.8.1" if image == "isaaclab-soft" else "4.3.1"})
+    if image != "train":
+        expected.update(packaging="23.0", click="8.1.7", idna="3.10", psutil="5.9.8",
+                        pillow="11.2.1" if image == "isaaclab-soft" else "11.3.0")
     actual = json.loads(subprocess.check_output([
         str(python), "-c", ("import sys,json,importlib.metadata as m; from packaging.version import Version; "
         "expected=json.loads(sys.argv[1]); actual={n:m.version(n) for n in expected}; "
@@ -189,14 +201,23 @@ def verify_installation(root, image):
     actual["expected_packages"] = expected
     actual["passed"] = (actual["passed"]
                         and actual["python"][:2] == ([3, 12] if image == "train" else [3, 11]))
+    actual["pinned_versions_match"] = actual["passed"]
+    actual["dependency_check_passed"] = check.returncode == 0
+    actual["known_upstream_conflicts"] = issues if original_pillow_conflict else []
+    actual["passed"] = actual["pinned_versions_match"] and actual["dependency_check_passed"]
     actual["source_commits"] = {}
     for source in (root / "src" / image).glob("*/.git"):
         actual["source_commits"][source.parent.name] = subprocess.check_output(
             ["git", "-C", str(source.parent), "rev-parse", "HEAD"], text=True).strip()
     (evidence / f"{image}.versions.json").write_text(json.dumps(actual, indent=2))
-    if not actual["passed"]:
+    if not actual["pinned_versions_match"]:
         raise RuntimeError(f"installed versions differ from the original pins: {actual}")
-    print("VERIFIED", image, flush=True)
+    if check.returncode != 0 and not original_pillow_conflict:
+        raise RuntimeError(f"unexpected dependency conflicts: {check.stdout}")
+    print("VERIFIED PINS", image, flush=True)
+    if original_pillow_conflict:
+        print("WARNING: original Soft Pillow conflict retained; dependency check is NOT clean. "
+              "Simulator and camera behavior still need a runtime check.", flush=True)
 
 
 def main():
