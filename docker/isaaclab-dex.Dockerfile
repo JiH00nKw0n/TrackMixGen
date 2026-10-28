@@ -10,6 +10,7 @@ ENV DEBIAN_FRONTEND=noninteractive PYTHONUNBUFFERED=1 ACCEPT_EULA=Y OMNI_KIT_ACC
 RUN apt-get update && apt-get install -y --no-install-recommends \
       python3.11 python3.11-venv python3.11-dev git curl ca-certificates build-essential cmake ninja-build \
       libgl1 libglu1-mesa libxt6 libxrandr2 libxinerama1 libxcursor1 libxi6 libglib2.0-0 libsm6 libxext6 ffmpeg \
+      libvulkan1 vulkan-tools \
     && rm -rf /var/lib/apt/lists/*
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh && ln -s /root/.local/bin/uv /usr/local/bin/uv
 RUN uv venv --python python3.11 --seed /opt/venv
@@ -25,6 +26,10 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     && uv pip install --python /opt/venv/bin/python h5py 'robomimic @ git+https://github.com/ARISE-Initiative/robomimic.git@v0.4.0' \
     && uv pip install --python /opt/venv/bin/python 'osqp==0.6.7.post3' 'qpsolvers==4.3.1' \
     && uv pip install --python /opt/venv/bin/python --index-url https://download.pytorch.org/whl/cu128 'torch==2.7.0+cu128' 'torchvision==0.22.0+cu128' 'torchaudio==2.7.0+cu128'
+# Kit (pip isaacsim) writes its cache, data and logs under the package folder; the containers run as the host user,
+# so those folders must be writable. Vulkan (libvulkan1) plus the driver libraries that NVIDIA_DRIVER_CAPABILITIES=all
+# mounts give Kit a GPU device inside docker (`--gpus all`).
+RUN K=/opt/venv/lib/python3.11/site-packages/isaacsim/kit && mkdir -p $K/cache $K/data $K/logs && chmod -R a+rwX $K/cache $K/data $K/logs
 WORKDIR /opt/tmg
 COPY pyproject.toml README.md ./
 COPY tmg/ tmg/
@@ -32,7 +37,7 @@ COPY configs/ configs/
 RUN --mount=type=cache,target=/root/.cache/uv uv pip install --python /opt/venv/bin/python --no-deps -e /opt/tmg \
     && uv pip install --python /opt/venv/bin/python 'hydra-core>=1.3,<1.4' 'omegaconf>=2.3,<2.4' pyyaml scipy msgpack websockets
 ENV TMG_DATA_ROOT=/data TMG_IMAGE=tmg/isaaclab-dex TMG_REVISION=$TMG_REVISION TMG_ISAACLAB_SRC=/opt/src/IsaacLab \
-    HF_HUB_DISABLE_TELEMETRY=1
+    HF_HUB_DISABLE_TELEMETRY=1 NVIDIA_DRIVER_CAPABILITIES=all
 LABEL org.opencontainers.image.revision=$TMG_REVISION
 VOLUME ["/data"]
 ENTRYPOINT ["tmg"]
