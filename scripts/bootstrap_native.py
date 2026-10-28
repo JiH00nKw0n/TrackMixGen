@@ -17,6 +17,27 @@ REPO = Path(__file__).resolve().parents[1]
 SOFT_COMMIT = "c9d146ba57358a544167de8ebe946caaac8f6220"
 SOFT_LAB_COMMIT = "25c69e088fa8122ad189b3a566d38ef24fa74d6f"
 DEX_LAB_COMMIT = "3c6e67bb5c7ada942a6d1884ab69338f57596f77"
+SOFT_PILLOW_FILE = "source/isaaclab/setup.py"
+
+
+def soft_pillow_contents(path):
+    """Describe the one authorized compatibility change against the pinned upstream source."""
+    head = subprocess.check_output(["git", "-C", str(path), "rev-parse", "HEAD"], text=True).strip()
+    if head != SOFT_LAB_COMMIT:
+        raise RuntimeError(f"unexpected Soft Isaac Lab revision: {head}")
+    original = subprocess.check_output(
+        ["git", "-C", str(path), "show", f"HEAD:{SOFT_PILLOW_FILE}"], text=True)
+    if original.count("pillow==11.2.1") != 1:
+        raise RuntimeError("expected exactly one upstream Pillow 11.2.1 requirement")
+    return original, original.replace("pillow==11.2.1", "pillow==11.3.0")
+
+
+def align_soft_pillow(path):
+    original, aligned = soft_pillow_contents(path)
+    target = path / SOFT_PILLOW_FILE
+    if target.read_text() not in (original, aligned):
+        raise RuntimeError(f"refusing to replace other edits in {target}")
+    target.write_text(aligned)
 
 
 def run(args, **kwargs):
@@ -36,12 +57,17 @@ def download(url, dest):
     partial.replace(dest)
 
 
-def checkout(url, path, revision):
+def checkout(url, path, revision, *, soft_pillow_patch=False):
     if not path.exists():
         run(["git", "clone", "--filter=blob:none", url, path])
     dirty = subprocess.check_output(["git", "-C", str(path), "status", "--porcelain"], text=True)
     if dirty:
-        raise RuntimeError(f"refusing to replace modified checkout {path}")
+        allowed = False
+        if soft_pillow_patch and revision == SOFT_LAB_COMMIT and dirty == f" M {SOFT_PILLOW_FILE}\n":
+            _, aligned = soft_pillow_contents(path)
+            allowed = (path / SOFT_PILLOW_FILE).read_text() == aligned
+        if not allowed:
+            raise RuntimeError(f"refusing to replace modified checkout {path}")
     run(["git", "-C", path, "checkout", "--detach", revision])
 
 
@@ -142,7 +168,8 @@ def install(root, image):
         src.mkdir(parents=True, exist_ok=True)
         lab = src / "IsaacLab"
         if image == "isaaclab-soft":
-            checkout("https://github.com/masoudmoghani/IsaacLab", lab, SOFT_LAB_COMMIT)
+            checkout("https://github.com/masoudmoghani/IsaacLab", lab, SOFT_LAB_COMMIT, soft_pillow_patch=True)
+            align_soft_pillow(lab)
             checkout("https://github.com/NVlabs/SoftMimicGen", src / "SoftMimicGen", SOFT_COMMIT)
         else:
             checkout("https://github.com/isaac-sim/IsaacLab", lab, DEX_LAB_COMMIT)
@@ -206,18 +233,13 @@ def verify_installation(root, image):
     check = subprocess.run([str(uv), "pip", "check", "--python", str(python)],
                            check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     (evidence / f"{image}.check.txt").write_text(check.stdout)
-    issues = [line.strip() for line in check.stdout.splitlines() if line.strip().startswith("The package `")]
-    # The pinned Soft Isaac Lab fork explicitly requires Pillow 11.2.1, while Isaac Sim 5.1 requires 11.3.0.
-    # Preserve the original Docker install order's effective version and report the conflict, never hide it.
-    known = ["The package `isaacsim-kernel` requires `pillow==11.3.0`, but `11.2.1` is installed"]
-    original_pillow_conflict = image == "isaaclab-soft" and check.returncode != 0 and issues == known
     expected = ({"torch": "2.8.0+cu128", "torchvision": "0.23.0+cu128", "lerobot": "0.6.1"}
                 if image == "train" else
                 {"isaacsim": "5.1.0", "torch": "2.7.0+cu128", "torchvision": "0.22.0+cu128",
                  "torchaudio": "2.7.0+cu128", "qpsolvers": "4.8.1" if image == "isaaclab-soft" else "4.3.1"})
     if image != "train":
         expected.update(packaging="23.0", click="8.1.7", idna="3.10", psutil="5.9.8",
-                        pillow="11.2.1" if image == "isaaclab-soft" else "11.3.0")
+                        pillow="11.3.0")
     actual = json.loads(subprocess.check_output([
         str(python), "-c", ("import sys,json,importlib.metadata as m; from packaging.version import Version; "
         "expected=json.loads(sys.argv[1]); actual={n:m.version(n) for n in expected}; "
@@ -229,21 +251,20 @@ def verify_installation(root, image):
                         and actual["python"][:2] == ([3, 12] if image == "train" else [3, 11]))
     actual["pinned_versions_match"] = actual["passed"]
     actual["dependency_check_passed"] = check.returncode == 0
-    actual["known_upstream_conflicts"] = issues if original_pillow_conflict else []
     actual["passed"] = actual["pinned_versions_match"] and actual["dependency_check_passed"]
     actual["source_commits"] = {}
+    actual["source_changes"] = {}
     for source in (root / "src" / image).glob("*/.git"):
         actual["source_commits"][source.parent.name] = subprocess.check_output(
             ["git", "-C", str(source.parent), "rev-parse", "HEAD"], text=True).strip()
+        actual["source_changes"][source.parent.name] = subprocess.check_output(
+            ["git", "-C", str(source.parent), "diff", "HEAD"], text=True)
     (evidence / f"{image}.versions.json").write_text(json.dumps(actual, indent=2))
     if not actual["pinned_versions_match"]:
         raise RuntimeError(f"installed versions differ from the original pins: {actual}")
-    if check.returncode != 0 and not original_pillow_conflict:
+    if check.returncode != 0:
         raise RuntimeError(f"unexpected dependency conflicts: {check.stdout}")
     print("VERIFIED PINS", image, flush=True)
-    if original_pillow_conflict:
-        print("WARNING: original Soft Pillow conflict retained; dependency check is NOT clean. "
-              "Simulator and camera behavior still need a runtime check.", flush=True)
 
 
 def main():
