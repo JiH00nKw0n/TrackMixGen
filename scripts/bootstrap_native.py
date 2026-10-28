@@ -226,6 +226,7 @@ def install(root, image):
             checkout("https://github.com/isaac-sim/IsaacLab-Arena", src / "IsaacLab-Arena", ARENA_COMMIT)
             pip("qpsolvers==4.8.1", "onnxruntime", "lightwheel-sdk", "vuer[all]", "tenacity", "trimesh", "rtree")
             pip("--no-deps", "-e", src / "IsaacLab-Arena")
+            pip("--no-build-isolation", "-e", str(lab / "source/isaaclab_rl") + "[rsl-rl]", "msgpack-numpy")
         pip("--index-url", "https://download.pytorch.org/whl/cu128",
             "torch==2.7.0+cu128", "torchvision==0.22.0+cu128", "torchaudio==2.7.0+cu128")
     pip("--no-deps", "-e", REPO)

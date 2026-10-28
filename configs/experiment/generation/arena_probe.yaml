@@ -1,0 +1,8 @@
+defaults:
+  - pool_isaac
+  - _self_
+# One successful demonstration per newly connected Arena task, separate from the formal pool.
+name: arena_probe
+attempts: 1
+chunk: 1
+seed_offset: 39000

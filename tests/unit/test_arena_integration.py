@@ -1,5 +1,4 @@
 """Validate that both Arena tasks enter the actual generator and policy workflow."""
-import copy
 from types import SimpleNamespace as NS
 
 import pytest
@@ -45,3 +44,18 @@ def test_same_camera_is_recorded_and_used_for_policy_without_duplicate_images():
     assert cfg.observations.policy.robot_pov_cam_rgb is not term
     assert cfg.recorders.record_pre_step_flat_camera_observations is None
     assert cfg.rerender_on_reset
+
+
+def test_arena_runtime_uses_its_own_lab_and_package_paths(tmp_path, monkeypatch):
+    import importlib.util
+    from pathlib import Path
+    repo=Path(__file__).resolve().parents[2]
+    spec=importlib.util.spec_from_file_location('native_runtime_arena',repo/'scripts/native_runtime.py')
+    mod=importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+    root=tmp_path/'native'; py=root/'envs/isaaclab-arena/bin/python'
+    py.parent.mkdir(parents=True); py.touch()
+    monkeypatch.setenv('TMG_NATIVE_ROOT',str(root))
+    actual,env=mod.runtime_environment('isaaclab-arena',str(tmp_path/'data'))
+    assert actual==py
+    assert env['TMG_ISAACLAB_SRC']==str(root/'src/isaaclab-arena/IsaacLab')
+    assert env['TMG_ARENA_SRC']==str(root/'src/isaaclab-arena/IsaacLab-Arena')

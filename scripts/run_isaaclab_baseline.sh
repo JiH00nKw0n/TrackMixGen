@@ -2,7 +2,7 @@
 # Baseline experiment of the Isaac Lab generators (SoftMimicGen, DexMimicGen) on one GPU machine, end to end:
 # for every task, the official source demonstrations, one generated pool of 1,000 successes with the official
 # generator settings (method none, generation pool_isaac), the fixed evaluation scenes, a 1,000-demonstration image
-# dataset, then three training seeds of the image Diffusion Policy, each validated on the 25 validation scenes at
+# dataset, then three training seeds of each policy in POLICIES, each validated on the 25 validation scenes at
 # every checkpoint, selected, and tested on the 300 test scenes. Ends with a results bundle (scripts/collect_results.py).
 #
 # Two lanes keep the GPU busy: the generation lane runs the tasks one after another (sources, pool, resets, dataset),
@@ -45,6 +45,9 @@ for t in $DEX_TASKS; do
   JOBS="$JOBS dexmimicgen:$image:$t"
 done
 ALL_JOBS=$JOBS
+if [ "$CLUSTER" = pod ] && [[ "$JOBS" == *":isaaclab-arena:"* ]]; then
+  TMG_ARENA_PREFLIGHT=${TMG_ARENA_PREFLIGHT:-1}
+fi
 task_config_exists() { [ -f "$REPO/configs/experiment/generator/$1/task/$2.yaml" ]; }
 dataset_of() { echo "$DATA_ROOT/datasets/$1/$2/$SCENE/$METHOD/$GENERATION/$OBSERVATION/n${SIZE}_seed0.hdf5"; }
 resets_of() { echo "$DATA_ROOT/resets/$1/$2/$SCENE/val25_test300_seed202600.json"; }
@@ -131,6 +134,12 @@ for job in $ALL_JOBS; do
     echo "$gen/$task" >> "$LOG/BLOCKED_TASKS"
   fi
 done
+if [ "${TMG_ARENA_PREFLIGHT:-0}" = 1 ] && [ "${ONLY_GENERATION:-0}" != 1 ]; then
+  log "checking both Arena tasks before formal work (at most two simulation jobs)"
+  python3 "$REPO/scripts/native_runtime.py" python --image isaaclab-arena --data-root "$DATA_ROOT" -- \
+    "$REPO/scripts/arena_preflight.py" > "$LOG/arena_preflight.log" 2>&1 \
+    || { fail "Arena task preflight" "$LOG/arena_preflight.log"; exit 1; }
+fi
 if [ "$SEQUENTIAL_TASKS" = 1 ]; then
   for one_job in $ALL_JOBS; do
     JOBS=$one_job
