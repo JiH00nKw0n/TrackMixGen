@@ -87,3 +87,32 @@ def test_layout_hand_layout_reads_the_action_term():
     hl = layout.hand_layout(env)
     assert hl.indices == {"left": [0, 2], "right": [1, 3]} and hl.arm_dim == 14
     assert IsaacLabLayout(eefs=["robot0"], arm_action_dims={"robot0": (0, 6)}, hand_prefixes=None, hand_term=None, measure_links=None).hand_layout(env) is None
+
+
+def test_chunk_seed_goes_into_datagen_config_not_the_command_line(tmp_path, monkeypatch):
+    """The official generate_dataset.py has no --seed; the entrypoint writes the chunk seed into datagen_config.seed."""
+    import json
+
+    from tmg.generation.generators.isaaclab import entrypoint
+
+    monkeypatch.setenv("TMG_DATA_ROOT", str(tmp_path))
+    cfg = resolved(compose("generate", ["generator=softmimicgen", "task=rope", "scene=ours", "method=none", "generation=pilot20"]))
+    gen = make_generator(cfg)
+    spec = gen.prepare_chunk(plan_chunks(20, 20, 9000)[0], tmp_path / "c")
+    assert "--seed" not in spec.extra["script_args"] and spec.chunk["seed"] == 9001
+    assert spec.extra["script"].startswith("/opt/src/SoftMimicGen/") or "TMG_SOFTMIMICGEN_SRC" in str(spec.extra["script"])
+
+    class Datagen:
+        seed = 1
+
+    class EnvCfg:
+        datagen_config = Datagen()
+
+    calls = []
+    ns = {"setup_env_config": lambda **kw: (EnvCfg(), "success_term")}
+    spec_dict = json.loads(json.dumps(spec.__dict__))
+    spec_dict["extra"]["disable_graft"] = True
+    entrypoint.install(ns, spec_dict)
+    env_cfg, term = ns["setup_env_config"](env_name="x")
+    calls.append(env_cfg.datagen_config.seed)
+    assert calls == [9001] and term == "success_term"
