@@ -213,6 +213,31 @@ Isaac Lab 평가를 만들 때도 성공 판정은 첫 행동 뒤부터 매 걸�
 `robot0_eye_in_hand_image`, `robot0_eef_pos`, `robot0_eef_quat`, `robot0_gripper_qpos`)로 바꿨고, Pick Place의 원본 주소를 위 경로로
 바꿨다.
 
+### 2.1.1 컨테이너에서 Isaac Sim이 GPU를 잡기까지 (2026-10-28, Isaac 서버)
+
+처음 빌드한 Isaac Lab 이미지에서 Isaac Sim은 `vkCreateInstance failed ... ERROR_INCOMPATIBLE_DRIVER`로 GPU 장치를 만들지 못했다.
+공식 Isaac Lab 이미지(`nvcr.io/nvidia/isaac-lab:3.0.0-rc1`)는 같은 호스트에서 GPU를 잡았으므로 호스트 문제는 아니었다. 라이브러리
+적재 추적(`LD_DEBUG=libs vulkaninfo`)으로 두 컨테이너를 비교하니, NVIDIA Vulkan 드라이버(`libGLX_nvidia.so.0`)는 초기화 과정에서
+`libEGL.so.1`, `libEGL_nvidia.so.0`, `libgbm.so.1`, `libdrm.so.2`, `libnvidia-egl-gbm.so.1`을 차례로 열고, 우리 이미지에는 `libegl1`,
+`libgbm1`, `libdrm2` 패키지가 없어서 그 자리에서 조용히 실패했다. 세 패키지를 넣자 `vulkaninfo`가 GPU를 보였다. 함께 확인한 사실은
+다음과 같다.
+
+- `docker run --gpus all`은 드라이버 라이브러리는 넣어 주지만 Vulkan 드라이버 파일 `/etc/vulkan/icd.d/nvidia_icd.json`을 넣지 않았다.
+  `--runtime=nvidia -e NVIDIA_VISIBLE_DEVICES=all -e NVIDIA_DRIVER_CAPABILITIES=all`로 돌리면 들어온다. Makefile의 Isaac Lab 이미지
+  블록이 이 방식으로 돈다.
+- Kit은 자기 Vulkan 로더(`omni.gpu_foundation/bin/deps/libvulkan.so.1`)를 쓰므로 시스템 로더 버전은 원인이 아니었다(새 로더를 빌드해
+  시험해도 같은 오류였다). CUDA 호환 라이브러리(`cuda-compat`)도 원인이 아니었다.
+- pip으로 설치한 Isaac Sim은 패키지 폴더 아래 `kit/cache`, `kit/data`, `kit/logs`에 쓰므로, 호스트 사용자 권한으로 도는 컨테이너에서는
+  그 폴더를 쓰기 가능하게 만들어야 한다(Dockerfile의 `chmod`).
+- 공식 생성 스크립트는 `--seed`를 받지 않는다. 청크 시드는 `env_cfg.datagen_config.seed`에 써 넣고, 스크립트가 그 값으로 random,
+  numpy, torch를 초기화한다.
+- SoftMimicGen의 USD 자산(밧줄, 수건, 젠가, 로봇, 약 220 MB)은 Hugging Face 저장소의 `data/` 폴더에 있고 `source/softmimicgen_assets/data`에
+  있어야 한다. 이미지 빌드 때 내려받아 넣는다.
+- Pillow 버전 충돌. SoftMimicGen의 Isaac Lab 포크(`source/isaaclab/setup.py`)는 `pillow==11.2.1`을 고정하고, Isaac Sim 5.1
+  (`isaacsim-kernel`)은 `Pillow==11.3.0`을 고정한다. 공식 Isaac Lab 3c6e67bb(Dex 이미지)도 11.3.0이므로 포크의 값은 옛 Isaac Lab 배포판의
+  고정값일 뿐이다. 두 이미지 모두 시뮬레이터의 값 11.3.0을 쓰고, Isaac Sim이 함께 고정하는 packaging 23.0, click 8.1.7, idna 3.10,
+  psutil 5.9.8도 마지막 층에서 되돌린다(`pip check`에는 Soft 포크의 pillow 줄 하나만 남는다).
+
 ### 2.2 Isaac Lab 과제의 정책 평가 (`tmg eval`, 2026-10-28)
 
 평가기는 `tmg/evaluation/isaaclab_rollout.py`에 있고 생성기 이미지 안에서 GPU로 돈다. 환경은 Isaac Lab의 공식 평가 스크립트
