@@ -71,7 +71,7 @@ def resolve_crop(params: dict, features: dict) -> dict:
             params["crop_shape"] = None
         else:
             _, h, w = (int(v) for v in shape)
-            params["crop_shape"] = [int(round(h * CROP_RATIO)), int(round(w * CROP_RATIO))]
+            params["crop_shape"] = [round(h * CROP_RATIO), round(w * CROP_RATIO)]
     return params
 
 
