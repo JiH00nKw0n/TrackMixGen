@@ -238,3 +238,12 @@ def test_policy_input_accepts_both_image_layouts():
     assert raw["observation.images.agentview"].shape == (3, 84, 84)
     assert np.array_equal(raw["observation.images.agentview"], hwc.transpose(2, 0, 1))
     assert np.abs(processed["observation.images.agentview"].astype(int) - raw["observation.images.agentview"].astype(int)).max() <= 1
+
+
+def test_crop_shape_auto_follows_the_image_side():
+    from tmg.policy.lerobot_policies import resolve_crop
+
+    assert resolve_crop({"crop_shape": "auto"}, {"image_shape": (3, 84, 84)})["crop_shape"] == [76, 76]
+    assert resolve_crop({"crop_shape": "auto"}, {"image_shape": (3, 128, 128)})["crop_shape"] == [116, 116]
+    assert resolve_crop({"crop_shape": "auto"}, {"image_shape": None})["crop_shape"] is None
+    assert resolve_crop({"crop_shape": [70, 70]}, {"image_shape": (3, 84, 84)})["crop_shape"] == [70, 70]

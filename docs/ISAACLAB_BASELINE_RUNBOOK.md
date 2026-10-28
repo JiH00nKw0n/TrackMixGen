@@ -20,9 +20,10 @@
 
 ## 1. 돌리는 과제와 공식 설정
 
-기본 과제는 네 개다. SoftMimicGen의 Rope(밧줄을 U자로 만들기), Towel(수건 접기), Jenga(블록을 탑에 놓기)와 DexMimicGen의 GR1
-Pick Place(사람형 로봇이 물체를 집어 상자에 넣기)다. DexMimicGen의 Nut Pour와 Exhaust Pipe는 공개된 주석 달린 원본 시연 파일이
-없어서 돌릴 수 없다(9절).
+논문 계획의 다섯 과제는 SoftMimicGen의 Rope(밧줄을 U자로 만들기), Towel(수건 접기)와 DexMimicGen의 GR1 Pick Place(사람형 로봇이
+물체를 집어 상자에 넣기), Microwave Opening(전자레인지 문 열기), Bottle Placement and Door Closing(병을 냉장고에 넣고 문 닫기)이다.
+이 안내서의 실행 스크립트는 지금 앞의 세 과제를 돈다. 뒤의 두 과제는 NVIDIA AutoData(Isaac Lab Arena)의 DexMimicGen 과제라서 별도
+이미지와 연동이 필요하며 준비 중이다(9절). Jenga 과제 설정도 있지만 계획에 없으므로 기본 목록에서 뺐다(`SOFT_TASKS`로 넣을 수 있다).
 
 생성기 설정은 공식 환경 설정 파일의 값을 그대로 쓴다. 우리 코드는 공식 생성 스크립트에 시도 수, 시드, 입출력 파일만 넘기고 나머지는
 건드리지 않는다. 아래 표의 값은 공식 소스에서 읽은 것이다.
@@ -31,10 +32,9 @@ Pick Place(사람형 로봇이 물체를 집어 상자에 넣기)다. DexMimicGe
 |---|---|---|---|---|---|
 | Soft Rope | 3 | 그렇다 | 변형체 정합 비용이 가장 낮은 3개 중 무작위 (registration_cost) | 0.0 | 10, 5 |
 | Soft Towel | 내려받을 때 매니페스트에 기록 | 그렇다 | 같음 | 0.01 | 5, 5 |
-| Soft Jenga | 내려받을 때 매니페스트에 기록 | 아니다 (하위작업마다 고른다) | 잡기는 registration_cost, 놓기는 현재 물체 자세에 가장 가까운 3개 중 무작위 (nearest_neighbor_object) | 0.01 | 5, 5 |
 | Dex GR1 Pick Place | 5 | 그렇다 | nearest_neighbor_object | 0.003 | 오른손 0, 3 / 왼손 0 |
 
-네 과제 모두 공식 설정이 "성공 수 보장"(generation_guarantee)이어서, 생성 설정 `pool_isaac`의 시도 수 1,000은 성공 1,000개가 나올
+세 과제 모두 공식 설정이 "성공 수 보장"(generation_guarantee)이어서, 생성 설정 `pool_isaac`의 시도 수 1,000은 성공 1,000개가 나올
 때까지 돈다는 뜻이다(성공 250개짜리 청크 4개). 실패 시도도 모두 기록되므로 생성 성공률은 기록에서 계산한다.
 
 정책은 영상 Diffusion Policy 하나다(`configs/experiment/policy/diffusion_policy.yaml`, 10만 갱신, 배치 64, 체크포인트 1만 갱신마다).
@@ -202,7 +202,7 @@ make generate GENERATOR=softmimicgen IMAGE=isaaclab-soft TASK=rope SCENE=ours ME
 CLUSTER=ada nohup scripts/run_isaaclab_baseline.sh > /dev/null 2>&1 &
 ```
 
-스크립트는 두 줄기를 동시에 돈다. 생성 줄기는 과제를 Rope, Towel, Jenga, Pick Place 순서로 하나씩 처리하고(원본, 풀, 고정 장면,
+스크립트는 두 줄기를 동시에 돈다. 생성 줄기는 과제를 Rope, Towel, Pick Place 순서로 하나씩 처리하고(원본, 풀, 고정 장면,
 데이터셋), 정책 줄기는 데이터셋이 생긴 과제부터 시드 3개를 차례로 학습하고 평가한다. 그래서 한 과제의 학습이 도는 동안 다음 과제의
 생성이 같은 GPU에서 함께 돈다.
 
@@ -261,7 +261,7 @@ GPU 메모리가 부족하면 `VAL_PARALLEL`(동시에 검증하는 체크포인
 ## 7. 단계별 수동 실행
 
 문제를 좁힐 때는 단계를 따로 돈다. 변수는 `GENERATOR`(softmimicgen 또는 dexmimicgen), `IMAGE`(isaaclab-soft 또는 isaaclab-dex),
-`TASK`(rope, towel, jenga, pick_place)다. 아래는 Rope 예다.
+`TASK`(rope, towel, pick_place, 그리고 계획 밖의 jenga)다. 아래는 Rope 예다.
 
 원본 시연을 내려받는다. 결과는 `<data_root>/sources/softmimicgen/rope/source.hdf5`와 매니페스트(원본 수, md5)다.
 
@@ -328,11 +328,11 @@ Dex Pick Place의 공식 문서 기준 생성 1,000개는 RTX 6000 Ada에서 약
 
 ## 9. 알려진 제한과 문제 해결
 
-- Nut Pour와 Exhaust Pipe. Isaac Lab에 환경은 있지만 주석 달린 원본 시연 파일이 공개되어 있지 않다(Isaac 자산 서버와 문서를 2026-10-28에
-  확인했다). 원본을 직접 녹화하고 주석을 달지 않으면 돌릴 수 없다.
-- Jenga는 공식 설정이 하위작업마다 원본을 따로 고른다(1절 표). 다른 세 과제와 다르지만 공식값이므로 그대로 둔다.
+- Microwave Opening과 Bottle Placement and Door Closing은 NVIDIA AutoData(Isaac Lab Arena)의 DexMimicGen 과제다. 순정 Isaac Lab 기반인
+  지금의 Dex 이미지로는 돌릴 수 없고, AutoData 기반 이미지와 연동을 준비 중이다. 준비되면 이 안내서를 갱신한다.
+- Isaac Lab의 Nut Pour와 Exhaust Pipe는 환경은 있지만 주석 달린 원본 시연 파일이 공개되어 있지 않아 쓰지 않는다.
 - 평가 상한은 Rope, Towel, Jenga 400걸음, Pick Place 600걸음이다(과제 파일의 `horizon`). 공식 평가 스크립트의 기본값 800과 다르다.
-- 원본 시연 수는 Soft Towel과 Jenga는 내려받아야 안다. `<data_root>/sources/softmimicgen/<과제>/source.manifest.json`의 `demos`에 적힌다.
+- 원본 시연 수는 Soft Towel은 내려받아야 안다. `<data_root>/sources/softmimicgen/<과제>/source.manifest.json`의 `demos`에 적힌다.
 - `docker: Error response from daemon: could not select device driver`는 NVIDIA Container Toolkit이 없다는 뜻이다. 설치 뒤 도커를 다시 시작한다.
 - Isaac Sim이 뜨지 않고 EULA를 묻는 로그가 나오면 이미지 환경 변수 `ACCEPT_EULA=Y`가 빠진 것이다. 이미지를 다시 빌드한다.
 - `policy server on port N did not come up`은 포트가 이미 쓰이고 있다는 뜻이다. `scripts/task_policy_pipeline.sh`의 두 번째 인자로 다른 시작 포트를 준다.

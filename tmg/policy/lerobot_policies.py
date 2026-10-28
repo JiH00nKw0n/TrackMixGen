@@ -56,11 +56,30 @@ def policy_params(policy_cfg: dict, observation: str) -> dict:
     return params
 
 
+CROP_RATIO = 76 / 84   # robomimic's random-crop ratio: 76 of 84 pixels (and 116 of 128)
+
+
+def resolve_crop(params: dict, features: dict) -> dict:
+    """Turn ``crop_shape: auto`` into pixels: the robomimic ratio of the dataset's image side (84 -> 76, 128 -> 116).
+
+    A fixed ``[76, 76]`` would crop 128x128 Isaac Lab images to 59% of their side instead of 90% (decision 2026-10-29).
+    """
+    params = dict(params)
+    if params.get("crop_shape") == "auto":
+        shape = features.get("image_shape")
+        if shape is None:
+            params["crop_shape"] = None
+        else:
+            _, h, w = (int(v) for v in shape)
+            params["crop_shape"] = [int(round(h * CROP_RATIO)), int(round(w * CROP_RATIO))]
+    return params
+
+
 def build_config(policy_cfg: dict, features: dict, device: str, observation: str = "image") -> PreTrainedConfig:
     """The LeRobot config object of ``policy_cfg['name']`` with our values and the dataset features."""
     name = str(policy_cfg["name"])
     inputs, outputs = policy_features(features)
-    params = policy_params(policy_cfg, observation)
+    params = resolve_crop(policy_params(policy_cfg, observation), features)
     if name == "bc_rnn":
         from tmg.policy.bc_rnn import BCRNNConfig
 
