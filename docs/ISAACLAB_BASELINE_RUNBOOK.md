@@ -332,6 +332,7 @@ Ada 6000에서는 다를 수 있으므로, 첫 과제가 끝나면 `driver.log`�
 | Rope 검증 25장면 (Isaac Sim 프로세스 1개, 상한 400걸음) | 에피소드 하나 평균 89초(모두 실패해 400걸음을 다 돌았다), 25장면 37분 + 시작 2분 | 성공하는 정책은 일찍 끝나 더 빠르다. 체크포인트 10개를 2개씩 동시에 검증하면 시드당 약 3.5시간 |
 | Pick Place 검증 25장면 (상한 600걸음, 지금 설정은 400) | 에피소드 하나 약 2.9분, 25장면 72분 | 상한 400으로는 약 50분. 체크포인트 10개를 2개씩 검증하면 시드당 약 4시간 |
 | 시험 300장면 | 측정하지 않았다 | 에피소드 89초 기준 3개 분할로 시드당 약 2.5시간 |
+| MINI 모드 시드 하나의 정책 단계 (200갱신 학습 + 검증 6장면 + 시험 6장면 2분할) | Rope 18분, Towel 21분, Pick Place 34분, Microwave 33분 (드라이버 로그 시각) | 3.7절의 동작 확인이 걸리는 시간의 기준이다 |
 
 에피소드 시간의 상당 부분은 정책 서버의 확산 추론(8걸음마다 100단계 잡음 제거)이다. 시간을 줄여야 하면 `VAL_PARALLEL`과
 `TEST_SHARDS`를 GPU 메모리가 허락하는 만큼 늘린다(각각 Isaac Sim 프로세스 하나). GPU 메모리는 Isaac Sim 프로세스당 약 5에서 14 GB,
@@ -347,7 +348,12 @@ Dex Pick Place의 공식 문서 기준 생성 1,000개는 RTX 6000 Ada에서 약
   이미지로 돈다. Arena 자산은 실행 때 Isaac 자산 서버와 Lightwheel 자산 서버(api.lightwheel.net)에서 내려받으므로 그 두 곳에 인터넷이
   닿아야 한다. 혼합과 추종 방법은 이 두 과제에 아직 연결되지 않았다(기준선 `method=none`만 된다).
 - Isaac Lab의 Nut Pour와 Exhaust Pipe는 환경은 있지만 주석 달린 원본 시연 파일이 공개되어 있지 않아 쓰지 않는다.
-- 평가 상한은 Rope 250, Towel 220, Pick Place 400걸음이다(과제 파일의 `horizon`). Rope와 Towel은 공식 설정의 롤아웃 상한이고, Pick Place는 환경 자체의 길이다.
+- 평가 상한은 Rope 250, Towel 220, Pick Place 400, Microwave Opening 250, Bottle Placement and Door Closing 500걸음이다(과제 파일의 `horizon`).
+  Rope와 Towel은 공식 설정의 롤아웃 상한이고, Pick Place와 AutoData 두 과제는 환경 자체의 에피소드 길이다.
+- 검증 결과는 실행 폴더의 `validation.jsonl`에 체크포인트마다 한 줄씩 쌓이고, 이미 줄이 있는 체크포인트는 다시 검증하지 않는다.
+  평가 상한이나 검증 장면 수를 바꾼 뒤 같은 실행 폴더에서 다시 돌리려면 `validation.jsonl`과 `eval/val_h*` 폴더를 지우고 시작한다.
+- 같은 풀 폴더(`pools/<생성기>/<과제>/<장면>/<방법>/<생성 설정>`)에 `make generate`를 두 개 동시에 돌리면 청크 파일을 서로 덮어써 한쪽이 실패한다.
+  7절의 수동 실행과 4절의 드라이버를 같은 데이터 폴더에서 동시에 쓰지 않는다.
 - 원본 시연 수는 Soft Towel은 내려받아야 안다. `<data_root>/sources/softmimicgen/<과제>/source.manifest.json`의 `demos`에 적힌다.
 - `docker: Error response from daemon: could not select device driver`는 NVIDIA Container Toolkit이 없다는 뜻이다. 설치 뒤 도커를 다시 시작한다.
 - Isaac Sim이 뜨지 않고 EULA를 묻는 로그가 나오면 이미지 환경 변수 `ACCEPT_EULA=Y`가 빠진 것이다. 이미지를 다시 빌드한다.
