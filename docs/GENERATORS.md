@@ -276,6 +276,38 @@ Rope를 `tmg/isaaclab-soft` 이미지로 전체 경로를 한 번 돌렸다. 측
 
 Dex Pick Place는 같은 방식의 시범 실행을 이어서 돌린다.
 
+## 2.5 AutoData (isaac-sim/AutoData @ 835f4aab): 논문 계획의 나머지 Dex 두 과제 (2026-10-29)
+
+논문 계획(`method_evaluation.tex`)의 DexMimicGen 과제는 Pick-and-Place, Microwave Opening, Bottle Placement and Door Closing이고,
+뒤의 둘은 NVIDIA AutoData가 Isaac Lab-Arena 위에서 제공하는 GR1 과제다. AutoData는 Isaac Lab Mimic의 생성 알고리즘을 자기
+패키지(`autodata_core`)로 다시 쓴 구현이라 `isaaclab_mimic`에 의존하지 않고, 스택도 다르다(Isaac Sim 6.1, Isaac Lab 3.0 @ 28a386f0,
+Arena @ 481f5ae5, Python 3.12, torch 2.11). 그래서 별도 이미지 `tmg/isaaclab-autodata`(`docker/isaaclab-autodata.Dockerfile`, Arena의
+uv 잠금 파일로 설치)와 별도 어댑터(`tmg/generation/generators/autodata/`)를 둔다. 생성기 이름은 `autodata`, 과제는 `microwave`와
+`bottle_door`다.
+
+| 과제 | Arena 환경 이름 | 원본 시연 | 공식 생성 설정 (`autodata_examples/tasks/*.yaml`) | 에피소드 길이 |
+|---|---|---|---|---|
+| Microwave Opening (오른손으로 전자레인지 문 열기) | `gr1_open_microwave` | Hugging Face `nvidia/Arena-GR1-Manipulation-Task`, 파일 `arena_gr1_manipulation_dataset_annotated.hdf5`, 리비전 `arena_v0.2_lab_v3.0`, 주석 달린 시연 10개 | 하위작업마다 원본 선택(select_src_per_subtask true), nearest_neighbor_object(nn_k 3), 행동 잡음 0.005, 보간 오른팔 5 왼팔 0, 첫 하위작업 종료 오프셋 [10, 20] | 5초 = 250걸음 (50 Hz) |
+| Bottle Placement and Door Closing (병을 냉장고에 넣고 문 닫기) | `put_item_in_fridge_and_close_door` | Hugging Face `nvidia/Arena-GR1-Manipulation-PlaceItemCloseDoor-Task`, 파일 `ranch_bottle_into_fridge/ranch_bottle_into_fridge_annotated.hdf5`, 같은 리비전, 주석 달린 시연 5개(카드에는 10개로 적혀 있다) | 하위작업마다 원본 선택, nearest_neighbor_object(nn_k 3), 행동 잡음 0.003, 보간 오른팔 5 왼팔 0, 종료 오프셋 [0, 0] | 10초 = 500걸음 |
+
+어댑터가 공식과 다르게 하는 것은 세 가지뿐이다. 청크마다 공식 기술 파일의 사본에 `generation_policy.seed`(청크 시드), `num_trials`
+(청크의 수), `guarantee_success: true`(Isaac Lab 과제처럼 수가 성공 수를 뜻하게)를 써 넣는다. 공식 기술 파일의 `guarantee_success`는
+false이고 `num_trials`는 50과 100이다.
+
+실행 방식은 AutoData의 자체 Arena 시험과 같다. `scripts/generate_dataset.py --external_callback
+isaaclab_arena.environments.isaaclab_interop.environment_registration_callback --env_name <환경> --alg dexmimicgen
+--task_descriptor <청크 사본> --embodiment autodata_examples/embodiments/gr1_ik_abs.yaml --enable_cameras`이고, `--` 뒤의 `--seed`는
+Arena에 전달된다. 기록 그라프트는 AutoData의 자리(`initial_state` 대입 뒤, 두 `return GenerationResult` 앞, `seq = WaypointSequence.from_poses`
+뒤, `play_action = datastream.target_eef_pose_to_action` 뒤, `execute`의 마지막 반환값)에 들어가며, 잡음 전 라벨은
+`datastream.target_eef_pose_to_action`을 감싸 얻는다. 혼합과 추종은 AutoData에 아직 연결하지 않았다(`method=none`만 된다).
+
+관측은 Arena GR1 임바디먼트의 `left_eef_pos`, `left_eef_quat`, `right_eef_pos`, `right_eef_quat`, `hand_joint_state`(Isaac Lab Pick Place와
+같은 이름)와 머리 카메라 `robot_pov_cam_rgb`(512×512, 관측 그룹 `camera_obs`)다. 데이터셋 단계와 평가기가 같은 함수로 128×128로
+줄인다(`tmg/data/images.py`). 평가기는 Arena 콜백으로 환경을 등록한 뒤 AutoData처럼 종료 조건을 모두 떼고 성공 판정 항목만 꺼내
+쓰며, Arena의 성공 판정은 클래스(`TaskSuccessTerm`)라 한 번 인스턴스로 만들어 매 걸음 부른다. 행동은 36차원(양손 자세 14 + 손가락 22)이다.
+
+이 절의 내용은 코드와 설정을 기준으로 적었고, Isaac 서버의 시범 실행 결과는 2.6절에 덧붙인다.
+
 ## 3. CP-Gen (kevin-thankyou-lin/cpgen@1e7c1fc4)
 
 CP-Gen은 원본 구간을 다시 재생하지 않는다. 시도마다 주석된 키포인트 제약을 새 물체 자세에 맞춰 다시 풀고(제약 걸음),

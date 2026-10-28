@@ -10,7 +10,7 @@
 
 1. 돌리는 과제와 공식 설정. 네 과제의 생성기 설정값과 원본 시연 수를 적는다.
 2. 요구 사항. 운영체제, 드라이버, 도커, 디스크, 네트워크 조건을 적는다.
-3. 준비. 드라이버 확인, git과 Docker 설치, NVIDIA Container Toolkit 설치, 저장소 받기, 데이터 폴더와 머신 설정, 이미지 세 개 빌드, 동작 확인을 순서대로 적는다.
+3. 준비. 드라이버 확인, git과 Docker 설치, NVIDIA Container Toolkit 설치, 저장소 받기, 데이터 폴더와 머신 설정, 이미지 네 개 빌드, 동작 확인을 순서대로 적는다.
 4. 실행. 전체 실행 명령과 진행 상황을 보는 방법, 중단 뒤 재시작 방법을 적는다.
 5. 결과 파일. 결과 묶음의 폴더 구조와 각 파일이 담는 내용, 수치를 읽는 방법을 적는다.
 6. 난수와 재현성. 어떤 시드가 어디에 쓰이고 무엇이 같게 유지되는지 적는다.
@@ -22,8 +22,8 @@
 
 논문 계획의 다섯 과제는 SoftMimicGen의 Rope(밧줄을 U자로 만들기), Towel(수건 접기)와 DexMimicGen의 GR1 Pick Place(사람형 로봇이
 물체를 집어 상자에 넣기), Microwave Opening(전자레인지 문 열기), Bottle Placement and Door Closing(병을 냉장고에 넣고 문 닫기)이다.
-이 안내서의 실행 스크립트는 지금 앞의 세 과제를 돈다. 뒤의 두 과제는 NVIDIA AutoData(Isaac Lab Arena)의 DexMimicGen 과제라서 별도
-이미지와 연동이 필요하며 준비 중이다(9절). Jenga 과제 설정도 있지만 계획에 없으므로 기본 목록에서 뺐다(`SOFT_TASKS`로 넣을 수 있다).
+실행 스크립트는 다섯 과제를 모두 돈다. 뒤의 두 과제는 NVIDIA AutoData(Isaac Lab-Arena 위의 DexMimicGen)로 돌며 네 번째 이미지
+`isaaclab-autodata`가 필요하다(3.6절). Jenga 과제 설정도 있지만 계획에 없으므로 기본 목록에서 뺐다(`SOFT_TASKS`로 넣을 수 있다).
 
 생성기 설정은 공식 환경 설정 파일의 값을 그대로 쓴다. 우리 코드는 공식 생성 스크립트에 시도 수, 시드, 입출력 파일만 넘기고 나머지는
 건드리지 않는다. 아래 표의 값은 공식 소스에서 읽은 것이다.
@@ -33,9 +33,12 @@
 | Soft Rope | 3 | 그렇다 | 변형체 정합 비용이 가장 낮은 3개 중 무작위 (registration_cost) | 0.0 | 10, 5 |
 | Soft Towel | 내려받을 때 매니페스트에 기록 | 그렇다 | 같음 | 0.01 | 5, 5 |
 | Dex GR1 Pick Place | 5 | 그렇다 | nearest_neighbor_object | 0.003 | 오른손 0, 3 / 왼손 0 |
+| Dex GR1 Microwave Opening (AutoData) | 10 | 아니다 (하위작업마다 고른다) | nearest_neighbor_object | 0.005 | 오른손 5, 5 / 왼손 0 |
+| Dex GR1 Bottle Placement and Door Closing (AutoData) | 5 | 아니다 (하위작업마다 고른다) | nearest_neighbor_object | 0.003 | 오른손 5, 5, 5, 5 / 왼손 0, 0 |
 
-세 과제 모두 공식 설정이 "성공 수 보장"(generation_guarantee)이어서, 생성 설정 `pool_isaac`의 시도 수 1,000은 성공 1,000개가 나올
-때까지 돈다는 뜻이다(성공 250개짜리 청크 4개). 실패 시도도 모두 기록되므로 생성 성공률은 기록에서 계산한다.
+Isaac Lab 세 과제는 공식 설정이 "성공 수 보장"(generation_guarantee)이어서, 생성 설정 `pool_isaac`의 시도 수 1,000은 성공 1,000개가
+나올 때까지 돈다는 뜻이다(성공 250개짜리 청크 4개). AutoData 두 과제의 공식 기술 파일은 성공을 보장하지 않지만, 우리 청크는 같은 뜻이
+되도록 사본에 `guarantee_success: true`를 써 넣는다. 실패 시도도 모두 기록되므로 생성 성공률은 기록에서 계산한다.
 
 정책은 영상 Diffusion Policy 하나다(`configs/experiment/policy/diffusion_policy.yaml`, 10만 갱신, 배치 64, 체크포인트 1만 갱신마다).
 관측은 과제의 카메라 두 대(128×128)와 로봇 상태다. 세 과제 모두 영상을 자르지 않는다(SoftMimicGen 공식 Diffusion Policy 설정과
@@ -161,7 +164,7 @@ sudo mkdir -p /data/tmg_data && sudo chown -R $USER:$USER /data/tmg_data
 make print-data-root CLUSTER=ada
 ```
 
-### 3.6 이미지 세 개 빌드
+### 3.6 이미지 네 개 빌드
 
 저장소 최상위에서 실행하며, 각각 1에서 2시간 걸리고 인터넷이 필요하다. 코드와 설정은 실행 때 컨테이너에 마운트되므로 저장소를
 갱신해도 다시 빌드하지 않는다(의존 패키지가 바뀔 때만 다시 빌드한다).
@@ -178,7 +181,12 @@ make build IMAGE=isaaclab-dex
 make build IMAGE=train
 ```
 
-끝나면 `docker images`에 `tmg/isaaclab-soft`, `tmg/isaaclab-dex`, `tmg/train`이 보여야 한다.
+```bash
+make build IMAGE=isaaclab-autodata
+```
+
+끝나면 `docker images`에 `tmg/isaaclab-soft`, `tmg/isaaclab-dex`, `tmg/isaaclab-autodata`, `tmg/train`이 보여야 한다. 네 번째 이미지는
+Isaac Sim 6.1 기반이라 가장 크고(약 30 GB) 오래 걸린다.
 
 ### 3.7 동작 확인
 
@@ -204,7 +212,7 @@ make generate GENERATOR=softmimicgen IMAGE=isaaclab-soft TASK=rope SCENE=ours ME
 CLUSTER=ada nohup scripts/run_isaaclab_baseline.sh > /dev/null 2>&1 &
 ```
 
-스크립트는 두 줄기를 동시에 돈다. 생성 줄기는 과제를 Rope, Towel, Pick Place 순서로 하나씩 처리하고(원본, 풀, 고정 장면,
+스크립트는 두 줄기를 동시에 돈다. 생성 줄기는 과제를 Rope, Towel, Pick Place, Microwave, Bottle Door 순서로 하나씩 처리하고(원본, 풀, 고정 장면,
 데이터셋), 정책 줄기는 데이터셋이 생긴 과제부터 시드 3개를 차례로 학습하고 평가한다. 그래서 한 과제의 학습이 도는 동안 다음 과제의
 생성이 같은 GPU에서 함께 돈다.
 
@@ -263,7 +271,7 @@ GPU 메모리가 부족하면 `VAL_PARALLEL`(동시에 검증하는 체크포인
 ## 7. 단계별 수동 실행
 
 문제를 좁힐 때는 단계를 따로 돈다. 변수는 `GENERATOR`(softmimicgen 또는 dexmimicgen), `IMAGE`(isaaclab-soft 또는 isaaclab-dex),
-`TASK`(rope, towel, pick_place, 그리고 계획 밖의 jenga)다. 아래는 Rope 예다.
+`TASK`(rope, towel, pick_place, microwave, bottle_door, 그리고 계획 밖의 jenga)다. AutoData 두 과제는 `GENERATOR=autodata IMAGE=isaaclab-autodata`로 돈다. 아래는 Rope 예다.
 
 원본 시연을 내려받는다. 결과는 `<data_root>/sources/softmimicgen/rope/source.hdf5`와 매니페스트(원본 수, md5)다.
 
@@ -330,8 +338,9 @@ Dex Pick Place의 공식 문서 기준 생성 1,000개는 RTX 6000 Ada에서 약
 
 ## 9. 알려진 제한과 문제 해결
 
-- Microwave Opening과 Bottle Placement and Door Closing은 NVIDIA AutoData(Isaac Lab Arena)의 DexMimicGen 과제다. 순정 Isaac Lab 기반인
-  지금의 Dex 이미지로는 돌릴 수 없고, AutoData 기반 이미지와 연동을 준비 중이다. 준비되면 이 안내서를 갱신한다.
+- Microwave Opening과 Bottle Placement and Door Closing은 NVIDIA AutoData(Isaac Lab-Arena)의 DexMimicGen 과제라 `isaaclab-autodata`
+  이미지로 돈다. Arena 자산은 실행 때 Isaac 자산 서버와 Lightwheel 자산 서버(api.lightwheel.net)에서 내려받으므로 그 두 곳에 인터넷이
+  닿아야 한다. 혼합과 추종 방법은 이 두 과제에 아직 연결되지 않았다(기준선 `method=none`만 된다).
 - Isaac Lab의 Nut Pour와 Exhaust Pipe는 환경은 있지만 주석 달린 원본 시연 파일이 공개되어 있지 않아 쓰지 않는다.
 - 평가 상한은 Rope 250, Towel 220, Pick Place 400걸음이다(과제 파일의 `horizon`). Rope와 Towel은 공식 설정의 롤아웃 상한이고, Pick Place는 환경 자체의 길이다.
 - 원본 시연 수는 Soft Towel은 내려받아야 안다. `<data_root>/sources/softmimicgen/<과제>/source.manifest.json`의 `demos`에 적힌다.
