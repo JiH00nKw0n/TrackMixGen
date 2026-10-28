@@ -98,6 +98,17 @@ def tools(root):
 
 def graphics(root):
     """Extract the installed host driver's user-space libraries. Do not run nvidia-installer."""
+    # Kit's renderer loads GLU even in headless mode. Extract Ubuntu libraries into the user directory.
+    packages = root / "downloads/graphics-deb"
+    packages.mkdir(parents=True, exist_ok=True)
+    for package in ("libglu1-mesa", "libopengl0"):
+        archives = list(packages.glob(f"{package}_*.deb"))
+        if not archives:
+            run(["apt-get", "-o", f"Dir::State::lists={root / 'tools/apt/lists'}",
+                 "-o", f"Dir::Cache={root / 'tools/apt/cache'}", "download", package], cwd=packages)
+            archives = list(packages.glob(f"{package}_*.deb"))
+        for archive in archives:
+            run(["dpkg-deb", "-x", archive, root / "tools"])
     versions = set(subprocess.check_output(
         ["nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader"], text=True).split())
     if len(versions) != 1:
@@ -133,7 +144,8 @@ def graphics(root):
     egl = root / "graphics/nvidia_egl.json"
     egl.write_text(json.dumps({"file_format_version": "1.0.0", "ICD": {
         "library_path": str(libs / "libEGL_nvidia.so.0")}}, indent=2))
-    env = {"LD_LIBRARY_PATH": str(libs), "VK_DRIVER_FILES": str(icd), "VK_ICD_FILENAMES": str(icd),
+    env = {"LD_LIBRARY_PATH": f"{libs}:{root / 'tools/usr/lib/x86_64-linux-gnu'}",
+           "VK_DRIVER_FILES": str(icd), "VK_ICD_FILENAMES": str(icd),
            "__EGL_VENDOR_LIBRARY_FILENAMES": str(egl)}
     (root / "graphics/environment.json").write_text(json.dumps(env, indent=2))
     with package.open("rb") as downloaded:
