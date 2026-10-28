@@ -69,7 +69,7 @@ generation_lane() {
     if [ -f "$(dataset_of $gen $task)" ] && [ -f "$(resets_of $gen $task)" ]; then log "[$gen/$task] dataset and resets exist, generation skipped"; continue; fi
     log "[$gen/$task] sources"
     M sources $common > "$LOG/sources_${gen}_$task.log" 2>&1 || { fail "sources $gen/$task" "$LOG/sources_${gen}_$task.log"; continue; }
-    log "[$gen/$task] pool ($GENERATION: 4 chunks of 250 successes)"
+    log "[$gen/$task] pool ($GENERATION; chunk count and size from the generation config)"
     M generate $common SCENE=$SCENE METHOD=$METHOD GENERATION=$GENERATION > "$LOG/pool_${gen}_$task.log" 2>&1 \
       || { fail "pool $gen/$task" "$LOG/pool_${gen}_$task.log"; continue; }
     log "[$gen/$task] pool done: $(grep -h 'pool complete' "$LOG/pool_${gen}_$task.log" | tail -1 | cut -c1-100)"
