@@ -176,6 +176,13 @@ def initial_placement(env) -> dict:
             nodes = _to_numpy(obj.data.nodal_pos_w[0]).astype(float) - origin
             out[name] = {"nodal_mean": [round(float(v), 5) for v in nodes.mean(axis=0)],
                          "nodal_min": [round(float(v), 5) for v in nodes.min(axis=0)], "nodal_max": [round(float(v), 5) for v in nodes.max(axis=0)]}
+        for name, obj in getattr(env.scene, "articulations", {}).items():   # Arena's microwave and refrigerator (doors are joints)
+            if name == "robot":
+                continue
+            pos = _to_numpy(obj.data.root_pos_w[0]).astype(float) - origin
+            quat = _to_numpy(obj.data.root_quat_w[0]).astype(float)
+            out[name] = {"pos": [round(float(v), 5) for v in pos], "quat_wxyz": [round(float(v), 5) for v in quat],
+                         "joint_pos": [round(float(v), 5) for v in _to_numpy(obj.data.joint_pos[0]).astype(float)]}
     except Exception as e:  # noqa: BLE001  the placement is a diagnostic; a missing attribute must not fail the episode
         out["error"] = repr(e)
     return out
