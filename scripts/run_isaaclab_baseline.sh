@@ -16,7 +16,7 @@
 #   ONLY_GENERATION (1: stop after the datasets), BUNDLE_NAME (results folder name under <data root>/reports).
 set -uo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-CLUSTER=${CLUSTER:-ada}; GPU=${GPU:-0}; SOFT_TASKS=${SOFT_TASKS:-"rope towel jenga"}; DEX_TASKS=${DEX_TASKS:-"pick_place"}
+CLUSTER=${CLUSTER:-ada}; GPU=${GPU:-0}; SOFT_TASKS=${SOFT_TASKS-"rope towel jenga"}; DEX_TASKS=${DEX_TASKS-"pick_place"}
 SEEDS=${SEEDS:-"202601 202602 202603"}; POLICY=${POLICY:-diffusion_policy}; SIZE=${SIZE:-1000}
 VAL_PARALLEL=${VAL_PARALLEL:-2}; TEST_SHARDS=${TEST_SHARDS:-3}; SEED_PARALLEL=${SEED_PARALLEL:-1}
 SCENE=ours; METHOD=none; GENERATION=pool_isaac; OBSERVATION=image
@@ -85,12 +85,13 @@ policy_lane() {
 }
 
 log "start: cluster $CLUSTER, GPU $GPU, jobs:$JOBS, seeds: $SEEDS, policy $POLICY"
-rm -f "$LOG/FAILURES"
+if [ -f "$LOG/FAILURES" ]; then mv "$LOG/FAILURES" "$LOG/FAILURES.$(date +%Y%m%d_%H%M%S)"; fi
+if [ -f "$LOG/DONE" ]; then mv "$LOG/DONE" "$LOG/DONE.$(date +%Y%m%d_%H%M%S)"; fi
 generation_lane &
 if [ "${ONLY_GENERATION:-0}" = 1 ]; then wait; else policy_lane & wait; fi
 log "collecting results into $DATA_ROOT/reports/$BUNDLE_NAME"
 python3 "$REPO/scripts/collect_results.py" --data-root "$DATA_ROOT" --out "$DATA_ROOT/reports/$BUNDLE_NAME" --policy $POLICY --seeds $SEEDS \
   $(for job in $JOBS; do IFS=: read -r gen image task <<< "$job"; echo "--job $gen/$task/$SCENE/$METHOD/$GENERATION/$OBSERVATION"; done) \
   --logs "$LOG" > "$LOG/collect.log" 2>&1 && log "bundle: $DATA_ROOT/reports/$BUNDLE_NAME.tar.gz" || fail "collect" "$LOG/collect.log"
-[ -f "$LOG/FAILURES" ] && log "FAILURES: $(tr '\n' ';' < "$LOG/FAILURES")"
+if [ -f "$LOG/FAILURES" ]; then log "FAILURES: $(tr '\n' ';' < "$LOG/FAILURES")"; exit 1; fi
 echo "ISAACLAB_BASELINE_DONE $(date)" > "$LOG/DONE"; log "done"

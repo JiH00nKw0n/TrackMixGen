@@ -16,16 +16,19 @@ SCENE=${SCENE:-ours}; OBSERVATION=${OBSERVATION:-image}; CLUSTER=${CLUSTER:-loca
 PORT=${PORT:-8765}; SHARDS=${SHARDS:-1}; EXTRA=${EXTRA:-}; IMAGE=${IMAGE:-robosuite}
 CKPT=${CKPT:-$(for d in "$RUN"/checkpoints/[0-9]*/; do [ -f "$d/checkpoint.json" ] && echo "${d%/}"; done | sort | tail -1)}
 DATA_ROOT=$(make -s -C "$REPO" print-data-root CLUSTER="$CLUSTER")
-in_container() { echo "${1/#$DATA_ROOT//data}"; }     # host path under the data root -> /data/... inside the containers
+RUNTIME_DATA_ROOT=$(make -s -C "$REPO" print-runtime-data-root CLUSTER="$CLUSTER")
+in_container() { echo "${1/#$DATA_ROOT/$RUNTIME_DATA_ROOT}"; }
 CKPT_C=$(in_container "$CKPT"); RUN_C=$(in_container "$RUN")
 TRAINING_SEED=$(basename "$RUN" | sed -E 's/^seed//')
 PORTS=$(seq "$PORT" $((PORT + SHARDS - 1)))
 
-stop_servers() { for p in $PORTS; do make -s -C "$REPO" serve-stop SERVER_NAME="tmg-serve-$p" CLUSTER="$CLUSTER" >/dev/null 2>&1 || true; done; }
+STARTED_PORTS=""
+stop_servers() { for p in $STARTED_PORTS; do make -s -C "$REPO" serve-stop SERVER_NAME="tmg-serve-$p" CLUSTER="$CLUSTER" >/dev/null 2>&1 || true; done; }
 trap stop_servers EXIT
 echo "[evaluate] $SHARDS server(s) for $CKPT on port(s) $(echo $PORTS | tr '\n' ' ')"
 for p in $PORTS; do
   make -s -C "$REPO" serve-detached CLUSTER="$CLUSTER" CKPT="$CKPT_C" PORT="$p" SERVER_NAME="tmg-serve-$p"
+  STARTED_PORTS="$STARTED_PORTS $p"
 done
 for p in $PORTS; do
   for i in $(seq 1 90); do

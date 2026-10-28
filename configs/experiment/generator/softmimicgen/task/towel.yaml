@@ -4,7 +4,7 @@ env_name: Isaac-Fold-Towel-Franka-IK-Rel-Mimic-v0   # read from the dataset's en
 camera_env: null                        # the official task already records agentview and eye-in-hand images
 camera_module: null
 source: ${paths.sources}/softmimicgen/towel/source.hdf5
-source_file: annotated_dataset_franka_towel.hdf5   # file in generator.source_repo
+source_file: annotated_dataset/annotated_dataset_franka_towel.hdf5   # file in generator.source_repo
 num_sources: null                       # not checked against the file: the manifest written by `tmg sources` records the count
 subtasks: [grasp towel corner, fold towel]
 reference_objects: [object, object]

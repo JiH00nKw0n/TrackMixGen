@@ -15,8 +15,9 @@ OBSERVATION=${OBSERVATION:-low_dim}; POLICY=${POLICY:-bc_rnn}; SEED=${SEED:-1}; 
 VAL_PARALLEL=${VAL_PARALLEL:-5}; TEST_SHARDS=${TEST_SHARDS:-6}; GENERATOR=${GENERATOR:-mimicgen}; IMAGE=${IMAGE:-robosuite}; SIZE=${SIZE:-1000}
 export SINGULARITYENV_CUDA_VISIBLE_DEVICES=$GPU CUDA_VISIBLE_DEVICES=$GPU
 DATA_ROOT=$(make -s -C "$REPO" print-data-root CLUSTER="$CLUSTER")
+RUNTIME_DATA_ROOT=$(make -s -C "$REPO" print-runtime-data-root CLUSTER="$CLUSTER")
 RUN=$DATA_ROOT/runs/$GENERATOR/$TASK/$SCENE/$METHOD/$GENERATION/$OBSERVATION/$POLICY/seed$SEED
-DATASET_C=/data/datasets/$GENERATOR/$TASK/$SCENE/$METHOD/$GENERATION/$OBSERVATION/n${SIZE}_seed0.hdf5
+DATASET_C=$RUNTIME_DATA_ROOT/datasets/$GENERATOR/$TASK/$SCENE/$METHOD/$GENERATION/$OBSERVATION/n${SIZE}_seed0.hdf5
 export GENERATOR IMAGE
 # CP-Gen evaluates in the generation environment rebuilt from its dataset's env_args (robosuite 1.5); the Isaac Lab
 # generators build their environment from the task id and need nothing from the dataset
@@ -50,7 +51,7 @@ for d in "$RUN"/checkpoints/[0-9]*/; do d=${d%/}; [ -f "$d/checkpoint.json" ] &&
 log "select checkpoint"
 make -s -C "$REPO" select-checkpoint $C || { log "SELECT FAILED"; exit 1; }
 SEL=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['checkpoint'])" "$RUN/SELECTED.json")
-SEL_HOST="${SEL/#\/data/$DATA_ROOT}"
+SEL_HOST="${SEL/#$RUNTIME_DATA_ROOT/$DATA_ROOT}"
 # the test shards need TEST_SHARDS consecutive free ports from PORT0+20
 tport=$((PORT0 + 20))
 while :; do ok=1; for p in $(seq "$tport" $((tport + TEST_SHARDS - 1))); do port_busy "$p" && { ok=0; break; }; done; [ "$ok" = 1 ] && break; tport=$((tport + 1)); done
