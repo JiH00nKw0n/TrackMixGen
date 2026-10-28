@@ -7,7 +7,8 @@ measured tracking error, with pre-noise actions kept as labels). The official ge
 edited: at run time the code reads the source of the official functions, checks their hashes and grafts one
 call per anchor into their syntax trees.
 
-Generators: MimicGen (robosuite), SoftMimicGen and DexMimicGen (Isaac Lab), CP-Gen (robosuite with cuRobo).
+Generators: MimicGen (robosuite), SoftMimicGen and DexMimicGen (Isaac Lab), CP-Gen (robosuite with cuRobo). The Isaac Lab
+baseline runs end to end on one GPU machine with `scripts/run_isaaclab_baseline.sh`; `docs/ISAACLAB_BASELINE_RUNBOOK.md` is the hand-off guide.
 Pipeline: source demonstrations, generation pools, source rankings, datasets, policies (BC-RNN, Diffusion
 Policy, π0 through LeRobot 0.6.1), fixed-scene evaluation through a policy server. Every command composes one
 config and writes one output folder with the resolved config and a provenance record.
@@ -77,16 +78,16 @@ tmg generate generator=mimicgen task=square scene=ours method=trackmix generatio
 | Group | Files | Meaning |
 |---|---|---|
 | `paths` | `local` | The data root. `TMG_DATA_ROOT` overrides it. Inside the images it is `/data`. |
-| `cluster` | `local`, `isaac`, `a100` | Container runtime, worker count, data root of one machine. |
+| `cluster` | `local`, `isaac`, `a100`, `ada` | Container runtime, worker count, data root of one machine. `ada` is the single-GPU hand-off machine of the Isaac Lab baseline (`docs/ISAACLAB_BASELINE_RUNBOOK.md`). |
 | `generator` | `mimicgen` | The generator adapter, its pinned commit, and the source hashes of the grafted functions. |
-| `task` | `square`, `coffee`, `threading`, `stack_three`, `hammer_cleanup`, `mug_cleanup`, `three_piece_assembly` | The task of the chosen generator. |
+| `task` | MimicGen: `square`, `coffee`, `threading`, `stack_three`, `hammer_cleanup`, `mug_cleanup`, `three_piece_assembly`; SoftMimicGen: `rope`, `towel`, `jenga`; DexMimicGen: `pick_place`; CP-Gen: `coffee`, `threading`, `three_piece_assembly`, `hammer_cleanup`, `mug_cleanup` | The task of the chosen generator. |
 | `scene` | `official_d1`, `ours` | Object placement. `official_d1` runs the generator's own distribution unchanged and lists its ranges. `ours` keeps each D1 centre, doubles the x and y widths, clips to 0.35 m of the table centre, pulls back where the 2026-10-26 scene check found robot contacts, and redraws until every object is within 0.85 m of the robot base. |
 | `method` | `none`, `trackmix`, `mixup_only`, `tracking_only` | Which hooks are on. `none` runs the official generator unchanged. A generator may override a few values through `method_overrides` in its own file. |
-| `generation` | `pilot20`, `pilot20_images`, `pool`, `pool_lowdim`, `rank3000`, `check200` | The attempt count, the chunk size, the seed offset and the generator protocol (noise, interpolation steps, whether cameras are rendered). `pool` stores images, `pool_lowdim` is the same pool without them. |
+| `generation` | `pilot20`, `pilot20_images`, `pool`, `pool_lowdim`, `pool_lowdim_onesrc`, `pool_isaac`, `rank3000`, `check200`, `official` | The attempt count, the chunk size, the seed offset and the generator protocol (noise, interpolation steps, whether cameras are rendered). `pool` stores images, `pool_lowdim` is the same pool without them. `pool_isaac` is the Isaac Lab pool (1,000 successes in 4 chunks; the protocol block does not apply to those generators, which keep their official settings). |
 | `observation` | `image`, `low_dim` | What the policy sees. `image`: the task's cameras (84x84) and the robot state, the paper setting. `low_dim`: the robot state and the task's object state (`task.object_state`, no images), for method exploration. It selects the dataset variant, the policy's `by_observation` values and the training batch size. |
 | `policy` | `bc_rnn`, `diffusion_policy`, `pi0` | Model values, with one override block per observation (`by_observation`). `pi0` has no low-dim form. |
 | `training` | `default` | Batch size and update budget per policy and observation, epoch length, checkpoint interval, gradient clip, selection rule. |
-| `evaluation` | `default` | Fixed scene counts (validation 25, test 300 per training seed, 3 seeds), their seed, the policy server address. |
+| `evaluation` | `default` | Fixed scene counts (validation 25, test 300 per training seed), the training seeds 202601, 202602, 202603, the scene seed 202600 (robosuite: stored states; Isaac Lab: per-scene reset seeds), the policy server address. |
 
 Every command writes exactly one output folder. For `generate`, `dataset` and `train` they are:
 

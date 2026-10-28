@@ -4,7 +4,7 @@ env_name: Isaac-PickPlace-GR1T2-Abs-Mimic-v0
 camera_env: TMG-PickPlace-GR1T2-Images-Mimic-v0   # the official task has no cameras; registered by camera_module
 camera_module: tmg.generation.simulators.isaaclab_tasks.gr1_pickplace_cameras
 source: ${paths.sources}/dexmimicgen/pick_place/source.hdf5
-source_url: https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Mimic/dataset_annotated_gr1.hdf5   # TODO confirm
+source_url: https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/IsaacLab/Mimic/pick_place_datasets/dataset_annotated_gr1.hdf5   # Isaac Lab docs (teleop_imitation.rst, commit 3c6e67bb)
 num_sources: 5
 subtasks: [right idle until grasp, right place; left grasp and hold]
 reference_objects: [object, object]

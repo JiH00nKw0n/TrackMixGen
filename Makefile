@@ -40,6 +40,12 @@ CONTAINER_TMP ?= $(or $(call cluster_value,container_tmp),$(DATA_ROOT)/tmp/conta
 PREP        = mkdir -p $(DATA_ROOT) $(CONTAINER_TMP) $(PREP_EXTRA)
 GEN_ARGS    = generator=$(GENERATOR) task=$(TASK) scene=$(SCENE) method=$(METHOD) generation=$(GENERATION) cluster=$(CLUSTER) $(OVERRIDES)
 REVISION   := $(shell git -C $(REPO) rev-parse --short HEAD 2>/dev/null || echo unknown)
+# the Isaac Lab images (SoftMimicGen, DexMimicGen) run Isaac Sim: GPU for generation, resets and evaluation
+ifneq (,$(filter isaaclab-%,$(IMAGE)))
+DOCKER_GPU = --gpus all
+SING_NV    = --nv
+DOCKER_VOL_EXTRA = --shm-size 8g
+endif
 # the CP-Gen image needs the GPU (cuRobo motion planning) also for generation and evaluation
 ifeq ($(IMAGE),cpgen)
 DOCKER_GPU = --gpus all
@@ -91,7 +97,7 @@ help:  ## this help
 	@awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' $(firstword $(MAKEFILE_LIST))
 	@echo; grep -E '^[a-zA-Z0-9_-]+:.*## ' $(firstword $(MAKEFILE_LIST)) | sed -E 's/^([a-zA-Z0-9_-]+):.*## /  \1|/' | awk -F '|' '{ printf "%-16s %s\n", $$1, $$2 }'
 
-build:  ## build the docker image IMAGE (robosuite | train)
+build:  ## build the docker image IMAGE (robosuite | cpgen | isaaclab-soft | isaaclab-dex | train)
 	DOCKER_BUILDKIT=1 docker build -f $(REPO)/docker/$(IMAGE).Dockerfile --build-arg TMG_REVISION=$(REVISION) -t tmg/$(IMAGE):$(TAG) $(REPO)
 
 sif:  ## build the singularity image SIF from a docker archive ARCHIVE (made with `docker save tmg/robosuite:latest -o ...`)

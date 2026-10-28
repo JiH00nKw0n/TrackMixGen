@@ -22,6 +22,9 @@ holds the success rate per split with a Wilson 95% interval. The output folder i
 never share a file. With ``append_validation`` the summary of the
 ``val`` split is also appended as one row to the training run's ``validation.jsonl`` (what
 ``tmg select_checkpoint`` reads).
+
+Isaac Lab generators (SoftMimicGen, DexMimicGen) take the same command and write the same files; the episodes are
+played by ``tmg.evaluation.isaaclab_rollout`` (Isaac Sim in the generator's image, scenes fixed by seeds).
 """
 from __future__ import annotations
 
@@ -37,7 +40,7 @@ from tmg.config import dump_yaml, resolved
 from tmg.core.chunks import write_json
 from tmg.core.provenance import write_provenance
 from tmg.evaluation.client import PolicyClient
-from tmg.evaluation.resets import read_resets, resets_path
+from tmg.evaluation.resets import is_isaaclab, read_resets, resets_path
 from tmg.generation.simulators.robosuite import load_scene_chain, register_env_class
 
 EPISODES = "episodes.jsonl"
@@ -85,16 +88,18 @@ def make_env(env_name: str, observation: dict, robot: str, env_meta: dict | None
         use_object_obs=True, control_freq=20)
 
 
-def policy_input(obs: dict, observation: dict) -> dict:
-    """Policy input from a robomimic observation dict (images -> CHW uint8; state keys concatenated).
+def policy_input(obs: dict, observation: dict, *, image_key: str = "{cam}_image") -> dict:
+    """Policy input from an observation dict (images -> CHW uint8; state keys concatenated).
 
-    Images arrive in one of two forms: raw robosuite frames, (H, W, 3) uint8 (``make_env``), or robomimic-processed
-    frames, (3, H, W) float32 in [0, 1] (``make_env_from_meta``: robomimic's ``EnvRobosuite.get_observation`` runs
-    ``ObsUtils.process_obs``, which scales and transposes). Both become the (3, H, W) uint8 the datasets store.
+    Images arrive in one of two forms: raw frames, (H, W, 3) uint8 (robosuite ``make_env``, Isaac Lab observation
+    terms), or robomimic-processed frames, (3, H, W) float32 in [0, 1] (``make_env_from_meta``: robomimic's
+    ``EnvRobosuite.get_observation`` runs ``ObsUtils.process_obs``, which scales and transposes). Both become the
+    (3, H, W) uint8 the datasets store. ``image_key`` is the observation key pattern of a camera: ``{cam}_image`` for
+    the robosuite generators, ``{cam}`` for the Isaac Lab generators (same pattern as the dataset layout).
     """
     out = {}
     for cam in observation.get("cameras") or []:
-        img = np.asarray(obs[f"{cam}_image"])
+        img = np.asarray(obs[image_key.format(cam=cam)])
         if img.dtype != np.uint8:
             img = (np.clip(img, 0, 1) * 255).astype(np.uint8) if img.max() <= 1.0 else img.astype(np.uint8)
         if not (img.ndim == 3 and img.shape[0] == 3 and img.shape[-1] != 3):     # (H, W, 3) -> (3, H, W)
@@ -191,7 +196,8 @@ def summarize(rows: list[dict]) -> dict:
 def evaluate(cfg) -> dict:
     """Run ``tmg eval`` (see the module docstring); returns the summary."""
     plain = resolved(cfg)
-    task, scene = plain["task"], load_scene_chain(plain["scene"], plain["generator"]["name"])
+    task = plain["task"]
+    scene = plain["scene"] if is_isaaclab(plain) else load_scene_chain(plain["scene"], plain["generator"]["name"])
     obs_cfg = plain["observation"]
     ev = plain["evaluation"]
     horizon = int(task["horizon"])
@@ -219,7 +225,19 @@ def evaluate(cfg) -> dict:
                                        f"use another output folder for {checkpoint}")
     todo = [s for s in scenes if s["index"] not in done]
     print(f"[tmg] eval {checkpoint} on {len(scenes)} scenes ({len(todo)} to play) of {task['name']}/{scene['name']}", flush=True)
-    if todo:
+
+    def record(f, row: dict) -> None:
+        f.write(json.dumps(row) + "\n")
+        f.flush()
+        done[row["reset_index"]] = row
+        print(f"[tmg]   reset {row['reset_index']} ({row['split']}): {'success' if row['success'] else 'fail'} in {row['steps']} steps", flush=True)
+
+    if todo and is_isaaclab(plain):
+        from tmg.evaluation.isaaclab_rollout import play_isaaclab
+
+        with open(log, "a") as f:
+            play_isaaclab(plain, todo, checkpoint, horizon, lambda row: record(f, row))
+    elif todo:
         env_name = register_env_class(task, scene)
         env_meta = None
         if plain.get("dataset"):
@@ -243,12 +261,8 @@ def evaluate(cfg) -> dict:
                     seed = episode_seed(int(ev["seed"]), int(plain.get("training_seed", 0)), s["index"])
                     t0 = time.time()
                     r = run_episode(env, policy, s, task, obs_cfg, horizon=horizon, seed=seed)
-                    row = {"reset_index": s["index"], "split": s["split"], **r, "policy_seed": seed, "checkpoint": checkpoint,
-                           "seconds": round(time.time() - t0, 2)}
-                    f.write(json.dumps(row) + "\n")
-                    f.flush()
-                    done[s["index"]] = row
-                    print(f"[tmg]   reset {s['index']} ({s['split']}): {'success' if r['success'] else 'fail'} in {r['steps']} steps", flush=True)
+                    record(f, {"reset_index": s["index"], "split": s["split"], **r, "policy_seed": seed, "checkpoint": checkpoint,
+                               "seconds": round(time.time() - t0, 2)})
         env.env.close()
     rows = [done[s["index"]] for s in scenes]
     summary = {"checkpoint": checkpoint, "task": task["name"], "scene": scene["name"], "split": split, "horizon": horizon, **summarize(rows),

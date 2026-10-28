@@ -7,6 +7,7 @@
 name: default
 val_scenes: 25                    # validation scenes played at every checkpoint
 test_scenes: 300                  # test scenes of the final table (per training seed)
-training_seeds: [1, 2, 3]         # training seeds of one condition in the final table
-seed: 7                           # reset draw seed of the scene file
+training_seeds: [202601, 202602, 202603]   # training seeds of one condition in the final table (decision 2026-10-28: the
+                                           # seeds of every generator and task are 202601, 202602, 202603)
+seed: 202600                      # reset draw seed of the scene file (all generators; the 2026-10 exploration runs used 7)
 server: {host: 127.0.0.1, port: 8765}

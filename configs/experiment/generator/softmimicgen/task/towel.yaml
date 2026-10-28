@@ -1,0 +1,21 @@
+name: towel
+display_name: Franka Fold Towel
+env_name: Isaac-Fold-Towel-Franka-IK-Rel-Mimic-v0   # read from the dataset's env args by the official script
+camera_env: null                        # the official task already records agentview and eye-in-hand images
+camera_module: null
+source: ${paths.sources}/softmimicgen/towel/source.hdf5
+source_file: annotated_dataset_franka_towel.hdf5   # file in generator.source_repo
+num_sources: null                       # not checked against the file: the manifest written by `tmg sources` records the count
+subtasks: [grasp towel corner, fold towel]
+reference_objects: [object, object]
+horizon: 400                        # evaluation step limit (same as rope)
+eval_episode_length_s: 20.0         # the env's own limit is 10 s = 200 steps at 20 Hz; the evaluation must raise episode_length_s to cover the horizon
+cameras: [agentview_image, robot0_eye_in_hand_image]
+image_size: [128, 128]
+robot_state: [robot0_eef_pos, robot0_eef_quat, robot0_gripper_qpos]
+object_state: []                    # low-dim training is not set up for the Isaac Lab tasks yet
+instruction: fold the towel in half
+# Official generation settings (softmimicgen/envs/franka_towel_ik_rel_mimic_env_cfg.py @ c9d146ba), used unchanged:
+# one source per attempt (select_src_per_subtask False), selection registration_cost (nn_k 3), action noise 0.01,
+# interpolation steps 5 and 5, relative actions, failed attempts kept, generation_guarantee (trials count successes).
+success_term: {name: object_folded, first_call: after_first_action}

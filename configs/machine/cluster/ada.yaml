@@ -1,0 +1,12 @@
+# Single-GPU workstation with an RTX PRO 6000 Ada (48 GB) and docker: the hand-off machine of the Isaac Lab baseline
+# (scripts/run_isaaclab_baseline.sh, docs/ISAACLAB_BASELINE_RUNBOOK.md). Edit data_root before the first run.
+name: ada
+runtime: docker
+image: tmg/isaaclab-soft:latest
+sif: null
+data_root: /data/tmg_data       # everything (sources, pools, datasets, runs, logs, reports) lives here; needs about 300 GB
+workers: 2                      # chunk processes at a time; each is one Isaac Sim instance (about 5 to 14 GB of GPU memory)
+max_workers: 2
+threads_per_worker: 4
+min_free_disk_gib: 50
+device: cuda:0                  # the GPU Isaac Sim simulates and renders on (generation and evaluation)

@@ -18,8 +18,9 @@ DATA_ROOT=$(make -s -C "$REPO" print-data-root CLUSTER="$CLUSTER")
 RUN=$DATA_ROOT/runs/$GENERATOR/$TASK/$SCENE/$METHOD/$GENERATION/$OBSERVATION/$POLICY/seed$SEED
 DATASET_C=/data/datasets/$GENERATOR/$TASK/$SCENE/$METHOD/$GENERATION/$OBSERVATION/n${SIZE}_seed0.hdf5
 export GENERATOR IMAGE
-# generators whose environment differs from MimicGen's (CP-Gen) evaluate in the generation environment of their dataset
-[ "$GENERATOR" = mimicgen ] || export EXTRA="dataset=$DATASET_C ${EXTRA:-}"
+# CP-Gen evaluates in the generation environment rebuilt from its dataset's env_args (robosuite 1.5); the Isaac Lab
+# generators build their environment from the task id and need nothing from the dataset
+[ "$GENERATOR" = cpgen ] && export EXTRA="dataset=$DATASET_C ${EXTRA:-}"
 C="GENERATOR=$GENERATOR TASK=$TASK SCENE=$SCENE METHOD=$METHOD GENERATION=$GENERATION OBSERVATION=$OBSERVATION POLICY=$POLICY SEED=$SEED CLUSTER=$CLUSTER OVERRIDES=dataset.size=$SIZE"
 log() { echo "[$TASK $(date +%H:%M:%S)] $*"; }
 validated() { [ -f "$RUN/validation.jsonl" ] && grep -q "/$1\"" "$RUN/validation.jsonl"; }

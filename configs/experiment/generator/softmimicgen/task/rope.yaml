@@ -10,9 +10,9 @@ subtasks: [grasp rope, shape rope]
 reference_objects: [rope, rope]
 horizon: 400                        # evaluation step limit (project decision 2026-10-27)
 eval_episode_length_s: 20.0         # the env's own limit is 10 s = 200 steps at 20 Hz; the evaluation must raise episode_length_s to cover the horizon
-cameras: [agentview, robot0_eye_in_hand]
+cameras: [agentview_image, robot0_eye_in_hand_image]   # observation term names = hdf5 obs keys (2026-10-28 check of a generated file)
 image_size: [128, 128]
-robot_state: [eef_pos, eef_quat, gripper_pos]
+robot_state: [robot0_eef_pos, robot0_eef_quat, robot0_gripper_qpos]   # (3) + (4) + (2); the official env's observation terms
 object_state: []                    # low-dim training is not set up for the Isaac Lab tasks yet
 instruction: pick up the rope and shape it into a U
 # Success term timing (2026-10-27 audit): rope_ends_close_tracked picks the two rope end nodes at its FIRST call of an

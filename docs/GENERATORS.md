@@ -178,6 +178,54 @@ Isaac Lab 평가를 만들 때도 성공 판정은 첫 행동 뒤부터 매 걸�
 소스 해시는 `configs/experiment/generator/{softmimicgen,dexmimicgen}.yaml`의 `graft_hashes`에 있다. 아직 `null`인 항목은
 첫 청크 실행이 설치된 해시를 로그에 찍으니, 그 값을 적어 고정한다. 고정 뒤에는 패키지가 바뀌면 청크가 시작하지 않는다.
 
+### 2.1 공식 생성 설정값과 원본 시연 (2026-10-28 조사)
+
+두 생성기는 우리 어댑터가 공식 스크립트에 시도 수, 시드, 입출력 파일만 넘기므로, 원본 시연 선택 방식과 행동 잡음 같은 생성기
+설정은 공식 환경 설정 파일의 값이 그대로 적용된다. `configs/experiment/generation/*.yaml`의 `protocol` 블록은 MimicGen에만
+적용된다. 아래 값은 공식 소스(SoftMimicGen `source/softmimicgen/softmimicgen/envs/*_mimic_env_cfg.py` @ c9d146ba, Isaac Lab
+`source/isaaclab_mimic/isaaclab_mimic/envs/pinocchio_envs/*_mimic_env_cfg.py` @ 3c6e67bb)에서 읽었다.
+
+| 과제 | 한 시도에 원본 하나 사용 (select_src_per_subtask) | 원본 선택 방식 (selection_strategy, nn_k 3) | 행동 잡음 (action_noise) | 하위작업별 보간 걸음 수 | 실패 시도 기록 (keep_failed) |
+|---|---|---|---|---|---|
+| Soft Rope (밧줄을 U자로) | 그렇다 (false) | 정합 비용이 가장 낮은 3개 중 선택 (registration_cost) | 0.0 | 10, 5 | 기록한다 |
+| Soft Towel (수건 접기) | 그렇다 (false) | 같음 | 0.01 | 5, 5 | 기록한다 |
+| Soft Jenga (블록을 탑에 놓기) | 아니다 (true, 하위작업마다 고른다) | 잡기는 registration_cost, 놓기는 현재 물체 자세에 가장 가까운 3개 중 선택 (nearest_neighbor_object) | 0.01 | 5, 5 | 기록한다 |
+| Dex GR1 Pick Place | 그렇다 (false) | nearest_neighbor_object | 0.003 | 오른손 0, 3 / 왼손 0 | 버린다 |
+| Dex GR1 Nut Pour | 그렇다 (false) | nearest_neighbor_object | 0.003 | 오른손 5, 3, 3 / 왼손 5, 5 | 버린다 |
+| Dex GR1 Exhaust Pipe | 그렇다 (false) | nearest_neighbor_object | 0.003 | 오른손 5, 5 / 왼손 5 | 버린다 |
+
+여섯 과제 모두 `generation_guarantee`가 켜져 있어 `--generation_num_trials`는 성공 수를 뜻한다. 우리 `generation=pool_isaac`
+(성공 250개 청크 4개)도 이 뜻을 그대로 따르고, 기록기는 실패 시도까지 모두 남기므로 생성 성공률은 기록에서 계산한다.
+
+원본 시연 파일의 공개 여부는 다음과 같다. 측정한 사실이다.
+
+- SoftMimicGen은 Hugging Face 저장소 `masoudmoghani/SoftMimicGen`의 `annotated_dataset/` 아래에 Rope, Towel, Jenga, Stack(soft cube),
+  humanoid teddy/towel, surgical threading/tissue, yam bag/towel의 주석 달린 원본 파일을 공개한다. Rope는 원본 3개이고, 나머지 개수는
+  내려받을 때 `tmg sources`가 매니페스트에 적는다.
+- Dex GR1 Pick Place의 주석 달린 원본은 Isaac 자산 서버
+  `Assets/Isaac/5.1/Isaac/IsaacLab/Mimic/pick_place_datasets/dataset_annotated_gr1.hdf5`(원본 5개)에 있다.
+- Dex GR1 Nut Pour와 Exhaust Pipe의 주석 달린 원본 파일은 2026-10-28 기준으로 찾지 못했다. Isaac 자산 서버의 `Mimic/` 아래 전체
+  목록에는 두 과제의 USD 자산 폴더(`nut_pour_task/`, `exhaust_pipe_task/`)만 있고 hdf5가 없으며, Isaac Lab 문서(고정 커밋과 main)도
+  두 과제의 데이터 파일을 안내하지 않는다. 따라서 두 과제는 원본을 직접 녹화하고 주석을 달지 않으면 돌릴 수 없다. 이 저장소에는
+  두 과제의 설정 파일을 두지 않았다.
+
+이 조사로 고친 설정이 둘 있다. Rope 과제 파일의 카메라 이름과 로봇 상태 키를 생성 파일의 실제 관측 키(`agentview_image`,
+`robot0_eye_in_hand_image`, `robot0_eef_pos`, `robot0_eef_quat`, `robot0_gripper_qpos`)로 바꿨고, Pick Place의 원본 주소를 위 경로로
+바꿨다.
+
+### 2.2 Isaac Lab 과제의 정책 평가 (`tmg eval`, 2026-10-28)
+
+평가기는 `tmg/evaluation/isaaclab_rollout.py`에 있고 생성기 이미지 안에서 GPU로 돈다. 환경은 Isaac Lab의 공식 평가 스크립트
+`scripts/imitation_learning/robomimic/play.py`와 같은 방식으로 만든다. 과제 번호(`task.camera_env`가 있으면 그것, 없으면
+`task.env_name`)로 환경 설정을 읽고, 관측 항목을 사전 형태로 두고, 시간 초과 종료와 기록기를 떼고, 성공 판정 항목을 설정에서 꺼내
+직접 부른다. 성공 판정은 매 걸음 `env.step` 뒤에만 부르고 리셋 직후에는 부르지 않는다(Rope 규칙, 2절).
+
+고정 장면은 저장된 상태가 아니라 시드다. `tmg resets`는 `<paths.resets>/<생성기>/<과제>/<장면>/val25_test300_seed202600.json`에
+장면 번호마다 `seed = SeedSequence([evaluation.seed, index])`를 적고, 롤아웃은 `env.reset()` 직전에 그 값으로 `env.seed`, 토치, 넘파이,
+`random`을 모두 초기화한다. 그래서 같은 `evaluation.seed`(202600)이면 어느 실행, 어느 정책, 어느 조건에서도 장면 번호 i의 배치는
+같다. 물리 결과까지 장치에 무관하게 같다고는 보장하지 않는다. 에피소드 기록(`episodes.jsonl`)에는 성공 여부, 걸음 수, 장면 시드,
+정책 시드와 함께 리셋 직후의 물체 자세(강체는 위치와 사원수, 변형체는 마디 평균 위치)를 남겨 뒤에 장면별 분석에 쓴다.
+
 ## 3. CP-Gen (kevin-thankyou-lin/cpgen@1e7c1fc4)
 
 CP-Gen은 원본 구간을 다시 재생하지 않는다. 시도마다 주석된 키포인트 제약을 새 물체 자세에 맞춰 다시 풀고(제약 걸음),
