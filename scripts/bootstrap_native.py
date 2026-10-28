@@ -57,7 +57,14 @@ def tools(root):
     if not shutil.which("make") and not (root / "tools/usr/bin/make").exists():
         folder = root / "downloads/deb"
         folder.mkdir(parents=True, exist_ok=True)
-        run(["apt-get", "download", "make"], cwd=folder)
+        lists = root / "tools/apt/lists"
+        cache = root / "tools/apt/cache"
+        (lists / "partial").mkdir(parents=True, exist_ok=True)
+        (cache / "archives/partial").mkdir(parents=True, exist_ok=True)
+        apt = ["apt-get", "-o", f"Dir::State::lists={lists}", "-o", f"Dir::Cache={cache}"]
+        if not any(lists.glob("*Packages*")):
+            run([*apt, "update"])
+        run([*apt, "download", "make"], cwd=folder)
         for deb in folder.glob("make_*.deb"):
             run(["dpkg-deb", "-x", deb, root / "tools"])
     return uv
@@ -158,6 +165,24 @@ def install(root, image):
         run([uv, "pip", "freeze", "--python", python], env=env, stdout=output)
     with (evidence / f"{image}.check.txt").open("w") as output:
         run([uv, "pip", "check", "--python", python], env=env, stdout=output, stderr=subprocess.STDOUT)
+    expected = ({"torch": "2.8.0+cu128", "torchvision": "0.23.0+cu128", "lerobot": "0.6.1"}
+                if image == "train" else
+                {"isaacsim": "5.1.0", "torch": "2.7.0+cu128", "torchvision": "0.22.0+cu128",
+                 "torchaudio": "2.7.0+cu128", "qpsolvers": "4.8.1" if image == "isaaclab-soft" else "4.3.1"})
+    actual = json.loads(subprocess.check_output([
+        str(python), "-c", ("import sys,json,importlib.metadata as m; "
+        "print(json.dumps({'python':list(sys.version_info[:3]),'packages':"
+        "{n:m.version(n) for n in sys.argv[1:]}}))"), *expected], text=True))
+    actual["expected_packages"] = expected
+    actual["passed"] = (actual["packages"] == expected
+                        and actual["python"][:2] == ([3, 12] if image == "train" else [3, 11]))
+    actual["source_commits"] = {}
+    for source in (root / "src" / image).glob("*/.git"):
+        actual["source_commits"][source.parent.name] = subprocess.check_output(
+            ["git", "-C", str(source.parent), "rev-parse", "HEAD"], text=True).strip()
+    (evidence / f"{image}.versions.json").write_text(json.dumps(actual, indent=2))
+    if not actual["passed"]:
+        raise RuntimeError(f"installed versions differ from the original pins: {actual}")
     print("INSTALLED", image, flush=True)
 
 
