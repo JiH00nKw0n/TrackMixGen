@@ -19,6 +19,7 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 CLUSTER=${CLUSTER:-ada}; GPU=${GPU:-0}; SOFT_TASKS=${SOFT_TASKS-"rope towel jenga"}; DEX_TASKS=${DEX_TASKS-"pick_place"}
 SEEDS=${SEEDS:-"202601 202602 202603"}; POLICY=${POLICY:-diffusion_policy}; SIZE=${SIZE:-1000}
 VAL_PARALLEL=${VAL_PARALLEL:-2}; TEST_SHARDS=${TEST_SHARDS:-3}; SEED_PARALLEL=${SEED_PARALLEL:-1}
+SEQUENTIAL_TASKS=${SEQUENTIAL_TASKS:-0}
 SCENE=ours; METHOD=none; GENERATION=pool_isaac; OBSERVATION=image
 DATA_ROOT=$(make -s -C "$REPO" print-data-root CLUSTER="$CLUSTER")
 LOG=$DATA_ROOT/logs/isaaclab_baseline; mkdir -p "$LOG"
@@ -87,8 +88,18 @@ policy_lane() {
 log "start: cluster $CLUSTER, GPU $GPU, jobs:$JOBS, seeds: $SEEDS, policy $POLICY"
 if [ -f "$LOG/FAILURES" ]; then mv "$LOG/FAILURES" "$LOG/FAILURES.$(date +%Y%m%d_%H%M%S)"; fi
 if [ -f "$LOG/DONE" ]; then mv "$LOG/DONE" "$LOG/DONE.$(date +%Y%m%d_%H%M%S)"; fi
-generation_lane &
-if [ "${ONLY_GENERATION:-0}" = 1 ]; then wait; else policy_lane & wait; fi
+if [ "$SEQUENTIAL_TASKS" = 1 ]; then
+  ALL_JOBS=$JOBS
+  for one_job in $ALL_JOBS; do
+    JOBS=$one_job
+    generation_lane
+    if [ "${ONLY_GENERATION:-0}" != 1 ]; then policy_lane; fi
+  done
+  JOBS=$ALL_JOBS
+else
+  generation_lane &
+  if [ "${ONLY_GENERATION:-0}" = 1 ]; then wait; else policy_lane & wait; fi
+fi
 log "collecting results into $DATA_ROOT/reports/$BUNDLE_NAME"
 python3 "$REPO/scripts/collect_results.py" --data-root "$DATA_ROOT" --out "$DATA_ROOT/reports/$BUNDLE_NAME" --policy $POLICY --seeds $SEEDS \
   $(for job in $JOBS; do IFS=: read -r gen image task <<< "$job"; echo "--job $gen/$task/$SCENE/$METHOD/$GENERATION/$OBSERVATION"; done) \
