@@ -167,8 +167,10 @@ def install(root, image):
     pip("--no-deps", "-e", REPO)
     pip("hydra-core>=1.3,<1.4", "omegaconf>=2.3,<2.4", "pyyaml", "scipy", "msgpack", "websockets")
     if image != "train":
-        # Later editable installs can replace these exact Isaac Sim 5.1 requirements.
-        pip("packaging==23.0", "click==8.1.7", "idna==3.10", "psutil==5.9.8")
+        # Resolve unpinned helper packages together with the exact Isaac Sim requirements. Installing the
+        # pins alone leaves recent pytest/IPython/wheel/Hugging Face releases with incompatible requirements.
+        pip("packaging==23.0", "click==8.1.7", "idna==3.10", "psutil==5.9.8",
+            "pytest", "ipython", "wheel", "transformers", "huggingface_hub")
     verify_installation(root, image)
     print("INSTALLED", image, flush=True)
 
