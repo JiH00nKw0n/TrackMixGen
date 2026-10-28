@@ -204,6 +204,15 @@ make generate GENERATOR=softmimicgen IMAGE=isaaclab-soft TASK=rope SCENE=ours ME
 첫 실행은 Isaac Sim이 자산을 내려받고 셰이더를 컴파일하느라 10분 넘게 걸릴 수 있다. 로그는
 `/data/tmg_data/pools/softmimicgen/rope/ours/none/pilot20/logs/`에 있다. 여기까지 되면 4절의 전체 실행으로 넘어간다.
 
+다섯 과제의 전체 경로(원본, 생성, 장면 시드, 데이터셋, 학습, 검증, 선택, 시험, 결과 묶음)를 작은 규모로 끝까지 확인하려면 4절의
+명령에 `MINI=1`을 붙인다. 과제마다 성공 20개짜리 풀, 시연 10개 데이터셋, 200갱신 학습, 검증과 시험 각 6장면으로 같은 코드 경로를
+돌고, 결과 묶음은 `/data/tmg_data/reports/isaaclab_mini_<날짜>.tar.gz`로 나온다. 정책 단계는 시드 하나에 과제마다 18분에서 34분이
+걸렸다(8절). MINI 실행은 풀과 실행 폴더 이름에 `pilot20`이 들어가므로 뒤의 전체 실행(`pool_isaac`)과 파일이 겹치지 않는다.
+
+```bash
+CLUSTER=ada MINI=1 SEEDS="202601" nohup scripts/run_isaaclab_baseline.sh > /data/tmg_data/mini_driver.out 2>&1 &
+```
+
 ## 4. 실행
 
 전체 실험은 명령 하나다. 며칠 걸리므로 `nohup`으로 띄우고 터미널을 닫아도 되게 한다.
@@ -332,7 +341,7 @@ Ada 6000에서는 다를 수 있으므로, 첫 과제가 끝나면 `driver.log`�
 | Rope 검증 25장면 (Isaac Sim 프로세스 1개, 상한 400걸음) | 에피소드 하나 평균 89초(모두 실패해 400걸음을 다 돌았다), 25장면 37분 + 시작 2분 | 성공하는 정책은 일찍 끝나 더 빠르다. 체크포인트 10개를 2개씩 동시에 검증하면 시드당 약 3.5시간 |
 | Pick Place 검증 25장면 (상한 600걸음, 지금 설정은 400) | 에피소드 하나 약 2.9분, 25장면 72분 | 상한 400으로는 약 50분. 체크포인트 10개를 2개씩 검증하면 시드당 약 4시간 |
 | 시험 300장면 | 측정하지 않았다 | 에피소드 89초 기준 3개 분할로 시드당 약 2.5시간 |
-| MINI 모드 시드 하나의 정책 단계 (200갱신 학습 + 검증 6장면 + 시험 6장면 2분할) | Rope 18분, Towel 21분, Pick Place 34분, Microwave 33분 (드라이버 로그 시각) | 3.7절의 동작 확인이 걸리는 시간의 기준이다 |
+| MINI 모드 시드 하나의 정책 단계 (200갱신 학습 + 검증 6장면 + 시험 6장면 2분할) | Rope 18분, Towel 21분, Pick Place 34분, Microwave 33분 (드라이버 로그 시각) | 3.7절의 `MINI=1` 확인 실행이 걸리는 시간의 기준이다 |
 
 에피소드 시간의 상당 부분은 정책 서버의 확산 추론(8걸음마다 100단계 잡음 제거)이다. 시간을 줄여야 하면 `VAL_PARALLEL`과
 `TEST_SHARDS`를 GPU 메모리가 허락하는 만큼 늘린다(각각 Isaac Sim 프로세스 하나). GPU 메모리는 Isaac Sim 프로세스당 약 5에서 14 GB,
