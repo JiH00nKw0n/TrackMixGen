@@ -79,7 +79,7 @@ class Graft:
         self.start_line = inspect.getsourcelines(func)[1]
         self.tree = ast.parse(textwrap.dedent(source))
         self.node = self.tree.body[0]
-        if not isinstance(self.node, ast.FunctionDef):
+        if not isinstance(self.node, (ast.FunctionDef, ast.AsyncFunctionDef)):   # Isaac Lab's generate/execute are async
             raise GraftError(f"{label}: source does not start with a function definition")
         self.node.decorator_list = []
         self.edits: list[str] = []
