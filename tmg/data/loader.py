@@ -49,8 +49,21 @@ class H5Frames:
         if isinstance(indices, (slice, int, np.integer)):
             return np.asarray(ds[indices], dtype=np.uint8)
         # h5py requires increasing, unique indices; edge padding requires duplicates.
+        indices = np.asarray(indices)
+        if indices.ndim != 1:
+            raise TypeError("frame indices must be one-dimensional")
+        indices = np.where(indices < 0, indices + len(self), indices)
+        if np.any(indices < 0) or np.any(indices >= len(self)):
+            raise IndexError("frame index out of range")
         unique, inverse = np.unique(indices, return_inverse=True)
-        return np.asarray(ds[unique], dtype=np.uint8)[inverse]
+        if not len(unique):
+            return np.empty((0, *self.shape[1:]), dtype=np.uint8)
+        # Image-sized HDF5 point selections are slow even for adjacent frames.
+        # Read the same frames as contiguous slices, then restore order and padding.
+        runs = np.split(unique, np.flatnonzero(np.diff(unique) != 1) + 1)
+        frames = np.concatenate([np.asarray(ds[int(run[0]):int(run[-1]) + 1], dtype=np.uint8)
+                                 for run in runs])
+        return frames[inverse]
 
 
 @dataclass
