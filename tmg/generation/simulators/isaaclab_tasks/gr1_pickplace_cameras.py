@@ -8,7 +8,8 @@ Isaac Lab-Arena, task config ``isaaclab_tasks.contrib.pick_place.pickplace_gr1t2
   two 128x128 pinhole cameras are added; their RGB images form an observation group ``camera_obs`` (``front_image``,
   ``side_image``), which Isaac Lab's recorder does not store (it keeps the ``policy`` group only), so the generated hdf5
   stays small and the AutoData runtime captures the frames per step, as it does for Arena's head camera;
-- ``rerender_on_reset`` makes the first frame of an episode valid.
+- ``rerender_on_reset`` makes the first frame of an episode valid;
+- the camera offset quaternion is given as (x, y, z, w), Isaac Lab 3.0's order.
 
 Camera placement follows the 2026-10 reproduction (front camera at (0.15, 1.8, 1.9) m looking at the table centre, side
 camera at (-1.4, 1.5, 1.8) m). Until 2026-10-29 the same cameras lived in the ``policy`` group of an Isaac Lab 2.x
@@ -16,7 +17,8 @@ environment and were recorded by the official recorder.
 """
 from __future__ import annotations
 
-import gymnasium as gym
+import importlib.util
+
 import numpy as np
 from scipy.spatial.transform import Rotation
 
@@ -27,8 +29,12 @@ SIDE = ((-1.4, 1.5, 1.8), (0.15, 0.5, 1.05))
 CAMERA_GROUP = "camera_obs"
 
 
-def look_at_quat_wxyz(eye, target) -> tuple[float, float, float, float]:
-    """Orientation (w, x, y, z) of a ROS-convention camera at ``eye`` looking at ``target``."""
+def look_at_quat_xyzw(eye, target) -> tuple[float, float, float, float]:
+    """Orientation (x, y, z, w) of a ROS-convention camera at ``eye`` looking at ``target``.
+
+    Isaac Lab 3.0's ``CameraCfg.OffsetCfg.rot`` is (x, y, z, w); Isaac Lab 2.x took (w, x, y, z), and passing that order
+    here points the cameras at the dome light (uniform white frames, found 2026-10-29).
+    """
     eye, target = np.asarray(eye, dtype=float), np.asarray(target, dtype=float)
     forward = target - eye
     forward /= np.linalg.norm(forward)
@@ -36,11 +42,12 @@ def look_at_quat_wxyz(eye, target) -> tuple[float, float, float, float]:
     right /= np.linalg.norm(right)
     down = np.cross(forward, right)
     xyzw = Rotation.from_matrix(np.column_stack([right, down, forward])).as_quat()
-    return float(xyzw[3]), float(xyzw[0]), float(xyzw[1]), float(xyzw[2])
+    return float(xyzw[0]), float(xyzw[1]), float(xyzw[2]), float(xyzw[3])
 
 
 def register() -> str:
     """Build the camera-enabled config class and register the gym id; returns the id."""
+    import gymnasium as gym
     import isaaclab.sim as sim_utils
     from isaaclab.envs import mdp
     from isaaclab.managers import ObservationGroupCfg, ObservationTermCfg, SceneEntityCfg
@@ -52,7 +59,7 @@ def register() -> str:
     def camera(name: str, eye, target) -> CameraCfg:
         return CameraCfg(prim_path="{ENV_REGEX_NS}/" + name, update_period=0.0, height=IMAGE_SIZE[0], width=IMAGE_SIZE[1],
                          data_types=["rgb"], spawn=sim_utils.PinholeCameraCfg(focal_length=18.15, clipping_range=(0.1, 3.0)),
-                         offset=CameraCfg.OffsetCfg(pos=eye, rot=look_at_quat_wxyz(eye, target), convention="ros"))
+                         offset=CameraCfg.OffsetCfg(pos=eye, rot=look_at_quat_xyzw(eye, target), convention="ros"))
 
     @configclass
     class ImageSceneCfg(PickPlaceGR1T2SceneCfg):
@@ -89,4 +96,5 @@ def register() -> str:
     return ENV_ID
 
 
-register()
+if importlib.util.find_spec("isaaclab") is not None:      # importing the module registers the environment inside Isaac Sim;
+    register()                                              # elsewhere (unit tests) only the helpers are available
