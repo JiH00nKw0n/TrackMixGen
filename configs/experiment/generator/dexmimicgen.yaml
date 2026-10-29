@@ -18,9 +18,12 @@ script: scripts/generate_dataset.py
 embodiment: autodata_examples/embodiments/gr1_ik_abs.yaml      # GR1 whole-body IK, absolute poses, 36-D action
 kit_args: null
 extra_args: []
-# Source text hashes of the grafted functions (sha256 of inspect.getsource); null = not pinned yet, the first chunk
-# run prints the installed hashes under "hashes". Pin them afterwards so a changed package refuses to run.
-graft_hashes: {generate: null, trajectory: null, execute: null}
+# Source text hashes of the grafted functions (sha256 of inspect.getsource) at AutoData 835f4aab, read from the first chunk
+# log of 2026-10-29 (the chunk prints them under "hashes"); a changed package refuses to run.
+graft_hashes:
+  generate: 8b078b39492e9e3c96275d7ccea7542cce08709a1db85eefbe8801f598866ccd      # DataGenerator.generate
+  trajectory: a76d66dd0d1e548720dc712c50c65b23cecd899d6552d1bd50e5396d31c5d4a2    # DataGenerator.generate_eef_subtask_trajectory
+  execute: ddbc84684bb9259304f17c20657f1d526b4cf30a832c6a191195f7e0443a6829       # MultiWaypoint.execute
 # action: [left pos 3, left quat 4, right pos 3, right quat 4, left hand 11, right hand 11] (gr1_ik_abs.yaml). AutoData's
 # embodiment adapter splits the hands itself (gripper_action_indices), so no hand layout by joint-name prefix is needed.
 eefs: [left, right]
