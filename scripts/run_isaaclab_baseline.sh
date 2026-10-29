@@ -10,7 +10,7 @@
 # pools, datasets, checkpoints, validations and evaluations are kept and skipped on a rerun.
 #
 #   CLUSTER=ada scripts/run_isaaclab_baseline.sh
-# Variables: CLUSTER (ada), GPU (0), SOFT_TASKS ("rope towel"; jenga is configured but not in the paper plan),
+# Variables: CLUSTER (ada), GPU (0: the one GPU of generation, resets, training and evaluation), SOFT_TASKS ("rope towel"; jenga is configured but not in the paper plan),
 #   DEX_TASKS ("pick_place microwave bottle_door": the GR1 tasks, all through NVIDIA AutoData in the image isaaclab-dex), SEEDS ("202601 202602 202603"),
 #   POLICY (diffusion_policy), SIZE (1000), VAL_PARALLEL (2: checkpoints validated at a time, each one Isaac Sim),
 #   TEST_SHARDS (3: parallel shards of the 300 test scenes), SEED_PARALLEL (1: training runs at a time),
@@ -26,6 +26,7 @@
 set -uo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 CLUSTER=${CLUSTER:-ada}; GPU=${GPU:-0}; SOFT_TASKS=${SOFT_TASKS-"rope towel"}; DEX_TASKS=${DEX_TASKS-"pick_place microwave bottle_door"}
+export ISAAC_GPU=$GPU     # the Isaac Lab containers (generation, resets, evaluation) see only this GPU (Makefile DOCKER_GPU)
 SEEDS=${SEEDS:-"202601 202602 202603"}; POLICY=${POLICY:-diffusion_policy}; SIZE=${SIZE:-1000}
 VAL_PARALLEL=${VAL_PARALLEL:-2}; TEST_SHARDS=${TEST_SHARDS:-3}; SEED_PARALLEL=${SEED_PARALLEL:-1}
 SEQUENTIAL_TASKS=${SEQUENTIAL_TASKS:-0}

@@ -45,7 +45,9 @@ REVISION   := $(shell git -C $(REPO) rev-parse --short HEAD 2>/dev/null || echo 
 # Vulkan; the NVIDIA runtime with NVIDIA_DRIVER_CAPABILITIES=all mounts the driver's Vulkan ICD (/etc/vulkan/icd.d/
 # nvidia_icd.json) into the container, which  alone did not on the Isaac server (2026-10-28)
 ifneq (,$(filter isaaclab-%,$(IMAGE)))
-DOCKER_GPU = --runtime=nvidia --gpus all -e NVIDIA_VISIBLE_DEVICES=all -e NVIDIA_DRIVER_CAPABILITIES=all
+# ISAAC_GPU (a GPU index, e.g. exported by scripts/run_isaaclab_baseline.sh from its GPU variable) exposes only that GPU to
+# the container, where it is device 0; empty exposes all GPUs and Isaac Sim takes device 0 of the host
+DOCKER_GPU = --runtime=nvidia --gpus $(if $(ISAAC_GPU),device=$(ISAAC_GPU),all) -e NVIDIA_VISIBLE_DEVICES=$(or $(ISAAC_GPU),all) -e NVIDIA_DRIVER_CAPABILITIES=all
 SING_NV    = --nv
 DOCKER_VOL_EXTRA = --shm-size 8g
 endif
