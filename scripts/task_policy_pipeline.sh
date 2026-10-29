@@ -15,6 +15,21 @@ OBSERVATION=${OBSERVATION:-low_dim}; POLICY=${POLICY:-bc_rnn}; SEED=${SEED:-1}; 
 VAL_PARALLEL=${VAL_PARALLEL:-5}; TEST_SHARDS=${TEST_SHARDS:-6}; GENERATOR=${GENERATOR:-mimicgen}; IMAGE=${IMAGE:-robosuite}; SIZE=${SIZE:-1000}
 export SINGULARITYENV_CUDA_VISIBLE_DEVICES=$GPU CUDA_VISIBLE_DEVICES=$GPU
 DATA_ROOT=$(make -s -C "$REPO" print-data-root CLUSTER="$CLUSTER")
+if [ "$CLUSTER" = pod ]; then
+  capacity_root=${TMG_RESULTS_ROOT:-$DATA_ROOT}/reports/evaluation_capacity
+  while [ -f "$capacity_root/ACTIVE.json" ]; do sleep 10; done
+  if [ -f "$capacity_root/selected.json" ]; then
+    parallel=$(python3 - "$capacity_root/selected.json" <<'PY'
+import json,sys
+r=json.load(open(sys.argv[1]))
+assert r['max_evaluations'] in (2,4,6) and r['verified']
+print(r['max_evaluations']//2)
+PY
+    ) || exit 1
+    VAL_PARALLEL=$parallel; TEST_SHARDS=$parallel
+    export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
+  fi
+fi
 RUNTIME_DATA_ROOT=$(make -s -C "$REPO" print-runtime-data-root CLUSTER="$CLUSTER")
 RUN=$DATA_ROOT/runs/$GENERATOR/$TASK/$SCENE/$METHOD/$GENERATION/$OBSERVATION/$POLICY/seed$SEED
 DATASET_C=$RUNTIME_DATA_ROOT/datasets/$GENERATOR/$TASK/$SCENE/$METHOD/$GENERATION/$OBSERVATION/n${SIZE}_seed0.hdf5
