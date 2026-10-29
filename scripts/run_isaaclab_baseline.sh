@@ -32,7 +32,7 @@ if [ "${MINI:-0}" = 1 ]; then
   EVAL_EXTRA="max_scenes=6 $EVAL_EXTRA"
   BUNDLE_NAME=${BUNDLE_NAME:-isaaclab_mini_$(date +%Y%m%d)}
 fi
-SCENE=ours; METHOD=none; OBSERVATION=image
+SCENE=ours; METHOD=none; OBSERVATION=${OBSERVATION:-image}   # low_dim: the tasks' object_state terms (task configs, 2026-10-29)
 GEN_NAME=${GENERATION##*/}       # pool folders are named after the config's `name`, without the `test/` folder
 DATA_ROOT=$(make -s -C "$REPO" print-data-root CLUSTER="$CLUSTER")
 RESULTS_ROOT=${TMG_RESULTS_ROOT:-$DATA_ROOT}
