@@ -305,7 +305,7 @@ def install_from_spec(spec: dict, namespace: dict | None = None) -> dict:
     layout.arm_action_dims = {k: tuple(v) for k, v in layout.arm_action_dims.items()}
     method = build_method(spec["method"], chunk_seed=int(spec["chunk"]["seed"]))
     runtime = AutoDataRuntime(method, layout, chunk_seed=int(spec["chunk"]["seed"]), records_dir=Path(spec["records_dir"]),
-                              cameras=spec["extra"].get("cameras") or spec["task"].get("cameras") or [],
+                              cameras=spec["extra"]["cameras"] if "cameras" in spec["extra"] else (spec["task"].get("cameras") or []),
                               image_size=spec["extra"].get("image_size") or spec["task"].get("image_size"))
     info = install(runtime, dict(spec["extra"].get("graft_hashes") or {}))
     if method.follower_factory is not None:

@@ -73,7 +73,14 @@ class DexMimicGenGenerator(IsaacLabGenerator):
                                       guarantee=bool(self.protocol.get("guarantee", True)))
         (folder / DESCRIPTOR).write_text(yaml.safe_dump(descriptor, sort_keys=False))
         callback = task.get("external_callback")
-        env_id = str(task.get("camera_env") or task["env_name"])
+        # generation.protocol.camera_names: null = the task's cameras, a list = those cameras ([] = none, the ranking pools).
+        # Without cameras the official environment is used instead of our camera environment (no per-step rendering).
+        names = self.protocol.get("camera_names")
+        cameras = list(task.get("cameras") or []) if names is None else [str(c) for c in names]
+        unknown = [c for c in cameras if c not in list(task.get("cameras") or [])]
+        if unknown:
+            raise ValueError(f"generation.protocol.camera_names {unknown} are not cameras of task {task['name']} ({task.get('cameras')})")
+        env_id = str(task.get("camera_env") or task["env_name"]) if cameras else str(task["env_name"])
         args = []
         if callback:
             args += ["--external_callback", str(callback)]
@@ -96,9 +103,9 @@ class DexMimicGenGenerator(IsaacLabGenerator):
             records_dir=str(folder / RECORDS_DIR), expected_outputs=[str(folder / RECORDS_DIR / ATTEMPTS_JSONL)],
             extra={"package": self.package, "soft": False, "runtime_module": RUNTIME_MODULE,
                    "script": str(root / str(g["script"])), "script_args": args, "layout": self.layout_dict(),
-                   "graft_hashes": dict(g.get("graft_hashes") or {}), "camera_module": task.get("camera_module"),
+                   "graft_hashes": dict(g.get("graft_hashes") or {}), "camera_module": task.get("camera_module") if cameras else None,
                    "register_modules": list(task.get("register_modules") or []), "env_name": env_id,
-                   "cameras": list(task.get("cameras") or []), "image_size": list(task.get("image_size") or [])})
+                   "cameras": cameras, "image_size": list(task.get("image_size") or [])})
         (folder / "chunk_args.json").write_text(json.dumps(args, indent=1))
         return spec
 

@@ -172,8 +172,9 @@ def test_pick_place_runs_on_the_autodata_stack(tmp_path, monkeypatch):
     (src / "autodata_examples" / "tasks" / "gr1_pick_place.yaml").write_text(yaml.safe_dump(official))
     monkeypatch.setenv("TMG_DATA_ROOT", str(tmp_path))
     monkeypatch.setenv("TMG_AUTODATA_SRC", str(src))
-    cfg = resolved(compose("generate", ["generator=dexmimicgen", "task=pick_place", "scene=ours", "method=trackmix", "generation=test/pilot20"]))
+    cfg = resolved(compose("generate", ["generator=dexmimicgen", "task=pick_place", "scene=ours", "method=trackmix", "generation=test/pilot20_images"]))
     assert cfg["generator"]["image"] == "tmg/isaaclab-dex" and cfg["generator"]["package"] == "autodata_core"
+    assert cfg["generation"]["protocol"]["camera_names"] == ["front_image", "side_image"]
     gen = make_generator(cfg)
     spec = gen.prepare_chunk(plan_chunks(20, 20, 9000)[0], tmp_path / "c")
     args = spec.extra["script_args"]
@@ -183,6 +184,17 @@ def test_pick_place_runs_on_the_autodata_stack(tmp_path, monkeypatch):
     assert spec.extra["cameras"] == ["front_image", "side_image"] and spec.extra["layout"]["noise_draw_shapes"] == [3, 4, 3, 4]
     assert spec.extra["layout"]["measure_links"] == {"left": "left_hand_pitch_link", "right": "right_hand_pitch_link"}
     assert spec.method["mixing"]["max_anchor_rotation_deg"] == 40.0 and spec.method["tracking"]["gripper_events"]["columns"] == [0, 1, 2, 3]
+    # the ranking pools want no images: the official environment is used (no per-step rendering), nothing is captured
+    rank = resolved(compose("generate", ["generator=dexmimicgen", "task=pick_place", "scene=ours", "method=none", "generation=rank_human_demos"]))
+    assert rank["generation"]["protocol"]["camera_names"] == []
+    spec = make_generator(rank).prepare_chunk(plan_chunks(3000, 250, 20000)[0], tmp_path / "r")
+    args = spec.extra["script_args"]
+    assert args[args.index("--env_name") + 1] == "Isaac-PickPlace-GR1T2-Abs-Mimic-v0" and spec.extra["env_name"] == "Isaac-PickPlace-GR1T2-Abs-Mimic-v0"
+    assert spec.extra["cameras"] == [] and spec.extra["camera_module"] is None and spec.extra["register_modules"] == ["isaaclab_mimic.envs"]
+    bad = resolved(compose("generate", ["generator=dexmimicgen", "task=pick_place", "scene=ours", "method=none", "generation=test/pilot20",
+                                        "generation.protocol.camera_names=[nope]"]))
+    with pytest.raises(ValueError):
+        make_generator(bad).prepare_chunk(plan_chunks(20, 20, 9000)[0], tmp_path / "b")
     written = yaml.safe_load((tmp_path / "c" / DESCRIPTOR).read_text())
     assert written["generation_policy"]["guarantee_success"] is False and written["generation_policy"]["select_src_per_subtask"] is False
     assert gen.demo_layout()["images_from_records"] is True
