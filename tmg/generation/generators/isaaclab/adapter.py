@@ -58,6 +58,10 @@ class IsaacLabGenerator(SyntheticDataGenerator):
 
         return fetch(self.task, self.generator_cfg)
 
+    def source_path(self) -> Path:
+        from tmg.generation.generators.isaaclab.sources import compatible_source
+        return compatible_source(self.task)
+
     def layout_dict(self) -> dict:
         """The ``IsaacLabLayout`` fields from the generator config (serialized into the chunk spec)."""
         g = self.generator_cfg

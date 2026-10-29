@@ -11,6 +11,9 @@ simulation_device: cpu
 source: ${paths.sources}/dexmimicgen/bottle_placement_door_closing/source.hdf5
 source_url: https://huggingface.co/datasets/nvidia/Arena-GR1-Manipulation-PlaceItemCloseDoor-Task/resolve/ad3e95aab96e1721373d94f03b043c98a859088b/ranch_bottle_into_fridge/ranch_bottle_into_fridge_annotated.hdf5
 num_sources: 5
+# The released annotations use the older name for the same ranch bottle object.
+source_object_aliases:
+  ranch_dressing_bottle: ranch_dressing_hope_robolab
 horizon: 600
 eval_episode_length_s: 30.0
 cameras: [robot_pov_cam_rgb]
