@@ -40,6 +40,8 @@ def usage(records, data):
         except ValueError: pass
     for r in records:
         pids={r['pid']}
+        if r.get('child_pid') and process_identity(r['child_pid'])==r.get('child_start_ticks'):
+            pids.add(r['child_pid'])
         for f in (data/'native_servers').glob('*.json'):
             try:
                 s=json.loads(f.read_text())
@@ -93,7 +95,10 @@ def main():
             active=[]
             for p in leases.glob('*.json'):
                 r=json.loads(p.read_text())
-                if not r.get('released_at') and process_identity(r['pid'])==r['start_ticks']:
+                alive=process_identity(r['pid'])==r['start_ticks']
+                if r.get('child_pid'):
+                    alive=alive or process_identity(r['child_pid'])==r.get('child_start_ticks')
+                if not r.get('released_at') and alive:
                     active.append(r)
             sample=resources();active=usage(active,data)
             if permits(sample,active,request,config['max_evaluations']):
@@ -105,12 +110,16 @@ def main():
             last_report=time.time()
         time.sleep(5)
     env=dict(os.environ,TMG_RESOURCE_OWNER=str(pid),OMP_NUM_THREADS='1',MKL_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1')
+    child=subprocess.Popen(command,env=env)
+    request.update(child_pid=child.pid,child_start_ticks=process_identity(child.pid))
+    write(record,request)
     try:
-        result=subprocess.run(command,env=env)
-        request.update(exit_code=result.returncode)
+        code=child.wait()
+        request.update(exit_code=code)
     finally:
-        request['released_at']=time.time();write(record,request)
-    raise SystemExit(result.returncode)
+        if child.poll() is not None: request['released_at']=time.time()
+        write(record,request)
+    raise SystemExit(code)
 
 
 if __name__=='__main__': main()

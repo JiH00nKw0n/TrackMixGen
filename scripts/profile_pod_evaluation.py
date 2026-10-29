@@ -99,13 +99,24 @@ class Profile:
 
     def train(self):
         checkpoints = {}
+        # A small read-only view is sufficient to prepare inference weights; formal data is untouched.
+        source=self.data/'datasets/softmimicgen/rope/ours/none/pool_isaac/image/n1000_seed0.hdf5'
+        subset=self.root/'probe_20_demos.hdf5'
+        py,env=self.envs['train']
+        subprocess.run([str(py),'-c',
+            'import h5py,sys; src,out=sys.argv[1:]; '
+            'f=h5py.File(src,"r"); g=h5py.File(out,"x"); d=g.create_group("data"); '
+            'd.attrs.update(dict(f["data"].attrs)); '
+            'keys=sorted(f["data"],key=lambda k:int(k.split("_")[1]))[:20]; '
+            '[(d.__setitem__(k,h5py.ExternalLink(src,"/data/"+k))) for k in keys]; '
+            'g.close(); f.close()',str(source),str(subset)],env=env,check=True)
         for policy in POLICIES:
             run = self.root / "probe_training" / policy / "seed202699"
             p = self.launch("train", ["train", "generator=softmimicgen", "task=rope", "scene=ours",
                 "method=none", "generation=pool_isaac", "observation=image", f"policy={policy}",
                 "cluster=pod", "seed=202699", "updates=200", "training.updates_per_epoch=100",
                 "training.checkpoint_every_epochs=2", "training.cache=hdf5", "training.num_threads=2",
-                "training.keep_training_states=last", f"output={run}"], self.root / f"train_{policy}.log")
+                "training.keep_training_states=last", f"dataset.path={subset}", f"output={run}"], self.root / f"train_{policy}.log")
             baseline=resources()
             while p.poll() is None:
                 sample=resources()
