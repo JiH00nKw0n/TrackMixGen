@@ -1,0 +1,9 @@
+# Mixup exploration, "good sources only": every source choice is a uniform draw among the 5 best-ranked sources of
+# the task's ranking (tmg/generation/method/source_select.py); no mixing, no path following.
+defaults:
+  - mx_none
+  - _self_
+name: mx_top5
+sources:
+  top_k: 5
+  ranking: ${generator.name}/${task.name}     # configs/experiment/generator/<gen>/ranking/<task>.yaml (tmg rank_sources)

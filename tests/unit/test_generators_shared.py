@@ -166,7 +166,11 @@ def test_grafted_calls_match_the_runtime_callbacks():
     """Every ``_tmg.xxx(...)`` statement the grafts insert names a runtime method taking exactly those arguments."""
     def generate(self, env, env_interface):                     # the anchor names only; the values do not matter
         new_initial_state = env.get_state()                      # noqa: F841
-        src_subtask_object_pose = 1                              # noqa: F841
+        selected_src_demo_ind = None                             # official: before the subtask loop
+        subtask_ind, need_source_demo_selection = 0, True        # noqa: F841  subtask_ind is read by the grafted call
+        if need_source_demo_selection:
+            selected_src_demo_ind = self.select_source_demo()    # official: the per-subtask selection (occurrence 1)
+        src_subtask_object_pose = selected_src_demo_ind          # noqa: F841
         src_subtask_eef_poses, src_subtask_target_poses, src_subtask_gripper_actions = 1, 2, 3   # noqa: F841
         transformed_seq = 4                                      # noqa: F841
         results = {}

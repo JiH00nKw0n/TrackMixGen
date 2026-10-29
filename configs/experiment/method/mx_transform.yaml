@@ -1,0 +1,17 @@
+# Mixup exploration axis 2 (the transform is large): a primary whose reference-object pose is far from the current
+# one is blended with the compatible source that needs the smallest transform; the source with the smaller
+# transform gets the larger share (TransformMixer, tmg/generation/method/geometric_mix.py).
+defaults:
+  - trackmix
+  - _self_
+name: mx_transform
+mixing:
+  type: transform
+  donors: all                       # all | good (only the high-ranked group may donate)
+  max_anchor_rotation_deg: 90.0     # compatibility bound at the anchors (start, close events, end)
+  rotation_weight: 0.1              # metres per radian in the pose distance
+  trigger_quantile: 0.5             # mix when the primary's transform is above this quantile of all sources'
+  weight_min: 0.2                   # bounds of the primary's share
+  weight_max: 0.8
+tracking: {enabled: false}
+labels: pre_noise

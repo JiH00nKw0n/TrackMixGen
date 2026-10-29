@@ -79,16 +79,18 @@ class PathFollower(Protocol):
 
 @dataclass
 class Method:
-    """The configured method: a mixer (or None), a follower factory (or None) and the action label kind."""
+    """The configured method: a mixer (or None), a follower factory (or None), the action label kind and a source
+    selection rule (or None: the generator's own choice)."""
     name: str
     mixer: SegmentMixer | None
     follower_factory: Any | None                   # callable() -> PathFollower, one per segment
     labels: str = "executed"                       # executed | pre_noise
+    sources: Any | None = None                     # TopKSources (method.sources.top_k) or None
 
     @property
     def is_identity(self) -> bool:
-        """True when the method changes nothing (no mixer, no follower, executed labels)."""
-        return self.mixer is None and self.follower_factory is None and self.labels == "executed"
+        """True when the method changes nothing (no mixer, no follower, executed labels, the generator's sources)."""
+        return self.mixer is None and self.follower_factory is None and self.labels == "executed" and self.sources is None
 
 
 class MixerType(Protocol):
@@ -113,9 +115,10 @@ def _mixer_types() -> dict[str, MixerType]:
     """Mixer implementations by ``method.mixing.type``."""
     if not _MIXERS:
         # imported here, not at the top: guided_mix imports MixContext and MixedSegment from this module
+        from tmg.generation.method.geometric_mix import JunctionMixer, TransformMixer
         from tmg.generation.method.guided_mix import GuidedMixer
 
-        _MIXERS["guided"] = GuidedMixer
+        _MIXERS.update(guided=GuidedMixer, transform=TransformMixer, junction=JunctionMixer)
     return _MIXERS
 
 
@@ -128,6 +131,7 @@ def build_method(cfg: Mapping, *, chunk_seed: int) -> Method:
     """Build the method of a ``method`` config block (plain mapping).
 
     ``mixing.type`` (default ``guided``) and ``tracking.type`` (default ``error_adaptive``) pick the implementation;
+    ``sources.top_k`` restricts the generator's source choice to the best-ranked sources (``TopKSources``);
     a new variant is a class added to ``_mixer_types`` or ``_FOLLOWERS`` plus a method config file naming it.
     """
     name = str(cfg.get("name", "none"))
@@ -150,4 +154,10 @@ def build_method(cfg: Mapping, *, chunk_seed: int) -> Method:
         if kind not in types:
             raise ValueError(f"method.tracking.type {kind!r} unknown; known: {sorted(types)}")
         factory = types[kind].factory(tracking)
-    return Method(name=name, mixer=mixer, follower_factory=factory, labels=labels)
+    sources = None
+    source_cfg = dict(cfg.get("sources") or {})
+    if source_cfg.get("top_k") is not None:
+        from tmg.generation.method.source_select import TopKSources
+
+        sources = TopKSources.from_config(source_cfg, chunk_seed=chunk_seed)
+    return Method(name=name, mixer=mixer, follower_factory=factory, labels=labels, sources=sources)

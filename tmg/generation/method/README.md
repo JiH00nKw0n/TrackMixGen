@@ -7,7 +7,11 @@ simulator, so every class is unit-tested with numpy arrays alone.
 ```
 interfaces.py   MixContext, MixedSegment, SegmentMixer, PathFollower, Method, build_method and the type
                 registries _MIXERS / _FOLLOWERS (MixerType, FollowerType protocols)
-guided_mix.py   GuidedMixer and its GuidedMixConfig: source mixing guided by the measured ranking (mixing.type: guided)
+guided_mix.py   GuidedMixer and its GuidedMixConfig: source mixing guided by the measured ranking (mixing.type: guided);
+                its flow is split into steps (_identity_reason, _donor_pool, _choose, _blend_schedule) that variants override
+geometric_mix.py TransformMixer (mixing.type: transform) and JunctionMixer (mixing.type: junction): donor and weight
+                chosen from the current scene's geometry instead of the ranking (mixup exploration axes 2 and 3)
+source_select.py TopKSources (method.sources.top_k): the generator's source choice restricted to the k best-ranked sources
 event_mix.py    event-aligned blending of two segments (used by GuidedMixer)
 tracking.py     ErrorAdaptiveFollower, EndEffectorPath: error-adaptive following  (tracking.type: error_adaptive)
 grippers.py     gripper state and event rules: gripper_states / change_indices (scalar sign commands),
@@ -165,3 +169,25 @@ in `test_tracking.py` (`test_build_method_picks_implementations_by_type`). The i
 dataset`, `make train`, `make validate`, `make evaluate` with the same `METHOD`. The resolved config of every
 output folder records the exact values used, and the attempt records keep the per-step and per-subtask records
 the classes wrote, so a variant can be analysed from the pool alone before any policy is trained.
+
+## 4. Mixup exploration conditions (`configs/experiment/method/mx_*.yaml`)
+
+Every `mx_*` condition turns path following off and labels the actions before noise, so conditions differ only in
+how sources are chosen and mixed. Mixing replaces the selected source's segment, in its reference-object frame,
+before the generator transforms it to the current scene; because the transform is the same rigid map for both
+segments, this equals transforming each source first and mixing the transformed segments.
+
+| Condition | What changes |
+|---|---|
+| `mx_none` | nothing: the generator as released |
+| `mx_top1`, `mx_top3`, `mx_top5` | every source choice is a uniform draw among the k best-ranked sources (`TopKSources`); the generator's own selection still runs first so its random draws are unchanged |
+| `mx_success_a20`, `_a40`, `_a90`, `_anone` | axis 1, `GuidedMixer`: a low-ranked primary is blended 0.8 : 0.2 with a high-ranked donor whose hand orientation at the anchors is within the bound (180 = no bound) |
+| `mx_transform` | axis 2, `TransformMixer`: when the primary's reference-object pose is far from the current one (above the median of all sources), blend with the compatible source of the smallest transform; primary share `clip(d_b / (d_a + d_b), 0.2, 0.8)` |
+| `mx_junction` | axis 3, `JunctionMixer`: when the primary's transformed start is far from the pose the generator interpolates from, blend the first `head_steps` steps with the source whose transformed start is nearest; the primary's share rises linearly from `clip(c_b / (c_a + c_b), 0.2, 0.8)` to 1 |
+
+The geometric mixers read two poses of the current scene from `MixContext.extra` (`current_object_pose`,
+`junction_pose`); the MimicGen runtime provides them (`MimicGenRuntime.scene_poses`). Adapters that do not provide
+them get the identity with the reason recorded. CP-Gen refuses any mixer for now (it re-solves constraints instead
+of replaying segments; its transform-then-mix variant is not wired yet); the top-K rule works on CP-Gen with
+`selection=ours`, one source per attempt from subtask 0's ranking.
+

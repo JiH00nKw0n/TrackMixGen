@@ -13,7 +13,7 @@ from typing import NamedTuple
 import numpy as np
 
 from tmg.core.poses import invert, transform_all
-from tmg.generation.method.event_mix import anchor_rotation_degrees, blend_poses, mix_segments
+from tmg.generation.method.event_mix import align_segments, anchor_rotation_degrees, blend_poses, mix_segments
 from tmg.generation.method.grippers import SignGripper, build_detector
 from tmg.generation.method.interfaces import MixContext, MixedSegment
 from tmg.generation.method.ranking import SourceRanking, load_ranking
@@ -135,11 +135,15 @@ class GuidedMixer:
             return "weight_a is 1"
         return None
 
-    def _candidates(self, context: MixContext, good: set[int], pa: np.ndarray, sa: np.ndarray) -> list[_Donor]:
-        """The high-success sources (ascending index) whose events match the primary's and whose anchor rotations stay
+    def _donor_pool(self, context: MixContext, primary: int, good: set[int]) -> list[int]:
+        """The sources that may donate, before the compatibility check: the high-success group (ascending index)."""
+        return sorted(good)
+
+    def _candidates(self, context: MixContext, pool, pa: np.ndarray, sa: np.ndarray) -> list[_Donor]:
+        """The sources of ``pool`` (in its order) whose events match the primary's and whose anchor rotations stay
         within ``max_anchor_rotation_deg``; ``pa`` and ``sa`` are the primary's object-frame targets and event series."""
         candidates = []
-        for b in sorted(good):
+        for b in pool:
             eef_b, targets_b, gripper_b = context.src_segments[b]
             inv_b = invert(np.asarray(context.src_object_poses[b], dtype=float))
             pb = transform_all(inv_b, np.asarray(targets_b, dtype=float))
@@ -151,16 +155,19 @@ class GuidedMixer:
             candidates.append(_Donor(b, pb, gb, sb, inv_b @ np.asarray(eef_b, dtype=float), angles))
         return candidates
 
-    def _blend_grippers(self, ga: np.ndarray, gb: np.ndarray, grip: np.ndarray, meta: dict) -> np.ndarray:
+    def _blend_grippers(self, ga: np.ndarray, gb: np.ndarray, grip: np.ndarray, meta: dict, weight_a=None) -> np.ndarray:
         """The mixed gripper commands in the primary's layout: the blended scalar for sign commands, otherwise both
-        sources' joint commands time-warped to the mixed timeline and blended with the pose weights."""
+        sources' joint commands time-warped to the mixed timeline and blended with the pose weights (``weight_a``:
+        one number or one per mixed step; ``self.weight_a`` when None)."""
+        w = self.weight_a if weight_a is None else weight_a
         ga2, gb2 = ga.reshape(len(ga), -1), gb.reshape(len(gb), -1)
         if self._scalar_commands(ga2):
             return grip.reshape(-1) if ga.ndim == 1 else grip.reshape(-1, 1)      # the blended scalar command
         # many-joint hands: both sources' joint commands, time-warped to the mixed timeline (same open/closed phase
         # at every step, checked by mix_segments) and blended with the same weights as the poses
         ia, ib = np.asarray(meta["source_a_index"]), np.asarray(meta["source_b_index"])
-        gripper = self.weight_a * ga2[ia] + (1 - self.weight_a) * gb2[ib]
+        wc = np.asarray(w, dtype=float).reshape(-1, 1) if np.ndim(w) else w
+        gripper = wc * ga2[ia] + (1 - wc) * gb2[ib]
         if ga.ndim == 1:
             gripper = gripper.reshape(-1)
         return gripper
@@ -192,17 +199,40 @@ class GuidedMixer:
         pa = transform_all(inv_a, context.primary_targets)
         ga = np.asarray(context.primary_gripper, dtype=float)
         sa = self._event_series(ga)
-        candidates = self._candidates(context, good, pa, sa)
+        candidates = self._candidates(context, self._donor_pool(context, a, good), pa, sa)
         record["eligible_donors"] = [c.index for c in candidates]
         if not candidates:
             record["identity_reason"] = "no compatible donor"
             return identity
-        rng = np.random.default_rng(np.random.SeedSequence([self.chunk_seed, call, self.seed_offset]))
-        donor = candidates[int(rng.integers(len(candidates)))]
-        mixed_obj, grip, meta = mix_segments(pa, sa, donor.poses, donor.series, self.weight_a)
-        mixed = transform_all(obj_a, mixed_obj)
+        donor, weight = self._choose(context, a, candidates, call, record)
+        if donor is None:
+            return identity                                   # _choose wrote the identity reason
         eef_a_obj = inv_a @ np.asarray(context.primary_eef_start, dtype=float)
-        eef_start = obj_a @ blend_poses(eef_a_obj[None], donor.eef_start[None], self.weight_a)[0]
-        gripper = self._blend_grippers(ga, donor.grippers, grip, meta)
+        if not callable(weight):
+            mixed_obj, grip, meta = mix_segments(pa, sa, donor.poses, donor.series, weight)
+            eef_start = obj_a @ blend_poses(eef_a_obj[None], donor.eef_start[None], weight)[0]
+            gripper = self._blend_grippers(ga, donor.grippers, grip, meta, weight)
+        else:
+            mixed_obj, gripper, meta = self._blend_schedule(pa, sa, ga, donor, weight)
+            eef_start = obj_a @ blend_poses(eef_a_obj[None], donor.eef_start[None], float(meta["weights"][0]))[0]
+        mixed = transform_all(obj_a, mixed_obj)
         record.update(mixed=True, source_b=int(donor.index), anchor_rotation_degrees=donor.angles, alignment=meta)
         return MixedSegment(eef_start, mixed, gripper, record)
+
+    def _choose(self, context: MixContext, primary: int, candidates: list[_Donor], call: int, record: dict):
+        """``(donor, weight_a)`` for a segment that may be mixed, or ``(None, None)`` after writing
+        ``record["identity_reason"]``. ``weight_a`` is one number, or a callable ``n -> (n,) weights`` for a weight
+        that changes along the mixed segment. Here: a uniform draw among the candidates from the private RNG
+        ``SeedSequence([chunk_seed, call, seed_offset])`` and the fixed ``weight_a``."""
+        rng = np.random.default_rng(np.random.SeedSequence([self.chunk_seed, call, self.seed_offset]))
+        return candidates[int(rng.integers(len(candidates)))], self.weight_a
+
+    def _blend_schedule(self, pa: np.ndarray, sa: np.ndarray, ga: np.ndarray, donor: _Donor, schedule):
+        """Blend with a weight that changes along the segment: the timeline is the primary's (events at its own
+        steps) and ``schedule(n)`` gives the primary's share at each of the n steps."""
+        aligned_a, aligned_b, ia, ib, align = align_segments(pa, sa, donor.poses, donor.series, 1.0)
+        w = np.asarray(schedule(len(aligned_a)), dtype=float)
+        mixed = blend_poses(aligned_a, aligned_b, w)
+        grip = w * sa[ia] + (1 - w) * donor.series[ib]
+        meta = dict(weights=[round(float(v), 4) for v in w], **align)
+        return mixed, self._blend_grippers(ga, donor.grippers, grip, meta, w), meta

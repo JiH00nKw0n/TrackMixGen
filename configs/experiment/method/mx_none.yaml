@@ -1,0 +1,6 @@
+# Mixup exploration baseline: the generator as released (no mixing, no path following), with pre-noise action
+# labels like every other mx_* condition so that only the source choice and the mixing differ between conditions.
+name: mx_none
+mixing: {enabled: false}
+tracking: {enabled: false}
+labels: pre_noise

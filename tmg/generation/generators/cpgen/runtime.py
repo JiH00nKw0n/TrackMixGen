@@ -83,18 +83,26 @@ class SourcePicker:
 
     ``all_sources=False`` is the official behaviour: the policy's current sequence is left alone (sequence 0 unless
     CP-Gen's own reset-near-constraint mode picked one). ``all_sources=True`` (selection=ours) draws a sequence index
-    per attempt from the chunk's private stream and restarts that sequence at its first constraint.
+    per attempt from the chunk's private stream and restarts that sequence at its first constraint. With a source
+    rule (``method.sources``, e.g. ``TopKSources``) the index comes from the rule instead (subtask 0's ranking, one
+    source per attempt); the chunk's own draw is still taken, so the two streams stay aligned across conditions.
     """
 
-    def __init__(self, all_sources: bool, chunk_seed: int):
+    def __init__(self, all_sources: bool, chunk_seed: int, rule=None):
         self.all_sources = bool(all_sources)
         self._rng = source_pick_rng(chunk_seed)
+        self.rule = rule
+        if rule is not None and not self.all_sources:
+            raise ValueError("a source rule (method.sources) needs every source loaded: use selection=ours")
 
     def pick(self, policy) -> None:
         """Set the policy's constraint sequence for the attempt that starts now (no-op in the official mode)."""
         sequences = getattr(policy, "constraint_sequences", None)
         if self.all_sources and sequences is not None and len(sequences) > 1:
-            policy.current_constraint_sequence_idx = int(self._rng.integers(len(sequences)))
+            index = int(self._rng.integers(len(sequences)))
+            if self.rule is not None:
+                index = int(self.rule.pick(0))
+            policy.current_constraint_sequence_idx = index
             policy.current_constraint_idx = 0
 
 
@@ -102,8 +110,11 @@ class CPGenRuntime:
     """The ``_tmg`` object the grafted ``generate_demo`` calls (anchors in the module docstring)."""
 
     def __init__(self, method: Method, chunk_seed: int, records_dir: Path | None, all_sources: bool = False):
+        if method.mixer is not None:
+            # CP-Gen solves constraints instead of replaying segments; its transform-then-mix variant is not wired yet
+            raise NotImplementedError(f"method {method.name!r}: source mixing is not implemented for CP-Gen yet")
         self.method = method
-        self.picker = SourcePicker(all_sources, chunk_seed)
+        self.picker = SourcePicker(all_sources, chunk_seed, rule=method.sources)
         self.rec = AttemptRecorder()
         self.rec.configure(records_dir)
         self.records_dir = records_dir

@@ -1,0 +1,9 @@
+# Mixup exploration axis 1 (per-source success is uneven): a low-ranked primary is blended with a compatible
+# high-ranked donor (GuidedMixer), donor hand orientation within 180 degrees of the primary at the anchors (180: no limit).
+defaults:
+  - trackmix
+  - _self_
+name: mx_success_anone
+mixing: {type: guided, max_anchor_rotation_deg: 180.0}
+tracking: {enabled: false}
+labels: pre_noise

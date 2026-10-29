@@ -61,39 +61,51 @@ def sample_poses(poses: np.ndarray, times: np.ndarray) -> np.ndarray:
     return out
 
 
-def blend_poses(a: np.ndarray, b: np.ndarray, weight_a: float) -> np.ndarray:
-    """Linear translation blend and shortest-rotation blend of two aligned pose arrays."""
+def blend_poses(a: np.ndarray, b: np.ndarray, weight_a) -> np.ndarray:
+    """Linear translation blend and shortest-rotation blend of two aligned pose arrays.
+
+    ``weight_a`` is the share of ``a``: one number for the whole array, or one number per pose (shape ``(n,)``)
+    for a blend whose weight changes along the segment.
+    """
     a = np.asarray(a, dtype=float)
     b = np.asarray(b, dtype=float)
     if a.shape != b.shape:
         raise ValueError("aligned pose arrays must have equal shapes")
     out = np.tile(np.eye(4), (len(a), 1, 1))
-    out[:, :3, 3] = weight_a * a[:, :3, 3] + (1 - weight_a) * b[:, :3, 3]
     ra = Rotation.from_matrix(a[:, :3, :3])
     rb = Rotation.from_matrix(b[:, :3, :3])
     delta = ra.inv() * rb
-    out[:, :3, :3] = (ra * Rotation.from_rotvec((1 - weight_a) * delta.as_rotvec())).as_matrix()
+    if np.ndim(weight_a) == 0:
+        out[:, :3, 3] = weight_a * a[:, :3, 3] + (1 - weight_a) * b[:, :3, 3]
+        out[:, :3, :3] = (ra * Rotation.from_rotvec((1 - weight_a) * delta.as_rotvec())).as_matrix()
+        return out
+    w = np.asarray(weight_a, dtype=float).reshape(-1)
+    if len(w) != len(a):
+        raise ValueError(f"{len(w)} weights for {len(a)} poses")
+    out[:, :3, 3] = w[:, None] * a[:, :3, 3] + (1 - w)[:, None] * b[:, :3, 3]
+    out[:, :3, :3] = (ra * Rotation.from_rotvec((1 - w)[:, None] * delta.as_rotvec())).as_matrix()
     return out
 
 
-def mix_segments(poses_a, gripper_a, poses_b, gripper_b, weight_a: float):
-    """Return (mixed poses, mixed gripper commands, alignment metadata).
-
-    Inputs are the target poses of a subtask segment, each expressed in its own frozen reference-object
-    frame, and the per-step gripper commands of shape (N,) or (N, 1).
-    """
-    if not np.isfinite(weight_a) or not 0 <= weight_a <= 1:
-        raise ValueError("weight_a must lie in [0, 1]")
-    if weight_a in (0, 1):
-        p, g = (poses_a, gripper_a) if weight_a == 1 else (poses_b, gripper_b)
-        return np.array(p, dtype=float), np.array(g, dtype=float), {
-            "identity_source": "A" if weight_a == 1 else "B", "weight_a": float(weight_a), "samples": len(p)}
+def _check_commands(gripper_a, gripper_b) -> tuple[np.ndarray, np.ndarray]:
     ga = np.asarray(gripper_a, dtype=float)
     gb = np.asarray(gripper_b, dtype=float)
     if ga.ndim not in (1, 2) or gb.ndim not in (1, 2):
         raise ValueError("gripper commands must have shape (N,) or (N, 1)")
     if (ga.ndim == 2 and ga.shape[1] != 1) or (gb.ndim == 2 and gb.shape[1] != 1):
         raise ValueError("expected one gripper command per control step")
+    return ga, gb
+
+
+def align_segments(poses_a, gripper_a, poses_b, gripper_b, weight_a: float):
+    """Put two segments on one timeline whose gripper events lie at the ``weight_a`` blend of both sources' event
+    steps (``weight_a`` 1 keeps A's timeline, 0 B's). Each interval between events is time-warped separately.
+
+    Returns ``(poses_a_on_timeline, poses_b_on_timeline, index_a, index_b, meta)``: both pose arrays have the mixed
+    length; ``index_a``/``index_b`` are each source's step at every mixed step (for the gripper commands);
+    ``meta`` holds the event steps. Raises ``IncompatibleGripperEvents`` when the event structures differ.
+    """
+    ga, gb = _check_commands(gripper_a, gripper_b)
     pa = _check_poses(poses_a, len(ga))
     pb = _check_poses(poses_b, len(gb))
     matched = _matching_events(ga, gb)
@@ -110,18 +122,38 @@ def mix_segments(poses_a, gripper_a, poses_b, gripper_b, weight_a: float):
     times = np.arange(n)
     ta = np.interp(times, knots, ka)
     tb = np.interp(times, knots, kb)
-    mixed = blend_poses(sample_poses(pa, ta), sample_poses(pb, tb), weight_a)
     ia = np.minimum(np.floor(ta + 1e-9).astype(int), len(ga) - 1)
     ib = np.minimum(np.floor(tb + 1e-9).astype(int), len(gb) - 1)
     if not np.array_equal(sa[ia], sb[ib]):
         raise IncompatibleGripperEvents("warped commands disagree on the event phase")
-    grip = weight_a * ga.reshape(-1)[ia] + (1 - weight_a) * gb.reshape(-1)[ib]
-    if ga.ndim == 2:
-        grip = grip[:, None]
-    meta = dict(weight_a=float(weight_a), samples=n, source_a_samples=len(pa), source_b_samples=len(pb),
+    meta = dict(samples=n, source_a_samples=len(pa), source_b_samples=len(pb),
                 event_labels=la, source_a_event_steps=ea.tolist(), source_b_event_steps=eb.tolist(),
                 desired_event_steps=desired[1:-1].tolist(), actual_event_steps=knots[1:-1].tolist(),
                 initial_commanded_closed=bool(sa[0]), source_a_index=ia.tolist(), source_b_index=ib.tolist())
+    return sample_poses(pa, ta), sample_poses(pb, tb), ia, ib, meta
+
+
+def mix_segments(poses_a, gripper_a, poses_b, gripper_b, weight_a: float):
+    """Return (mixed poses, mixed gripper commands, alignment metadata).
+
+    Inputs are the target poses of a subtask segment, each expressed in its own frozen reference-object
+    frame, and the per-step gripper commands of shape (N,) or (N, 1). The events are placed at the ``weight_a``
+    blend of both sources' event steps (:func:`align_segments`) and the poses and commands are blended with
+    ``weight_a`` at every step.
+    """
+    if not np.isfinite(weight_a) or not 0 <= weight_a <= 1:
+        raise ValueError("weight_a must lie in [0, 1]")
+    if weight_a in (0, 1):
+        p, g = (poses_a, gripper_a) if weight_a == 1 else (poses_b, gripper_b)
+        return np.array(p, dtype=float), np.array(g, dtype=float), {
+            "identity_source": "A" if weight_a == 1 else "B", "weight_a": float(weight_a), "samples": len(p)}
+    ga, gb = _check_commands(gripper_a, gripper_b)
+    aligned_a, aligned_b, ia, ib, align = align_segments(poses_a, ga, poses_b, gb, weight_a)
+    mixed = blend_poses(aligned_a, aligned_b, weight_a)
+    grip = weight_a * ga.reshape(-1)[ia] + (1 - weight_a) * gb.reshape(-1)[ib]
+    if ga.ndim == 2:
+        grip = grip[:, None]
+    meta = dict(weight_a=float(weight_a), **align)
     return mixed, grip, meta
 
 

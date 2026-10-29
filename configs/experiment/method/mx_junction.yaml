@@ -1,0 +1,18 @@
+# Mixup exploration axis 3 (the subtasks do not join): a primary whose transformed start is far from the pose the
+# generator interpolates from is blended, over the first head_steps steps only, with the compatible source whose
+# transformed start is nearest (JunctionMixer, tmg/generation/method/geometric_mix.py).
+defaults:
+  - trackmix
+  - _self_
+name: mx_junction
+mixing:
+  type: junction
+  donors: all
+  max_anchor_rotation_deg: 90.0
+  rotation_weight: 0.1
+  trigger_quantile: 0.5
+  weight_min: 0.2
+  weight_max: 0.8
+  head_steps: 20                    # steps of the primary's segment over which the blend returns to the primary
+tracking: {enabled: false}
+labels: pre_noise
