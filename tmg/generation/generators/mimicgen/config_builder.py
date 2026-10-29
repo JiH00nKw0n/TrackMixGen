@@ -38,20 +38,24 @@ def validate_protocol(protocol: Mapping) -> dict:
 
 
 def build_generation_config(template: Mapping, protocol: Mapping, *, env_name: str, source_dataset: str,
-                            output_folder: str, attempts: int, seed: int) -> dict:
+                            output_folder: str, attempts: int, seed: int,
+                            official_select_src_per_subtask: bool | None = None) -> dict:
     """Apply a protocol to a MimicGen task template.
 
     Args:
         template: the official template json (``exps/templates/robosuite/<task>.json``), left unmodified.
         protocol: the ``generation.protocol`` mapping (attempt count policy, source selection, noise, stitch
             steps, observations, rendering). ``select_src_per_subtask`` and ``selection_strategy`` set to null keep
-            the template's values (the official source selection of the task: one source per attempt, and
-            nearest_neighbor_object for the subtasks whose template says so).
+            the task's official source selection: the template's selection strategy per subtask, and the template's
+            ``select_src_per_subtask`` unless ``official_select_src_per_subtask`` overrides it.
         env_name: registered environment class to generate in.
         source_dataset: path of the prepared source hdf5.
         output_folder: folder MimicGen writes its experiment folder into.
         attempts: ``num_trials`` (attempts, since ``guarantee`` is false).
         seed: MimicGen's seed for this chunk.
+        official_select_src_per_subtask: the task's official ``select_src_per_subtask`` when it differs from the
+            template's. MimicGen's ``scripts/generate_core_configs.py`` sets it per task on top of the templates (True
+            for Stack, Stack Three and Pick Place, paper Appendix N.6); the templates themselves all say False.
 
     Returns:
         A new config dict ready to be written as ``mg_config.json``.
@@ -75,8 +79,10 @@ def build_generation_config(template: Mapping, protocol: Mapping, *, env_name: s
     generation["num_trials"] = int(attempts)
     generation["guarantee"] = bool(protocol["guarantee"])
     generation["keep_failed"] = bool(protocol["keep_failed"])
-    if protocol["select_src_per_subtask"] is not None:          # null keeps the template's value (official: false)
+    if protocol["select_src_per_subtask"] is not None:
         generation["select_src_per_subtask"] = bool(protocol["select_src_per_subtask"])
+    elif official_select_src_per_subtask is not None:            # null: the task's official value (Stack Three: True)
+        generation["select_src_per_subtask"] = bool(official_select_src_per_subtask)
     experiment["task"]["name"] = env_name
     config["obs"]["collect_obs"] = bool(protocol["collect_obs"])
     config["obs"]["camera_names"] = list(protocol["camera_names"] or [])

@@ -1,12 +1,13 @@
 # Source-demonstration selection rule: the generator's OFFICIAL one (the baseline, Table 1). The rule is independent of the
 # pool's size (generation/) and of what the pool stores (images or not), so any pool can be made with either rule; the pool,
 # dataset and run folders carry the rule's name after the scene (pools/<generator>/<task>/<scene>/<selection>/<method>/...).
-# - MimicGen: the task template's values (null = keep the template): one source demonstration per attempt, chosen at random,
-#   except nearest_neighbor_object (nn_k 3) for Square's first subtask (grasp the nut) and all Stack Three subtasks.
+# - MimicGen: the task's official values (null), i.e. what MimicGen's scripts/generate_core_configs.py writes on top of the
+#   templates (paper App. N.6): one source demonstration per attempt chosen at random, except nearest_neighbor_object (nn_k 3)
+#   for Square (picked at its first subtask, kept for the attempt) and Stack Three (picked again at every subtask).
 # - CP-Gen: the first source demonstration only (the released constraint annotation covers only that one).
 # - SoftMimicGen, DexMimicGen: the official environment / task-descriptor values; this group changes nothing for them.
 name: official
-select_src_per_subtask: null      # MimicGen: null keeps the template value (false for all seven tasks)
+select_src_per_subtask: null      # MimicGen: null = official (false, Stack Three true: task.official_select_src_per_subtask)
 selection_strategy: null          # MimicGen: null keeps each subtask's template value
 selection_strategy_kwargs: null
 all_sources: false                # CP-Gen: load only source demonstration 0

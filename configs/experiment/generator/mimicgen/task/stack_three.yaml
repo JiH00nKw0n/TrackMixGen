@@ -8,6 +8,8 @@ source_registry_name: stack_three
 num_sources: 10
 subtasks: [grasp cube A, place on cube B, grasp cube C, place on cube A]
 reference_objects: [cubeA, cubeB, cubeC, cubeA]
+official_select_src_per_subtask: true   # MimicGen scripts/generate_core_configs.py and paper App. N.6: a source per subtask
+                                        # (nearest_neighbor_object, nn_k 3, from the template); the template itself says false
 horizon: 600                        # evaluation step limit (project decision 2026-10-27: 600 for every robosuite task; MimicGen's own values were 400/500)
 cameras: [agentview, robot0_eye_in_hand]
 image_size: [84, 84]

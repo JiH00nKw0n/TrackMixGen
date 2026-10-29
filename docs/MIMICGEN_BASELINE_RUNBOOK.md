@@ -42,7 +42,7 @@
 
 | 항목 | 값 |
 |---|---|
-| 한 시도의 모든 하위작업이 같은 원본 시연을 쓰는가 | 그렇다 (`select_src_per_subtask: false`, 일곱 과제 공통) |
+| 한 시도의 모든 하위작업이 같은 원본 시연을 쓰는가 | Stack Three만 아니다(하위작업마다 다시 고른다, `select_src_per_subtask: true`). 나머지 여섯 과제는 그렇다(`false`). MimicGen의 `scripts/generate_core_configs.py`와 논문 부록 N.6의 값이다 |
 | 원본 시연을 고르는 방식 | 무작위. 단, Square의 첫 하위작업(너트 잡기)과 Stack Three의 모든 하위작업은 현재 물체 자세와 가장 가까운 원본 3개 중에서 고른다(`nearest_neighbor_object`, `nn_k: 3`) |
 | 행동 잡음 | 0.05 (모든 하위작업) |
 | 하위작업 사이 보간 걸음 수 | 5, 고정 걸음 0 |

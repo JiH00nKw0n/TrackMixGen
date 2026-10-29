@@ -69,7 +69,8 @@ class MimicGenGenerator(RobosuiteGenerator):
             protocol["camera_size"] = list(self.task["image_size"])
         config = config_builder.build_generation_config(
             self.template(), protocol, env_name=env_name, source_dataset=str(self.source_path()),
-            output_folder=str(folder), attempts=chunk.attempts, seed=chunk.seed)
+            output_folder=str(folder), attempts=chunk.attempts, seed=chunk.seed,
+            official_select_src_per_subtask=self.task.get("official_select_src_per_subtask"))
         config_path = config_builder.save_config(config, folder / MG_CONFIG)
         experiment = config_builder.experiment_name(env_name, chunk.attempts, chunk.seed)
         return self._spec(
