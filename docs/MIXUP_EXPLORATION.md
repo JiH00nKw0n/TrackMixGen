@@ -36,7 +36,7 @@ MimicGen 계열 생성기는 사람이 시연한 원본 데모 몇 개(과제당
 | 과제 | MimicGen 7개 중 선택 (`square`, `coffee`, `threading`, `stack_three`, `hammer_cleanup`, `mug_cleanup`, `three_piece_assembly`) | 모두 측정된 원본 순위가 있다 |
 | 배치 범위 | `scene=ours` | 논문 실험의 범위다 |
 | 관측 | 저차원 (`observation=low_dim`, 로봇 상태 + 물체 상태, 영상 없음) | 생성과 학습이 영상보다 약 10배 빠르다 |
-| 풀 | `generation=pool_lowdim` (영상을 그리지 않는 풀) | 저차원 학습에는 영상이 필요 없다 |
+| 풀 | `generation=pool_robosuite_lowdim` (영상을 그리지 않는 풀) | 저차원 학습에는 영상이 필요 없다 |
 | 정책 | Diffusion Policy와 BC-RNN 둘 다 (`policy=diffusion_policy`, `policy=bc_rnn`) | 두 정책 모두에서 같은 방향의 결과가 나와야 한다 |
 | 추종 | 끔 (`method.tracking.enabled=false`) | 믹스업의 효과만 본다 |
 | 라벨 | 잡음 전 행동 (`labels: pre_noise`) | 모든 조건에 같게 둔다 |
@@ -89,9 +89,9 @@ MimicGen 계열 생성기는 사람이 시연한 원본 데모 몇 개(과제당
 1. 조건 파일을 만든다. 값만 다른 변형은 `trackmix`를 상속해 바꿀 값만 적고 `tracking: {enabled: false}`로 둔다.
    새 선택 규칙은 `tmg/generation/method/`에 클래스를 쓰고 `interfaces.py`의 등록 사전에 이름을 넣은 뒤
    `mixing.type`으로 고른다. 절차와 뼈대 코드는 `/tmg/generation/method/README.md`에 있다.
-2. 조립된 설정을 확인한다. `tmg show generate task=square scene=ours method=<이름> generation=pool_lowdim`.
+2. 조립된 설정을 확인한다. `tmg show generate task=square scene=ours method=<이름> generation=pool_robosuite_lowdim`.
 3. 풀을 만든다. 기준 풀과 과제의 순위 파일이 먼저 있어야 한다(믹스업이 순위를 읽는다).
-   `make generate TASK=square SCENE=ours METHOD=<이름> GENERATION=pool_lowdim CLUSTER=a100 OVERRIDES="generation.attempts=5000"`.
+   `make generate TASK=square SCENE=ours METHOD=<이름> GENERATION=pool_robosuite_lowdim CLUSTER=a100 OVERRIDES="generation.attempts=5000"`.
 4. 시도 기록을 먼저 분석한다. `chunks/seed<N>/records/attempts.jsonl`에 시도별 성공, 선택된 원본, 하위작업별 혼합 기록
    (`mixed`, `source_a`, `donor`, `identity_reason`)이 있다. 원본별 성공률, 혼합 발생 비율, 혼합하지 않은 이유의 분포를
    기준과 비교한다. 이 단계에서 4장의 기준 1을 판정한다.

@@ -72,7 +72,7 @@ You select a file of a group on the command line with `group=name`. The generato
 so its groups keep short names:
 
 ```bash
-tmg generate generator=mimicgen task=square scene=ours method=trackmix generation=pool cluster=isaac
+tmg generate generator=mimicgen task=square scene=ours method=trackmix generation=pool_robosuite_image cluster=isaac
 ```
 
 | Group | Files | Meaning |
@@ -83,7 +83,7 @@ tmg generate generator=mimicgen task=square scene=ours method=trackmix generatio
 | `task` | MimicGen: `square`, `coffee`, `threading`, `stack_three`, `hammer_cleanup`, `mug_cleanup`, `three_piece_assembly`; SoftMimicGen: `rope`, `towel`, `jenga`; DexMimicGen: `pick_place`; CP-Gen: `coffee`, `threading`, `three_piece_assembly`, `hammer_cleanup`, `mug_cleanup` | The task of the chosen generator. |
 | `scene` | `official_d1`, `ours` | Object placement. `official_d1` runs the generator's own distribution unchanged and lists its ranges. `ours` keeps each D1 centre, doubles the x and y widths, clips to 0.35 m of the table centre, pulls back where the 2026-10-26 scene check found robot contacts, and redraws until every object is within 0.85 m of the robot base. |
 | `method` | `none`, `trackmix`, `mixup_only`, `tracking_only` | Which hooks are on. `none` runs the official generator unchanged. A generator may override a few values through `method_overrides` in its own file. |
-| `generation` | `pilot20`, `pilot20_images`, `pool`, `pool_lowdim`, `pool_lowdim_onesrc`, `pool_isaac`, `rank3000`, `check200`, `official` | The attempt count, the chunk size, the seed offset and the generator protocol (noise, interpolation steps, whether cameras are rendered). `pool` stores images, `pool_lowdim` is the same pool without them. `pool_isaac` is the Isaac Lab pool (1,000 successes in 4 chunks; the protocol block does not apply to those generators, which keep their official settings). |
+| `generation` | `pool_robosuite_image`, `pool_robosuite_lowdim`, `pool_isaac`, `rank_human_demos`, `imported_official`; small configs under `test/` (`test/pilot20`, `test/pilot20_images`, `test/pilot50`, `test/pool_robosuite_lowdim_onesrc`) | The attempt count, the chunk size, the seed offset and the generator protocol (noise, interpolation steps, whether cameras are rendered). `pool_robosuite_image` stores images, `pool_robosuite_lowdim` is the same pool without them. `pool_isaac` is the Isaac Lab pool (1,000 successes in 4 chunks; the protocol block does not apply to those generators, which keep their official settings). `rank_human_demos` is the 3,000-attempt pool for ranking the source demonstrations, `imported_official` the name under which an official dataset is imported. The pool folder is named after the config's `name` (the `test/` folder is not part of the path). |
 | `observation` | `image`, `low_dim` | What the policy sees. `image`: the task's cameras (84x84) and the robot state, the paper setting. `low_dim`: the robot state and the task's object state (`task.object_state`, no images), for method exploration. It selects the dataset variant, the policy's `by_observation` values and the training batch size. |
 | `policy` | `bc_rnn`, `diffusion_policy`, `pi0` | Model values, with one override block per observation (`by_observation`). `pi0` has no low-dim form. |
 | `training` | `default` | Batch size and update budget per policy and observation, epoch length, checkpoint interval, gradient clip, selection rule. |
@@ -97,7 +97,7 @@ Every command writes exactly one output folder. For `generate`, `dataset` and `t
 <paths.runs>/<generator>/<task>/<scene>/<method>/<generation>/<observation>/<policy>/seed<seed>/
 ```
 
-A low-dim dataset can be written from an image pool or from a `pool_lowdim` pool; an image dataset needs a pool
+A low-dim dataset can be written from an image pool or from a `pool_robosuite_lowdim` pool; an image dataset needs a pool
 that stored images. `make dataset`, `make train`, `make validate` and `make evaluate` take `OBSERVATION=image|low_dim`
 (default `image`); evaluation must use the observation the checkpoint was trained with, and the policy server
 reports its inputs so a mismatch stops with an error.
@@ -146,13 +146,13 @@ make verify-baseline TASK=square
 A pilot pool uses the same code path as a full pool. Run it before each full pool.
 
 ```bash
-make generate TASK=square SCENE=official_d1 METHOD=none GENERATION=pilot20
+make generate TASK=square SCENE=official_d1 METHOD=none GENERATION=test/pilot20
 ```
 
 To run the path follower on the same 20 scenes, change the method:
 
 ```bash
-make generate TASK=square SCENE=official_d1 METHOD=tracking_only GENERATION=pilot20
+make generate TASK=square SCENE=official_d1 METHOD=tracking_only GENERATION=test/pilot20
 ```
 
 ### 3.6 Run a full pool
@@ -160,7 +160,7 @@ make generate TASK=square SCENE=official_d1 METHOD=tracking_only GENERATION=pilo
 A full pool makes chunks of 250 attempts. Set the attempt count on the command line through `OVERRIDES`.
 
 ```bash
-make generate TASK=square SCENE=ours METHOD=none GENERATION=pool OVERRIDES="generation.attempts=3000"
+make generate TASK=square SCENE=ours METHOD=none GENERATION=pool_robosuite_image OVERRIDES="generation.attempts=3000"
 ```
 
 If the run stops, run the same command again. Finished chunks are kept. If a finished chunk was made under a
@@ -214,8 +214,8 @@ overwritten.
    must exist, because the mixer reads the ranking file:
 
    ```bash
-   tmg show generate task=square scene=ours method=trackmix_w07 generation=pool_lowdim
-   make generate TASK=square SCENE=ours METHOD=trackmix_w07 GENERATION=pool_lowdim CLUSTER=a100 OVERRIDES="generation.attempts=5000"
+   tmg show generate task=square scene=ours method=trackmix_w07 generation=pool_robosuite_lowdim
+   make generate TASK=square SCENE=ours METHOD=trackmix_w07 GENERATION=pool_robosuite_lowdim CLUSTER=a100 OVERRIDES="generation.attempts=5000"
    ```
 
 3. Read the attempt records before you train anything. `chunks/seed<N>/records/attempts.jsonl` has the success
@@ -226,9 +226,9 @@ overwritten.
 4. Train and evaluate with the same `METHOD`:
 
    ```bash
-   make dataset  TASK=square SCENE=ours METHOD=trackmix_w07 GENERATION=pool_lowdim OBSERVATION=low_dim CLUSTER=a100 OVERRIDES="size=300"
-   make train    TASK=square SCENE=ours METHOD=trackmix_w07 GENERATION=pool_lowdim OBSERVATION=low_dim POLICY=diffusion_policy SEED=1 CLUSTER=a100 OVERRIDES="dataset.size=300"
-   make validate RUN=<data root>/runs/mimicgen/square/ours/trackmix_w07/pool_lowdim/low_dim/diffusion_policy/seed1 TASK=square SCENE=ours OBSERVATION=low_dim CLUSTER=a100
+   make dataset  TASK=square SCENE=ours METHOD=trackmix_w07 GENERATION=pool_robosuite_lowdim OBSERVATION=low_dim CLUSTER=a100 OVERRIDES="size=300"
+   make train    TASK=square SCENE=ours METHOD=trackmix_w07 GENERATION=pool_robosuite_lowdim OBSERVATION=low_dim POLICY=diffusion_policy SEED=1 CLUSTER=a100 OVERRIDES="dataset.size=300"
+   make validate RUN=<data root>/runs/mimicgen/square/ours/trackmix_w07/pool_robosuite_lowdim/low_dim/diffusion_policy/seed1 TASK=square SCENE=ours OBSERVATION=low_dim CLUSTER=a100
    make evaluate RUN=<the same run> TASK=square SCENE=ours OBSERVATION=low_dim CLUSTER=a100
    ```
 

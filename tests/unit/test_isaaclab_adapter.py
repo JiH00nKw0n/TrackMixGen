@@ -13,7 +13,7 @@ from tmg.generation.generators.isaaclab.runtime import IsaacLabLayout, _cut_inte
 
 def test_dex_chunk_spec_carries_layout_script_and_overrides(tmp_path, monkeypatch):
     monkeypatch.setenv("TMG_DATA_ROOT", str(tmp_path))
-    cfg = resolved(compose("generate", ["generator=dexmimicgen", "task=pick_place", "scene=ours", "method=trackmix", "generation=pilot20"]))
+    cfg = resolved(compose("generate", ["generator=dexmimicgen", "task=pick_place", "scene=ours", "method=trackmix", "generation=test/pilot20"]))
     gen = make_generator(cfg)
     chunk = plan_chunks(20, 20, 9000)[0]
     spec = gen.prepare_chunk(chunk, tmp_path / "chunk")
@@ -29,7 +29,7 @@ def test_dex_chunk_spec_carries_layout_script_and_overrides(tmp_path, monkeypatc
 
 def test_soft_generator_uses_the_soft_builder(tmp_path, monkeypatch):
     monkeypatch.setenv("TMG_DATA_ROOT", str(tmp_path))
-    cfg = resolved(compose("generate", ["generator=softmimicgen", "task=rope", "scene=official", "method=none", "generation=pilot20"]))
+    cfg = resolved(compose("generate", ["generator=softmimicgen", "task=rope", "scene=official", "method=none", "generation=test/pilot20"]))
     gen = make_generator(cfg)
     spec = gen.prepare_chunk(plan_chunks(5, 5, 1)[0], tmp_path / "c")
     assert spec.extra["soft"] is True and spec.extra["package"] == "softmimicgen.datagen" and "--task" not in spec.extra["script_args"]
@@ -96,7 +96,7 @@ def test_chunk_seed_goes_into_datagen_config_not_the_command_line(tmp_path, monk
     from tmg.generation.generators.isaaclab import entrypoint
 
     monkeypatch.setenv("TMG_DATA_ROOT", str(tmp_path))
-    cfg = resolved(compose("generate", ["generator=softmimicgen", "task=rope", "scene=ours", "method=none", "generation=pilot20"]))
+    cfg = resolved(compose("generate", ["generator=softmimicgen", "task=rope", "scene=ours", "method=none", "generation=test/pilot20"]))
     gen = make_generator(cfg)
     spec = gen.prepare_chunk(plan_chunks(20, 20, 9000)[0], tmp_path / "c")
     assert "--seed" not in spec.extra["script_args"] and spec.chunk["seed"] == 9001

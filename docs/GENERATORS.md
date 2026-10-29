@@ -60,8 +60,8 @@
 
 ### 1.4 원본 시연 선택 방식: 지금은 우리 값, 최종 평가는 공식 템플릿 값 (2026-10-27 결정)
 
-생성 프로토콜은 `configs/experiment/generation/pilot20.yaml`의 `protocol` 블록에 있고, 다른 generation 설정(`pool`, `pool_lowdim`,
-`rank3000`, `check200`, `pilot20_images`)은 이 블록을 물려받는다. 지금 값은 하위작업마다 원본 시연을 독립적으로 고르고
+생성 프로토콜은 `configs/experiment/generation/pool_robosuite_image.yaml`의 `protocol` 블록에 있고, 다른 generation 설정(`pool_robosuite_lowdim`,
+`rank_human_demos`, `pool_isaac`, `test/` 아래의 시험용 설정들)은 이 블록을 물려받는다. 지금 값은 하위작업마다 원본 시연을 독립적으로 고르고
 (`select_src_per_subtask: true`) 고르는 방식은 무작위다(`selection_strategy: random`). MimicGen 공식 설정 템플릿
 (`mimicgen/exps/templates/robosuite/*.json`)은 일곱 과제 모두 `select_src_per_subtask: false`(한 시도의 모든 하위작업이 같은 원본
 시연을 쓴다)이고, Square의 두 번째 하위작업과 Stack Three의 모든 하위작업은 `nearest_neighbor_object`(현재 물체 자세와 가장
@@ -95,9 +95,9 @@
 
 | 학습 데이터 (모두 D2 장면, 1,000개, 저차원 BC-RNN 시드 1, 10만 갱신) | 생성 성공률 | 25장면 검증 최고 | 300장면 시험(상한 600) |
 |---|---|---|---|
-| 우리 생성, 하위작업별 원본 독립 선택 (`pool_lowdim`) | 10.3% (11,000회 중 1,137회) | 9만 체크포인트 2/25 | 14/300 = 4.7% (95% 구간 2.8–7.7%) |
-| 우리 생성, 한 시도에 원본 하나 (`pool_lowdim_onesrc`, 공식 템플릿 값) | 29.1% (4,000회 중 1,166회) | 10만 체크포인트 4/25 | 14/300 = 4.7% (95% 구간 2.8–7.7%) |
-| 논문 공식 D2 데이터셋 (`scripts/import_robomimic_dataset.py`로 변환, `generation=official`) | 해당 없음 | 7만 체크포인트 2/25 | 8/300 = 2.7% (95% 구간 1.4–5.2%) |
+| 우리 생성, 하위작업별 원본 독립 선택 (`pool_robosuite_lowdim`) | 10.3% (11,000회 중 1,137회) | 9만 체크포인트 2/25 | 14/300 = 4.7% (95% 구간 2.8–7.7%) |
+| 우리 생성, 한 시도에 원본 하나 (`test/pool_robosuite_lowdim_onesrc`, 공식 템플릿 값) | 29.1% (4,000회 중 1,166회) | 10만 체크포인트 4/25 | 14/300 = 4.7% (95% 구간 2.8–7.7%) |
+| 논문 공식 D2 데이터셋 (`scripts/import_robomimic_dataset.py`로 변환, `generation=imported_official`) | 해당 없음 | 7만 체크포인트 2/25 | 8/300 = 2.7% (95% 구간 1.4–5.2%) |
 | 논문 보고값 | 31.3% | 해당 없음 | 38.7% (체크포인트별 50회 평가의 최대값, 시드 3개 중 최대) |
 
 측정으로 확인한 것은 다음과 같다.
@@ -269,7 +269,7 @@ Isaac Lab 평가를 만들 때도 성공 판정은 첫 행동 뒤부터 매 걸�
 
 Rope를 `tmg/isaaclab-soft` 이미지로 전체 경로를 한 번 돌렸다. 측정한 사실이다.
 
-- 생성(`generation=pilot20`, 성공 20개 보장): 26회 시도, 성공 20회, 834초(Isaac Sim 시작 포함, 시도당 평균 23.8초). 원본 3개가 모두
+- 생성(`generation=test/pilot20`, 성공 20개 보장): 26회 시도, 성공 20회, 834초(Isaac Sim 시작 포함, 시도당 평균 23.8초). 원본 3개가 모두
   선택되었다. 기록(`attempts.jsonl` 26줄, 라벨 npz)과 공식 `generated.hdf5`(성공 20개)가 맞았다.
 - 고정 장면 시드 파일(검증 25, 시험 300)과 영상 데이터셋(시연 10개, 1,710걸음, 128×128 두 카메라)을 썼다.
 - Diffusion Policy 200갱신 학습 뒤 `make validate`가 새 평가기로 검증 25장면을 모두 돌렸다. 오류 0, 모두 400걸음까지 실패(기대한 결과,
@@ -404,7 +404,7 @@ Rope, Towel, Microwave의 공식 초기 상태 분포가 좁아 생성이 거의
 도 같은 `apply_scene`을 거치므로 검증과 시험 장면이 같은 분포에서 나온다. 전자레인지는 생성 기록에서 시도마다 자세가 달라지는 것을
 확인했다(x 0.38에서 0.42 m, y −0.07에서 −0.01 m).
 
-성공 50개를 채울 때까지 한 프로세스씩 돌린 결과다(`pilot50`, 청크 시드 9501, 세 프로세스 동시 실행).
+성공 50개를 채울 때까지 한 프로세스씩 돌린 결과다(`generation=test/pilot50`, 청크 시드 9501, 세 프로세스 동시 실행).
 
 | 과제 | 공식 (성공 20개 실행) | ours (성공 50개 실행) | ours 시간 |
 |---|---|---|---|
@@ -432,7 +432,7 @@ Rope가 가장 크게 떨어졌고 Towel은 거의 변하지 않았다. 공식 �
 (+ 방향 7.5° 이상)이 실패의 대부분을 만든다. 범위를 줄인다면 Rope 절반 변형의 회전을 공식 ±30°로 되돌리고, Towel 회전을 ±30°로 되돌리고
 x 상한을 +0.12 m로 낮추고, Microwave 회전을 −15°에서 +5°로 자르는 것이 측정값에 맞는 조정이다. 2026-10-29에 현재 범위를 그대로
 두기로 정했다. ours 장면의 생성 성공률은 위 표의 Rope 53.2%, Towel 76.9%, Microwave 75.8%가 기준값이고, 어려운 영역을 뺀 범위로
-바꾸려면 두 ours.yaml 파일의 해당 범위를 고친 뒤 pilot50을 다시 돌려 이 표를 갱신해야 한다.
+바꾸려면 두 ours.yaml 파일의 해당 범위를 고친 뒤 pilot50을 다시 돌려 이 표를 갱신해야 한다(`generation=test/pilot50`).
 
 ## 3. CP-Gen (kevin-thankyou-lin/cpgen@1e7c1fc4)
 

@@ -32,7 +32,7 @@ def load_fixture():
 
 def test_cpgen_chunk_spec_and_method_overrides(tmp_path, monkeypatch):
     monkeypatch.setenv("TMG_DATA_ROOT", str(tmp_path))
-    cfg = resolved(compose("generate", ["generator=cpgen", "task=coffee", "scene=ours", "method=trackmix", "generation=pilot20"]))
+    cfg = resolved(compose("generate", ["generator=cpgen", "task=coffee", "scene=ours", "method=trackmix", "generation=test/pilot20"]))
     gen = make_generator(cfg)
     spec = gen.prepare_chunk(plan_chunks(20, 20, 9000)[0], tmp_path / "chunk")
     c = spec.extra["cpgen_config"]
@@ -43,10 +43,10 @@ def test_cpgen_chunk_spec_and_method_overrides(tmp_path, monkeypatch):
     assert spec.scene["base_env_suffix"] == "D0" and spec.scene["override_bounds"] is True
     assert gen.demo_layout()["demo_glob"] == "generated_obs.hdf5" and gen.demo_layout()["labels_from_records"] is False
     assert (tmp_path / "chunk" / "cpgen_config.json").exists()
-    none = make_generator(resolved(compose("generate", ["generator=cpgen", "task=threading", "scene=official_d0", "method=none", "generation=pilot20"])))
+    none = make_generator(resolved(compose("generate", ["generator=cpgen", "task=threading", "scene=official_d0", "method=none", "generation=test/pilot20"])))
     assert none.method["labels"] == "pre_noise" and none.scene_chain()["env_suffix"] == "D0" and none.env_name() == "Threading_D0"
     for t in TASKS:
-        compose("generate", ["generator=cpgen", f"task={t}", "scene=ours", "method=none", "generation=pilot20"])
+        compose("generate", ["generator=cpgen", f"task={t}", "scene=ours", "method=none", "generation=test/pilot20"])
 
 
 def test_cpgen_ours_scene_equals_mimicgen_ours_for_its_tasks():

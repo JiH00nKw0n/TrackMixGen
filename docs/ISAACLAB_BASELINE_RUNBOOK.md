@@ -217,7 +217,7 @@ make sources GENERATOR=softmimicgen IMAGE=isaaclab-soft TASK=rope CLUSTER=ada
 ```
 
 ```bash
-make generate GENERATOR=softmimicgen IMAGE=isaaclab-soft TASK=rope SCENE=ours METHOD=none GENERATION=pilot20 CLUSTER=ada
+make generate GENERATOR=softmimicgen IMAGE=isaaclab-soft TASK=rope SCENE=ours METHOD=none GENERATION=test/pilot20 CLUSTER=ada
 ```
 
 첫 실행은 Isaac Sim이 자산을 내려받고 셰이더를 컴파일하느라 10분 넘게 걸릴 수 있다. 로그는
@@ -226,7 +226,7 @@ make generate GENERATOR=softmimicgen IMAGE=isaaclab-soft TASK=rope SCENE=ours ME
 다섯 과제의 전체 경로(원본, 생성, 장면 시드, 데이터셋, 학습, 검증, 선택, 시험, 결과 묶음)를 작은 규모로 끝까지 확인하려면 4절의
 명령에 `MINI=1`을 붙인다. 과제마다 성공 20개짜리 풀, 시연 10개 데이터셋, 200갱신 학습, 검증과 시험 각 6장면으로 같은 코드 경로를
 돌고, 결과 묶음은 `/data/tmg_data/reports/isaaclab_mini_<날짜>.tar.gz`로 나온다. 정책 단계는 시드 하나에 과제마다 18분에서 41분이
-걸렸다(8절). MINI 실행은 풀과 실행 폴더 이름에 `pilot20`이 들어가므로 뒤의 전체 실행(`pool_isaac`)과 파일이 겹치지 않는다.
+걸렸다(8절). MINI 실행은 생성 설정 `test/pilot20`을 쓰고 풀과 실행 폴더 이름에 `pilot20`이 들어가므로 뒤의 전체 실행(`pool_isaac`)과 파일이 겹치지 않는다.
 
 ```bash
 CLUSTER=ada MINI=1 SEEDS="202601" nohup scripts/run_isaaclab_baseline.sh > /data/tmg_data/mini_driver.out 2>&1 &

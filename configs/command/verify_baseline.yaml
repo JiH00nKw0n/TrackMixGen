@@ -8,7 +8,7 @@ defaults:
   - /task: ???
   - /scene: official_d1
   - /method: none
-  - /generation: pilot20
+  - /generation: test/pilot20
   - _self_
 output: ${paths.pools}/_verify_baseline/${generator.name}/${task.name}/${scene.name}/${generation.name}
 command: verify_baseline

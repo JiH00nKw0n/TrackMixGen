@@ -10,7 +10,7 @@
 #   CLUSTER=a100 GPU=1 POOL_LANES=4 scripts/run_baseline_lowdim.sh
 set -uo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-CLUSTER=${CLUSTER:-a100}; GPU=${GPU:-1}; POOL_LANES=${POOL_LANES:-4}; SCENE=ours; METHOD=none; GENERATION=pool_lowdim
+CLUSTER=${CLUSTER:-a100}; GPU=${GPU:-1}; POOL_LANES=${POOL_LANES:-4}; SCENE=ours; METHOD=none; GENERATION=pool_robosuite_lowdim
 DATA_ROOT=$(make -s -C "$REPO" print-data-root CLUSTER="$CLUSTER")
 LOG=$DATA_ROOT/logs/baseline_lowdim; mkdir -p "$LOG"
 TASKS="three_piece_assembly square stack_three mug_cleanup hammer_cleanup threading coffee"   # longest pools first
@@ -45,7 +45,7 @@ until [ -f "$TRAIN_SIF" ]; do log "waiting for $TRAIN_SIF"; sleep 300; done
 log "stage B: policies of every task at once on GPU $GPU"
 port=8800
 for t in $TASKS; do
-  [ -f "$DATA_ROOT/datasets/mimicgen/$t/$SCENE/$METHOD/$GENERATION/low_dim/n1000_seed0.hdf5" ] || { log "no dataset for $t, skipped"; continue; }
+  [ -f "$DATA_ROOT/datasets/mimicgen/$t/$SCENE/$METHOD/${GENERATION##*/}/low_dim/n1000_seed0.hdf5" ] || { log "no dataset for $t, skipped"; continue; }
   CLUSTER=$CLUSTER GPU=$GPU "$REPO/scripts/task_policy_pipeline.sh" $t $port > "$LOG/policy_$t.log" 2>&1 &
   port=$((port + 40))
   sleep 60     # stagger the dataset loads and model builds

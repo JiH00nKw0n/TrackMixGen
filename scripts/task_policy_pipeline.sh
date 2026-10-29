@@ -5,20 +5,20 @@
 #   scripts/task_policy_pipeline.sh <task> <first port>      (the task uses ports <first port> .. <first port>+39:
 #   validation ports <first port>+<checkpoint index>, test shards from <first port>+20)
 # Variables: CLUSTER (a100), GPU (CUDA device for the train image, 1), GENERATOR (mimicgen), IMAGE (simulator image of the
-# rollouts, robosuite), METHOD (none), GENERATION (pool_lowdim), OBSERVATION (low_dim), POLICY (bc_rnn), SEED (1), SCENE (ours),
+# rollouts, robosuite), METHOD (none), GENERATION (pool_robosuite_lowdim), OBSERVATION (low_dim), POLICY (bc_rnn), SEED (1), SCENE (ours),
 # SIZE (dataset demos, 1000), VAL_PARALLEL (5), TEST_SHARDS (6), SKIP_TRAIN (1: the run is already trained),
 # TRAIN_OVERRIDES (extra `tmg train` overrides), EXTRA (extra `tmg eval` overrides, e.g. max_scenes=6).
 set -uo pipefail
 TASK=$1; PORT0=$2
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-CLUSTER=${CLUSTER:-a100}; GPU=${GPU:-1}; METHOD=${METHOD:-none}; GENERATION=${GENERATION:-pool_lowdim}
+CLUSTER=${CLUSTER:-a100}; GPU=${GPU:-1}; METHOD=${METHOD:-none}; GENERATION=${GENERATION:-pool_robosuite_lowdim}
 OBSERVATION=${OBSERVATION:-low_dim}; POLICY=${POLICY:-bc_rnn}; SEED=${SEED:-1}; SCENE=${SCENE:-ours}
 VAL_PARALLEL=${VAL_PARALLEL:-5}; TEST_SHARDS=${TEST_SHARDS:-6}; GENERATOR=${GENERATOR:-mimicgen}; IMAGE=${IMAGE:-robosuite}; SIZE=${SIZE:-1000}
 export SINGULARITYENV_CUDA_VISIBLE_DEVICES=$GPU CUDA_VISIBLE_DEVICES=$GPU
 DATA_ROOT=$(make -s -C "$REPO" print-data-root CLUSTER="$CLUSTER")
 RUNTIME_DATA_ROOT=$(make -s -C "$REPO" print-runtime-data-root CLUSTER="$CLUSTER")
-RUN=$DATA_ROOT/runs/$GENERATOR/$TASK/$SCENE/$METHOD/$GENERATION/$OBSERVATION/$POLICY/seed$SEED
-DATASET_C=$RUNTIME_DATA_ROOT/datasets/$GENERATOR/$TASK/$SCENE/$METHOD/$GENERATION/$OBSERVATION/n${SIZE}_seed0.hdf5
+RUN=$DATA_ROOT/runs/$GENERATOR/$TASK/$SCENE/$METHOD/${GENERATION##*/}/$OBSERVATION/$POLICY/seed$SEED
+DATASET_C=$RUNTIME_DATA_ROOT/datasets/$GENERATOR/$TASK/$SCENE/$METHOD/${GENERATION##*/}/$OBSERVATION/n${SIZE}_seed0.hdf5
 export GENERATOR IMAGE
 # CP-Gen evaluates in the generation environment rebuilt from its dataset's env_args (robosuite 1.5); the Isaac Lab
 # generators build their environment from the task id and need nothing from the dataset

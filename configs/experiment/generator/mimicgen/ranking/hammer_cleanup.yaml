@@ -4,8 +4,8 @@
 generator: mimicgen
 task: hammer_cleanup
 basis: Full-task generation success rate (successes / attempts) of each source demonstration, per subtask, measured by tmg
-  rank_sources on the baseline pool /data/pools/mimicgen/hammer_cleanup/ours/none/rank3000 (3000 attempts, 12 chunks, scene
-  ours, generation rank3000). The source of a subtask is the demonstration the generator selected for that subtask.
+  rank_sources on the baseline pool /data/pools/mimicgen/hammer_cleanup/ours/none/rank_human_demos (3000 attempts, 12 chunks, scene
+  ours, generation rank_human_demos). The source of a subtask is the demonstration the generator selected for that subtask.
 split_note: The ranking only orders the sources. Which prefix counts as high-success is method.mixing.good_fraction.
 subtasks:
   0:

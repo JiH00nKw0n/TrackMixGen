@@ -1,0 +1,12 @@
+defaults:
+  - /generation/pool_robosuite_image@_here_
+  - _self_
+# Scene check at 50 attempts in one chunk, chunk seed 9501 (Isaac Lab generators: 50 successes, see pool_isaac). Used
+# for the ours-scene success rates of 2026-10-29 (docs/GENERATORS.md 2.8).
+name: pilot50
+attempts: 50
+chunk: 50
+seed_offset: 9500
+protocol:
+  camera_names: []
+  camera_size: null

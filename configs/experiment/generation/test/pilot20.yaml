@@ -1,0 +1,12 @@
+defaults:
+  - /generation/pool_robosuite_image@_here_
+  - _self_
+# Smoke run: 20 attempts in one chunk, no images, chunk seed 9001. Same code path as a full pool. The Isaac Lab driver's
+# MINI mode uses it (generation=test/pilot20; the pool folder is named after `name`, i.e. .../pilot20).
+name: pilot20
+attempts: 20
+chunk: 20
+seed_offset: 9000
+protocol:
+  camera_names: []
+  camera_size: null

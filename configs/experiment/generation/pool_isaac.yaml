@@ -1,13 +1,14 @@
 defaults:
-  - pool
+  - pool_robosuite_image
   - _self_
-# Full pool of an Isaac Lab generator (SoftMimicGen, DexMimicGen): 1,000 successes in 4 chunks, seeds from 30001.
-# The Isaac Lab adapters run the official `generate_dataset.py` with the task's official environment config, so the
-# `protocol` block below is NOT applied to them: source selection, action noise and interpolation steps are the
-# official per-task values (listed in each task file and in docs/GENERATORS.md section 2.1). Those configs set
+# Full pool of an Isaac Lab generator (SoftMimicGen, DexMimicGen, AutoData): 1,000 successes in 4 chunks, chunk seeds
+# 30001..30004. The Isaac Lab adapters run the official `generate_dataset.py` with the task's official environment config,
+# so the inherited `protocol` block is NOT applied to them: source selection, action noise and interpolation steps are
+# the official per-task values (listed in each task file and in docs/GENERATORS.md section 2.1). Those configs set
 # `generation_guarantee`, so `attempts` is the number of SUCCESSES each chunk runs until (the official meaning of
 # `--generation_num_trials`); the records still hold every attempt, so the generation success rate is measured.
-# Images are the official cameras of the task (Soft) or the registered camera environment (Dex, `task.camera_env`).
+# Images are the official cameras of the task (Soft), the registered camera environment (Dex, `task.camera_env`) or
+# the Arena head camera captured per step (AutoData).
 name: pool_isaac
 attempts: 1000
 chunk: 250

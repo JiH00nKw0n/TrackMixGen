@@ -27,12 +27,13 @@ VAL_PARALLEL=${VAL_PARALLEL:-2}; TEST_SHARDS=${TEST_SHARDS:-3}; SEED_PARALLEL=${
 SEQUENTIAL_TASKS=${SEQUENTIAL_TASKS:-0}
 GENERATION=${GENERATION:-pool_isaac}; TRAIN_OVERRIDES=${TRAIN_OVERRIDES:-}; EVAL_EXTRA=${EVAL_EXTRA:-}
 if [ "${MINI:-0}" = 1 ]; then
-  GENERATION=pilot20; SIZE=10; VAL_PARALLEL=1; TEST_SHARDS=2
+  GENERATION=test/pilot20; SIZE=10; VAL_PARALLEL=1; TEST_SHARDS=2
   TRAIN_OVERRIDES="training.by_policy.diffusion_policy.image.updates=200 training.updates_per_epoch=100 training.checkpoint_every_epochs=2 $TRAIN_OVERRIDES"
   EVAL_EXTRA="max_scenes=6 $EVAL_EXTRA"
   BUNDLE_NAME=${BUNDLE_NAME:-isaaclab_mini_$(date +%Y%m%d)}
 fi
 SCENE=ours; METHOD=none; OBSERVATION=image
+GEN_NAME=${GENERATION##*/}       # pool folders are named after the config's `name`, without the `test/` folder
 DATA_ROOT=$(make -s -C "$REPO" print-data-root CLUSTER="$CLUSTER")
 RESULTS_ROOT=${TMG_RESULTS_ROOT:-$DATA_ROOT}
 LOG=$RESULTS_ROOT/logs/isaaclab_baseline; mkdir -p "$LOG"
@@ -46,16 +47,16 @@ for t in $DEX_TASKS; do JOBS="$JOBS dexmimicgen:isaaclab-dex:$t"; done
 AUTODATA_TASKS=${AUTODATA_TASKS-"microwave bottle_door"}      # assign first: a quoted default inside ${...} is one word
 for t in $AUTODATA_TASKS; do JOBS="$JOBS autodata:isaaclab-autodata:$t"; done
 ALL_JOBS=$JOBS
-dataset_of() { echo "$DATA_ROOT/datasets/$1/$2/$SCENE/$METHOD/$GENERATION/$OBSERVATION/n${SIZE}_seed0.hdf5"; }
+dataset_of() { echo "$DATA_ROOT/datasets/$1/$2/$SCENE/$METHOD/$GEN_NAME/$OBSERVATION/n${SIZE}_seed0.hdf5"; }
 resets_of() { echo "$DATA_ROOT/resets/$1/$2/$SCENE/val25_test300_seed202600.json"; }
-run_of() { echo "$DATA_ROOT/runs/$1/$2/$SCENE/$METHOD/$GENERATION/$OBSERVATION/$POLICY/seed$3"; }
+run_of() { echo "$DATA_ROOT/runs/$1/$2/$SCENE/$METHOD/$GEN_NAME/$OBSERVATION/$POLICY/seed$3"; }
 M() { make -s -C "$REPO" "$@"; }
 
 collect_bundle() {
   local args=() job gen image task
   for job in $ALL_JOBS; do
     IFS=: read -r gen image task <<< "$job"
-    args+=(--job "$gen/$task/$SCENE/$METHOD/$GENERATION/$OBSERVATION")
+    args+=(--job "$gen/$task/$SCENE/$METHOD/$GEN_NAME/$OBSERVATION")
   done
   python3 "$REPO/scripts/collect_results.py" --data-root "$DATA_ROOT" --out "$RESULTS_ROOT/reports/$BUNDLE_NAME" \
     --policy "$POLICY" --seeds $SEEDS "${args[@]}" --logs "$LOG" "$@" > "$LOG/collect.log" 2>&1 \
