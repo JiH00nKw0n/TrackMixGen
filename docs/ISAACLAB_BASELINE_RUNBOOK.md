@@ -358,6 +358,10 @@ Dex Pick Place의 공식 문서 기준 생성 1,000개는 RTX 6000 Ada에서 약
 - Microwave Opening과 Bottle Placement and Door Closing은 NVIDIA AutoData(Isaac Lab-Arena)의 DexMimicGen 과제라 `isaaclab-autodata`
   이미지로 돈다. Arena 자산은 실행 때 Isaac 자산 서버와 Lightwheel 자산 서버(api.lightwheel.net)에서 내려받으므로 그 두 곳에 인터넷이
   닿아야 한다. 혼합과 추종 방법은 이 두 과제에 아직 연결되지 않았다(기준선 `method=none`만 된다).
+- Microwave Opening의 공식 환경은 로봇, 전자레인지, 문의 시작 열림 정도를 모두 고정값으로 두고 무작위화 항목이 없다. 그래서 이 과제의
+  검증 25장면과 시험 300장면은 초기 상태가 같고, 에피소드마다 다른 정책 시드와 물리 시뮬레이션의 비결정성만 다르다. 장면 시드 파일은
+  만들어지지만 초기 상태를 바꾸지 않는다. Bottle Placement and Door Closing은 병 위치만 흔들며(측정한 폭 x 약 8 mm, y 약 4 mm) 냉장고와
+  로봇은 고정이다. 둘 다 공식 설정 그대로다.
 - Isaac Lab의 Nut Pour와 Exhaust Pipe는 환경은 있지만 주석 달린 원본 시연 파일이 공개되어 있지 않아 쓰지 않는다.
 - 평가 상한은 Rope 250, Towel 220, Pick Place 400, Microwave Opening 250, Bottle Placement and Door Closing 500걸음이다(과제 파일의 `horizon`).
   Rope와 Towel은 공식 설정의 롤아웃 상한이고, Pick Place와 AutoData 두 과제는 환경 자체의 에피소드 길이다.
