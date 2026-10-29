@@ -5,7 +5,7 @@ camera_env: null                        # the official task already records agen
 camera_module: null
 source: ${paths.sources}/softmimicgen/towel/source.hdf5
 source_file: annotated_dataset/annotated_dataset_franka_towel.hdf5   # file in generator.source_repo
-num_sources: null                       # not checked against the file: the manifest written by `tmg sources` records the count
+num_sources: 3                          # three human demonstrations in the official source file (manifest of 2026-10-29)
 subtasks: [grasp towel corner, fold towel]
 reference_objects: [object, object]
 horizon: 400                        # evaluation step limit (project decision 2026-10-26: SoftMimicGen 400, DexMimicGen 600; the official robomimic rollout horizon is 220)
