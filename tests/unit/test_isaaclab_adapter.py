@@ -95,6 +95,14 @@ def test_chunk_seed_goes_into_datagen_config_not_the_command_line(tmp_path, monk
         datagen_config = Datagen()
         events = types.SimpleNamespace(reset_object_position=types.SimpleNamespace(
             params={"pose_range": {"x": (0.0, 0.1)}, "partial_pose_range": {"x": (0.0, 0.1), "y": (0.0, 0.1)}}))
+        observations = types.SimpleNamespace(policy=types.SimpleNamespace())
+
+    import sys
+
+    managers = types.ModuleType("isaaclab.managers")           # the low-dim term is written with Isaac Lab's term config class
+    managers.ObservationTermCfg = lambda func, params: types.SimpleNamespace(func=func, params=params)
+    monkeypatch.setitem(sys.modules, "isaaclab", types.ModuleType("isaaclab"))
+    monkeypatch.setitem(sys.modules, "isaaclab.managers", managers)
 
     calls = []
     ns = {"setup_env_config": lambda **kw: (EnvCfg(), "success_term")}
@@ -103,5 +111,6 @@ def test_chunk_seed_goes_into_datagen_config_not_the_command_line(tmp_path, monk
     entrypoint.install(ns, spec_dict)
     env_cfg, term = ns["setup_env_config"](env_name="x")
     assert env_cfg.events.reset_object_position.params["pose_range"]["x"] == (-0.05, 0.15)      # the ours scene is applied
+    assert env_cfg.observations.policy.rope_state.params["counts"] == [16]                       # the task's low-dim term is added
     calls.append(env_cfg.datagen_config.seed)
     assert calls == [9001] and term == "success_term"

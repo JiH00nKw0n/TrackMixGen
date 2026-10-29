@@ -19,7 +19,13 @@ env_args: []
 cameras: [robot_pov_cam_rgb]
 image_size: [128, 128]
 robot_state: [left_eef_pos, left_eef_quat, right_eef_pos, right_eef_quat, hand_joint_state]
-object_state: []
+object_state: [bottle_door_state]   # 27 = bottle pose (7) + hands to bottle (6) + refrigerator pose (7) + fridge_door_joint (1) + hands to refrigerator (6)
+# Low-dim object observation (decision 2026-10-29): Arena records no object term, so one is added to the policy group at
+# generation and evaluation (tmg/generation/simulators/isaaclab_lowdim.py); pools made before 2026-10-29 lack it.
+lowdim_terms:
+  bottle_door_state:
+    func: tmg.generation.simulators.isaaclab_lowdim:scene_object_state
+    params: {objects: [{name: ranch_dressing_hope_robolab}, {name: refrigerator, joints: [fridge_door_joint]}], eef: {links: [left_hand_roll_link, right_hand_roll_link]}}
 instruction: put the bottle in the refrigerator and close the door
 # Official generation settings (autodata_examples/tasks/gr1_put_and_close_door.yaml @ 835f4aab), used unchanged except that
 # the chunk guarantees its success count: a source per subtask, nearest_neighbor_object (nn_k 3), action noise 0.003,

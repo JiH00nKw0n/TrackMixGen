@@ -17,7 +17,7 @@ env_args: []
 cameras: [front_image, side_image]
 image_size: [128, 128]
 robot_state: [left_eef_pos, left_eef_quat, right_eef_pos, right_eef_quat, hand_joint_state]
-object_state: []                    # low-dim training is not set up for the Isaac Lab tasks yet (the recorded `object` term holds pos, quat, eef-to-object)
+object_state: [object]              # 13 = object pos (3), quat (4), left and right eef (hand roll links) to object (3 + 3); the official term
 instruction: pick up the object with the right hand and place it in the bin
 # Official generation settings (autodata_examples/tasks/gr1_pick_place.yaml @ 835f4aab = the Isaac Lab Mimic environment config
 # pickplace_gr1t2_mimic_env_cfg.py): one source for the whole attempt (select_src_per_subtask false), nearest_neighbor_object

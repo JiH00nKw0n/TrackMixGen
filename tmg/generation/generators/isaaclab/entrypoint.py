@@ -10,7 +10,8 @@ That function runs after the script's imports and before its ``main()``:
 
 1. imports the task's ``register_modules`` and camera module (environment registration, a camera-enabled environment);
 2. wraps the script's ``setup_env_config`` so that the scene ranges are written into the environment config
-   (``simulators.isaaclab.apply_scene``), the chunk seed is written into ``datagen_config.seed`` (the official
+   (``simulators.isaaclab.apply_scene``), the task's low-dim observation terms are added to the policy group
+   (``simulators.isaaclab_lowdim.add_lowdim_terms``), the chunk seed is written into ``datagen_config.seed`` (the official
    scripts take no ``--seed``; they seed random, numpy and torch with that config value), ``generation_guarantee`` is
    set from ``generation.protocol.guarantee`` (true: ``--generation_num_trials`` counts successes, the official value;
    false: it counts attempts, for the test pilots and the ranking pools) and the overrides are logged;
@@ -33,6 +34,7 @@ def install(namespace: dict, spec: dict) -> None:
     import tmg.generation.generators.isaaclab.runtime as rt
     from tmg.generation.method import build_method
     from tmg.generation.simulators.isaaclab import apply_scene
+    from tmg.generation.simulators.isaaclab_lowdim import add_lowdim_terms
 
     for module in list(spec["extra"].get("register_modules") or []):      # e.g. isaaclab_mimic.envs registers the GR1 tasks
         __import__(str(module))
@@ -50,6 +52,8 @@ def install(namespace: dict, spec: dict) -> None:
         env_cfg, *rest = _as_tuple(original_setup(*args, **kwargs))
         applied = apply_scene(env_cfg, scene, task_name)
         print(f"[tmg] scene {scene.get('name')}: {'ranges applied ' + json.dumps(applied) if applied else 'official ranges kept'}", flush=True)
+        added = add_lowdim_terms(env_cfg, spec["task"])       # low-dim object terms, recorded with the policy group
+        print(f"[tmg] low-dim observation terms: {json.dumps(added) if added else 'none'}", flush=True)
         datagen = getattr(env_cfg, "datagen_config", None)
         if datagen is not None:        # the official script seeds random, numpy and torch with this value
             datagen.seed = chunk_seed

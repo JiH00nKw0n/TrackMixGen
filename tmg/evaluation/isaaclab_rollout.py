@@ -38,6 +38,7 @@ from tmg.evaluation.client import PolicyClient
 from tmg.evaluation.rollout import check_server, episode_seed, policy_input
 from tmg.generation.generators.autodata.runtime import reset_success_term
 from tmg.generation.simulators.isaaclab import apply_scene
+from tmg.generation.simulators.isaaclab_lowdim import add_lowdim_terms
 
 
 def launch_app(generator_cfg: dict, device: str):
@@ -146,6 +147,8 @@ def build_env(plain: dict, device: str):
         env_cfg.episode_length_s = max(float(env_cfg.episode_length_s), float(task["eval_episode_length_s"]))
     applied = apply_scene(env_cfg, plain["scene"], str(task["name"]))
     print(f"[tmg] scene {plain['scene'].get('name')}: {'ranges applied ' + str(applied) if applied else 'official ranges kept'}", flush=True)
+    added = add_lowdim_terms(env_cfg, task)             # the same low-dim object terms the generation recorded
+    print(f"[tmg] low-dim observation terms: {added if added else 'none'}", flush=True)
     env = gym.make(task_id, cfg=env_cfg).unwrapped
     if inspect.isclass(success_term.func):        # class-based term (Arena's TaskSuccessTerm): one instance for the whole run
         from tmg.generation.generators.autodata.runtime import initialize_success_term
@@ -211,7 +214,7 @@ def observation_input(obs_dict: dict, observation: dict) -> dict:
         if observation.get("image_size"):
             frame = resize_frames(frame, observation["image_size"])
         flat[cam] = frame
-    for key in observation["robot_state"]:
+    for key in [*observation["robot_state"], *(observation.get("object_state") or [])]:
         flat[key] = _to_numpy(policy[key])[0].astype(np.float32)
     return policy_input(flat, observation, image_key="{cam}")
 

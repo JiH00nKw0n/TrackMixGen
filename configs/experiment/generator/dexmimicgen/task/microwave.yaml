@@ -19,7 +19,13 @@ env_args: []                        # extra Arena options after "--" (embodiment
 cameras: [robot_pov_cam_rgb]        # Arena head camera, recorded at 512x512 and resized to image_size by `tmg dataset`
 image_size: [128, 128]
 robot_state: [left_eef_pos, left_eef_quat, right_eef_pos, right_eef_quat, hand_joint_state]
-object_state: []
+object_state: [microwave_state]     # 14 = microwave pose (7) + door joint microjoint (1) + both hands to the microwave (6)
+# Low-dim object observation (decision 2026-10-29): Arena records no microwave term, so one is added to the policy group at
+# generation and evaluation (tmg/generation/simulators/isaaclab_lowdim.py); pools made before 2026-10-29 lack it.
+lowdim_terms:
+  microwave_state:
+    func: tmg.generation.simulators.isaaclab_lowdim:scene_object_state
+    params: {objects: [{name: microwave, joints: [microjoint]}], eef: {links: [left_hand_roll_link, right_hand_roll_link]}}
 instruction: open the microwave door with the right hand
 # Official generation settings (autodata_examples/tasks/gr1_open_microwave.yaml @ 835f4aab), used unchanged except that the
 # chunk guarantees its success count: a source per subtask (select_src_per_subtask true), nearest_neighbor_object (nn_k 3),

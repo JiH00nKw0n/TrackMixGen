@@ -13,7 +13,15 @@ eval_episode_length_s: 20.0         # the env's own limit is 10 s = 200 steps at
 cameras: [agentview_image, robot0_eye_in_hand_image]
 image_size: [128, 128]
 robot_state: [robot0_eef_pos, robot0_eef_quat, robot0_gripper_qpos]
-object_state: []                    # low-dim training is not set up for the Isaac Lab tasks yet
+object_state: [towel_state]         # 111 = 6x6 grid of towel nodes (108) + eef to the towel centroid (3); see lowdim_terms
+# Low-dim object observation (decision 2026-10-29): the official environment records no towel term (5,989 nodes only in the
+# simulator state), so a 6x6 grid of nodes is picked once on the towel's rest plane, positions in the environment frame, plus
+# the vector from the end-effector (sensor ee_frame) to the towel centroid. Added to the policy group at generation and
+# evaluation (tmg/generation/simulators/isaaclab_lowdim.py); pools made before 2026-10-29 lack it.
+lowdim_terms:
+  towel_state:
+    func: tmg.generation.simulators.isaaclab_lowdim:deformable_nodes
+    params: {object: object, layout: grid, counts: [6, 6], relative: centroid, eef: {sensor: ee_frame}}
 instruction: fold the towel in half
 # Official generation settings (softmimicgen/envs/franka_towel_ik_rel_mimic_env_cfg.py @ c9d146ba), used unchanged:
 # one source per attempt (select_src_per_subtask False), selection registration_cost (nn_k 3), action noise 0.01,
