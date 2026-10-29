@@ -278,7 +278,7 @@ def test_policy_specs_keep_the_old_names_types_and_pipeline_rule():
     assert specs["bc_rnn"] == (["bc_rnn", "tmg_bc_rnn", "tmg.policy.bc_rnn:BCRNNConfig", "tmg.policy.bc_rnn:BCRNNPolicy"], {})
     assert specs["diffusion_policy"] == (["diffusion_policy", "diffusion", "lerobot.policies.diffusion.configuration_diffusion:DiffusionConfig",
                                           "lerobot.policies.diffusion.modeling_diffusion:DiffusionPolicy"],
-                                         {"tuple_params": ("crop_shape", "down_dims")})
+                                         {"tuple_params": ("crop_shape", "down_dims"), "optimizer": "adamw", "per_sample_crop": True})
     assert specs["pi0"] == (["pi0", "pi0", "lerobot.policies.pi0.configuration_pi0:PI0Config", "lerobot.policies.pi0.modeling_pi0:PI0Policy"],
                             {"uses_pipeline": True})
 

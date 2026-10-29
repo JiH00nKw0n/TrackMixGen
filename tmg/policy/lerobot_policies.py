@@ -48,6 +48,8 @@ class PolicySpec:
     policy_class: str               # "module:Class" of the PreTrainedPolicy subclass
     tuple_params: tuple[str, ...] = ()   # params the config class declares as tuples (lists in yaml)
     uses_pipeline: bool = False     # LeRobot's pre/post processor pipelines (tokenizer) instead of our normalizer
+    optimizer: str = "preset"       # preset: the config's optimizer preset; adamw: AdamW with the preset's values
+    per_sample_crop: bool = False   # crop every training image at its own location (tmg.policy.augment)
 
 
 POLICY_SPECS: dict[str, PolicySpec] = {
@@ -55,7 +57,10 @@ POLICY_SPECS: dict[str, PolicySpec] = {
     "diffusion_policy": PolicySpec("diffusion_policy", "diffusion",
                                    "lerobot.policies.diffusion.configuration_diffusion:DiffusionConfig",
                                    "lerobot.policies.diffusion.modeling_diffusion:DiffusionPolicy",
-                                   tuple_params=("crop_shape", "down_dims")),
+                                   tuple_params=("crop_shape", "down_dims"),
+                                   # the official Diffusion Policy trains with AdamW and per-sample random crops; LeRobot's
+                                   # preset is Adam (coupled L2 decay) and its RandomCrop draws one location per batch
+                                   optimizer="adamw", per_sample_crop=True),
     "pi0": PolicySpec("pi0", "pi0", "lerobot.policies.pi0.configuration_pi0:PI0Config",
                       "lerobot.policies.pi0.modeling_pi0:PI0Policy", uses_pipeline=True),
 }
@@ -157,9 +162,24 @@ def build_policy(policy_cfg: dict, features: dict, device: str, observation: str
     config = build_config(policy_cfg, features, device, observation, overrides)
     cls = policy_class(name)
     pretrained = (policy_cfg.get("pretrained_path") or None)
-    if pretrained:
-        return cls.from_pretrained(pretrained, config=config).to(device)
-    return cls(config).to(device)
+    policy = cls.from_pretrained(pretrained, config=config) if pretrained else cls(config)
+    if policy_spec(name).per_sample_crop:
+        from tmg.policy.augment import use_per_sample_crop
+
+        use_per_sample_crop(policy)
+    return policy.to(device)
+
+
+def build_optimizer(name: str, config, policy):
+    """The policy's optimizer: the config's LeRobot preset, or AdamW with the preset's learning rate, betas, eps and
+    weight decay when the spec says ``adamw`` (the official Diffusion Policy's optimizer)."""
+    preset = config.get_optimizer_preset()
+    if policy_spec(name).optimizer != "adamw":
+        return preset.build(policy.get_optim_params())
+    import torch
+
+    return torch.optim.AdamW(policy.get_optim_params(), lr=preset.lr, betas=tuple(preset.betas), eps=preset.eps,
+                             weight_decay=preset.weight_decay)
 
 
 def normalization_modes(config: PreTrainedConfig) -> dict[str, str]:
