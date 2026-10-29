@@ -196,6 +196,13 @@ def install_autodata(root):
                UV_LINK_MODE="hardlink", UV_HTTP_TIMEOUT="180", UV_CONCURRENT_DOWNLOADS="4")
     if not python.exists():
         run([uv, "venv", "--python", "3.12", "--seed", venv], env=env)
+    build = root / "tools/autodata-build"
+    if not (build / "bin/python").exists():
+        run([uv, "venv", "--python", python, build], env=env)
+    # The Dockerfile supplies CMake/Ninja through apt. Keep build tools outside the locked runtime.
+    run([uv, "pip", "install", "--no-config", "--python", build / "bin/python",
+         "cmake==3.28.4", "ninja==1.11.1.1"], env=env)
+    env["PATH"] = f"{build / 'bin'}:{root / 'tools/usr/bin'}:{env.get('PATH', '')}"
     run([uv, "export", "--frozen", "--no-dev", "--format", "pylock.toml", "--output-file", "pylock.toml", "--quiet"], cwd=arena, env=env)
     run([uv, "export", "--frozen", "--no-dev", "--format", "requirements.txt", "--no-emit-local", "--no-hashes",
          "--output-file", "constraints.txt", "--quiet"], cwd=arena, env=env)
