@@ -1,3 +1,4 @@
+import pathlib
 import types
 
 import numpy as np
@@ -36,10 +37,65 @@ def test_apply_scene_writes_pose_ranges():
     assert term.params["pose_range"] == {"x": (-0.025, 0.125), "y": (-0.05, 0.05), "yaw": (-0.2618, 0.2618)}
     assert applied["reset_object_position"]["x"] == (-0.025, 0.125)
     assert apply_scene(env_cfg, {"name": "official", "override_bounds": False}, "rope") == {}
+    assert apply_scene(env_cfg, scene, "towel") == {}            # a task the scene lists no bounds for keeps its official ranges
     with pytest.raises(KeyError):
-        apply_scene(env_cfg, scene, "towel")
+        apply_scene(env_cfg, {**scene, "bounds": {"rope": {"no_such_event": {"x": [0, 1]}}}}, "rope")
     with pytest.raises(ValueError):
         pose_range_of({"x": [1.0, 0.0]})
+
+
+def test_apply_scene_nested_parameters_and_added_events(monkeypatch):
+    import sys
+    from tmg.generation.simulators.isaaclab import ranges_of, validate_isaaclab_scene
+
+    term = types.SimpleNamespace(params={"pose_range": {"x": (0.0, 0.1)}, "partial_pose_range": {"x": (0.0, 0.1), "yaw": (-0.5, 0.5)}})
+    env_cfg = types.SimpleNamespace(events=types.SimpleNamespace(reset_object_position=term))
+    rope = {"reset_object_position": {"pose_range": {"x": [-0.05, 0.15], "y": [-0.1, 0.1]}, "partial_pose_range": {"yaw": [-1.0, 1.0]}}}
+    applied = apply_scene(env_cfg, {"name": "ours", "override_bounds": True, "bounds": {"rope": rope}}, "rope")
+    assert term.params["pose_range"] == {"x": (-0.05, 0.15), "y": (-0.1, 0.1)}
+    assert term.params["partial_pose_range"] == {"x": (0.0, 0.1), "yaw": (-1.0, 1.0)}      # the other axes stay official
+    assert set(applied["reset_object_position"]) == {"pose_range", "partial_pose_range"}
+    assert ranges_of({"x": [0, 1]}) == {"pose_range": {"x": (0.0, 1.0)}}
+
+    # added events: a fake isaaclab.managers and a target function resolved by "module:attribute"
+    calls = []
+    managers = types.ModuleType("isaaclab.managers")
+    managers.EventTermCfg = lambda **kw: types.SimpleNamespace(**kw)
+    managers.SceneEntityCfg = lambda name: ("entity", name)
+    isaaclab = types.ModuleType("isaaclab"); isaaclab.managers = managers
+    monkeypatch.setitem(sys.modules, "isaaclab", isaaclab); monkeypatch.setitem(sys.modules, "isaaclab.managers", managers)
+    target = types.ModuleType("tmg_fake_events"); target.reset_pose = lambda *a, **k: calls.append(a)
+    monkeypatch.setitem(sys.modules, "tmg_fake_events", target)
+    scene = {"name": "ours", "override_bounds": True, "bounds": {"microwave": {
+        "tmg_microwave_pose": {"add": True, "func": "tmg_fake_events:reset_pose", "asset": "microwave",
+                               "pose_range": {"x": [-0.05, 0.05]}, "params": {"velocity_range": {}}}}}}
+    validate_isaaclab_scene(scene)
+    env_cfg = types.SimpleNamespace(events=types.SimpleNamespace(existing=term))
+    applied = apply_scene(env_cfg, scene, "microwave")
+    added = env_cfg.events.tmg_microwave_pose
+    assert added.func is target.reset_pose and added.mode == "reset"
+    assert added.params == {"asset_cfg": ("entity", "microwave"), "velocity_range": {}, "pose_range": {"x": (-0.05, 0.05)}}
+    assert applied["tmg_microwave_pose"]["added"] == "tmg_fake_events:reset_pose"
+    assert list(vars(env_cfg.events)) == ["existing", "tmg_microwave_pose"]                 # appended after the official events
+    with pytest.raises(KeyError):
+        apply_scene(env_cfg, scene, "microwave")                                              # already added
+    with pytest.raises(ValueError):
+        validate_isaaclab_scene({"bounds": {"microwave": {"e": {"add": True, "func": "nomodule", "asset": "m"}}}})
+
+
+def test_shipped_isaaclab_scene_files_validate():
+    import yaml
+    from tmg.generation.simulators.isaaclab import validate_isaaclab_scene
+
+    root = pathlib.Path(__file__).resolve().parents[2] / "configs" / "experiment" / "generator"
+    for gen in ("softmimicgen", "dexmimicgen", "autodata"):
+        for f in (root / gen / "scene").glob("*.yaml"):
+            validate_isaaclab_scene(yaml.safe_load(f.read_text()))
+    ours = yaml.safe_load((root / "softmimicgen" / "scene" / "ours.yaml").read_text())
+    assert ours["override_bounds"] is True and set(ours["bounds"]) == {"rope", "towel"}
+    assert set(ours["bounds"]["rope"]["reset_object_position"]) == {"pose_range", "partial_pose_range"}
+    auto = yaml.safe_load((root / "autodata" / "scene" / "ours.yaml").read_text())
+    assert all(e["add"] for e in auto["bounds"]["microwave"].values())
 
 
 def test_measured_eef_poses_reads_the_configured_link():

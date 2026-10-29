@@ -1,5 +1,18 @@
-# Our scene for this generator equals the official reset distribution (decision 2026-10-26: the Isaac Lab tasks keep
-# the ranges of their papers). Listed under the same name as MimicGen's widened scene so the command line is uniform.
-# To widen, set override_bounds: true and list bounds: {<task>: {<reset event>: {x: [lo, hi], y: ..., yaw: ...}}}.
+# Our scene for SoftMimicGen: the official reset distribution widened (decision 2026-10-29). Rule as for the MimicGen
+# "ours" scene: the centre of every official range is kept and its width doubled; ranges the official config leaves
+# at zero (the rope's whole-body y shift and yaw) are opened symmetrically. Units: metres and radians (yaw).
+#   rope, official (franka_rope env_cfg.py, reset_nodal_pose_portion): whole rope x [0, 0.1], nothing else; one half of the
+#     rope additionally x [0, 0.1], y [0, 0.1], yaw [-30, 30] deg around that half's centroid (the bend of the rope).
+#   towel, official (franka_towel env_cfg.py, reset_nodal_state_uniform): x [0, 0.1], y [-0.05, 0.05], yaw [-30, 30] deg.
+# The robot's joint noise (gaussian, std 0.02 rad) stays official. Tasks not listed (jenga) keep their official ranges.
+# The same ranges are written into the evaluation environment (tmg/evaluation/isaaclab_rollout.py), so the fixed
+# validation and test scenes are drawn from this distribution too.
 name: ours
-override_bounds: false
+override_bounds: true
+bounds:
+  rope:
+    reset_object_position:
+      pose_range: {x: [-0.05, 0.15], y: [-0.1, 0.1], yaw: [-0.5235987755982988, 0.5235987755982988]}
+      partial_pose_range: {x: [-0.05, 0.15], y: [-0.05, 0.15], yaw: [-1.0471975511965976, 1.0471975511965976]}
+  towel:
+    reset_object_position: {x: [-0.05, 0.15], y: [-0.1, 0.1], yaw: [-1.0471975511965976, 1.0471975511965976]}
