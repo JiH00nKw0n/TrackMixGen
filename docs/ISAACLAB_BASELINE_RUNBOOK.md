@@ -42,7 +42,9 @@ Isaac Lab 세 과제는 공식 설정이 "성공 수 보장"(generation_guarante
 
 정책은 영상 Diffusion Policy 하나다(`configs/experiment/policy/diffusion_policy.yaml`, 10만 갱신, 배치 64, 체크포인트 1만 갱신마다).
 관측은 과제의 카메라 두 대(128×128)와 로봇 상태다. 세 과제 모두 영상을 자르지 않는다(SoftMimicGen 공식 Diffusion Policy 설정과
-같고, MimicGen 과제의 공식 76×76 자르기는 그쪽에만 남겨 둔다). 평가 상한은 Rope 250걸음, Towel 220걸음(공식 롤아웃 상한),
+같고, MimicGen 과제의 공식 76×76 자르기는 그쪽에만 남겨 둔다). 공식과 다른 점이 하나 있다. Towel의 공식 agentview 카메라는 300×300이고
+공식 Diffusion Policy(robomimic 구현)는 카메라마다 인코더가 따로 있어 그 크기 그대로 쓰지만, 우리가 쓰는 LeRobot 구현은 모든 카메라
+영상을 한 텐서로 쌓아야 해서 agentview를 128×128로 줄여 쓴다(2026-10-29 결정). 다른 네 과제의 카메라는 공식 크기와 같다. 평가 상한은 Rope 250걸음, Towel 220걸음(공식 롤아웃 상한),
 Pick Place 400걸음(환경 자체 길이)이다. 체크포인트 선택은 검증 25장면 성공률이 가장 높은 것(동률이면 이른 것)이다.
 
 ## 2. 요구 사항
