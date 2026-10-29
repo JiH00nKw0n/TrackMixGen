@@ -115,7 +115,7 @@ class Profile:
             p = self.launch("train", ["train", "generator=softmimicgen", "task=rope", "scene=ours",
                 "method=none", "generation=pool_isaac", "observation=image", f"policy={policy}",
                 "cluster=pod", "seed=202699", "updates=200", "training.updates_per_epoch=100",
-                "training.checkpoint_every_epochs=2", "training.cache=hdf5", "training.num_threads=2",
+                "training.checkpoint_every_epochs=2", "training.cache=ram", "training.num_threads=2",
                 "training.keep_training_states=last", f"dataset.path={subset}", f"output={run}"], self.root / f"train_{policy}.log")
             baseline=resources()
             while p.poll() is None:
