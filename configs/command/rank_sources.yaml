@@ -1,14 +1,14 @@
 # @package _global_
 # tmg rank_sources: order the source demonstrations of one task by their generation success in a finished
 # baseline pool (method=none) and write configs/experiment/generator/<generator>/ranking/<task>.yaml.
-#   tmg rank_sources task=hammer_cleanup scene=ours generation=rank3000
+#   tmg rank_sources task=hammer_cleanup scene=ours generation=rank_human_demos
 defaults:
   - /paths: local
   - /cluster: local
   - /generator: mimicgen
   - /task: ???
   - /scene: ours
-  - /generation: rank3000
+  - /generation: rank_human_demos
   - _self_
 
 # The baseline pool to read (the output folder of `tmg generate` with method=none and the same choices).

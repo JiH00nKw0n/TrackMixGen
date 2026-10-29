@@ -61,22 +61,27 @@ esac
     assert "serve-stop" not in calls.read_text()
 
 
-def test_autodata_uses_the_main_pinned_runtime_paths(tmp_path, monkeypatch):
+@pytest.mark.parametrize("image", ["isaaclab-dex", "isaaclab-autodata"])
+def test_autodata_uses_the_main_pinned_runtime_paths(tmp_path, monkeypatch, image):
     import importlib.util
     spec=importlib.util.spec_from_file_location('native_autodata',REPO/'scripts/native_runtime.py')
     module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
     root=tmp_path/'native';py=root/'envs/isaaclab-autodata/bin/python'
+    legacy=root/'envs/isaaclab-dex/bin/python'
+    legacy.parent.mkdir(parents=True);legacy.write_text('legacy installation must not be selected')
     py.parent.mkdir(parents=True);py.touch()
     monkeypatch.setenv('TMG_NATIVE_ROOT',str(root))
     with pytest.raises(RuntimeError,match='has not passed'):
-        module.runtime_environment('isaaclab-autodata',str(tmp_path/'data'))
+        module.runtime_environment(image,str(tmp_path/'data'))
     proof=root/'install-records/isaaclab-autodata.versions.json'
     proof.parent.mkdir();proof.write_text(json.dumps({'passed':False}))
     with pytest.raises(RuntimeError,match='has not passed'):
-        module.runtime_environment('isaaclab-autodata',str(tmp_path/'data'))
+        module.runtime_environment(image,str(tmp_path/'data'))
     proof.write_text(json.dumps({'passed':True}))
-    actual,env=module.runtime_environment('isaaclab-autodata',str(tmp_path/'data'))
+    actual,env=module.runtime_environment(image,str(tmp_path/'data'))
     assert actual==py
+    assert env['TMG_IMAGE']==f'native/{image}'
+    assert legacy.read_text()=='legacy installation must not be selected'
     assert env['TMG_ISAACLAB_SRC']==str(root/'src/isaaclab-autodata/IsaacLab-Arena/submodules/IsaacLab')
     assert env['TMG_ARENA_SRC']==str(root/'src/isaaclab-autodata/IsaacLab-Arena')
     assert env['TMG_AUTODATA_SRC']==str(root/'src/isaaclab-autodata/AutoData')

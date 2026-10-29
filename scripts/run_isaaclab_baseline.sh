@@ -1,5 +1,5 @@
 #!/bin/bash
-# Baseline experiment of the Isaac Lab generators (SoftMimicGen, DexMimicGen) on one GPU machine, end to end:
+# Baseline experiment of the Isaac Lab generators (SoftMimicGen on its Isaac Lab fork, DexMimicGen through AutoData) on one GPU machine, end to end:
 # for every task, the official source demonstrations, one generated pool of 1,000 successes with the official
 # generator settings (method none, generation pool_isaac), the fixed evaluation scenes, a 1,000-demonstration image
 # dataset, then three training seeds of each policy in POLICIES, each validated on the 25 validation scenes at
@@ -11,7 +11,7 @@
 #
 #   CLUSTER=ada scripts/run_isaaclab_baseline.sh
 # Variables: CLUSTER (ada), GPU (0), SOFT_TASKS ("rope towel"),
-#   DEX_TASKS ("pick_place"), AUTODATA_TASKS ("microwave bottle_door"), SEEDS ("202601 202602 202603"),
+#   DEX_TASKS ("pick_place microwave bottle_door"), SEEDS ("202601 202602 202603"),
 #   POLICY (diffusion_policy), SIZE (1000), VAL_PARALLEL (2: checkpoints validated at a time, each one Isaac Sim),
 #   TEST_SHARDS (3: parallel shards of the 300 test scenes), SEED_PARALLEL (1: training runs at a time),
 #   ONLY_GENERATION (1: stop after the datasets), BUNDLE_NAME (results folder name under <result root>/reports),
@@ -21,8 +21,7 @@
 set -uo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 CLUSTER=${CLUSTER:-ada}; GPU=${GPU:-0}; SOFT_TASKS=${SOFT_TASKS-"rope towel"}
-DEX_TASKS=${DEX_TASKS-"pick_place"}
-AUTODATA_TASKS=${AUTODATA_TASKS-"microwave bottle_door"}
+DEX_TASKS=${DEX_TASKS-"pick_place microwave bottle_door"}
 SEEDS=${SEEDS:-"202601 202602 202603"}; POLICY=${POLICY:-diffusion_policy}; SIZE=${SIZE:-1000}
 POLICIES=${POLICIES:-$POLICY}
 VAL_PARALLEL=${VAL_PARALLEL:-2}; TEST_SHARDS=${TEST_SHARDS:-3}; SEED_PARALLEL=${SEED_PARALLEL:-1}
@@ -32,6 +31,7 @@ if [ "${TMG_RETIRE_COMPLETED:-0}" = 1 ] && [ "$SEQUENTIAL_TASKS" != 1 ]; then
 fi
 SCENE=ours; METHOD=none; GENERATION=${GENERATION:-pool_isaac}; OBSERVATION=image
 TRAIN_OVERRIDES=${TRAIN_OVERRIDES:-}; EVAL_EXTRA=${EVAL_EXTRA:-}
+GEN_NAME=${GENERATION##*/}
 DATA_ROOT=$(make -s -C "$REPO" print-data-root CLUSTER="$CLUSTER")
 RESULTS_ROOT=${TMG_RESULTS_ROOT:-$DATA_ROOT}
 LOG=$RESULTS_ROOT/logs/isaaclab_baseline; mkdir -p "$LOG"
@@ -42,12 +42,11 @@ fail() { log "$1 FAILED (see $2)"; echo "$1" >> "$LOG/FAILURES"; }
 JOBS=""
 for t in $SOFT_TASKS; do JOBS="$JOBS softmimicgen:isaaclab-soft:$t"; done
 for t in $DEX_TASKS; do JOBS="$JOBS dexmimicgen:isaaclab-dex:$t"; done
-for t in $AUTODATA_TASKS; do JOBS="$JOBS autodata:isaaclab-autodata:$t"; done
 ALL_JOBS=$JOBS
 task_config_exists() { [ -f "$REPO/configs/experiment/generator/$1/task/$2.yaml" ]; }
-dataset_of() { echo "$DATA_ROOT/datasets/$1/$2/$SCENE/$METHOD/$GENERATION/$OBSERVATION/n${SIZE}_seed0.hdf5"; }
+dataset_of() { echo "$DATA_ROOT/datasets/$1/$2/$SCENE/$METHOD/$GEN_NAME/$OBSERVATION/n${SIZE}_seed0.hdf5"; }
 resets_of() { echo "$DATA_ROOT/resets/$1/$2/$SCENE/val25_test300_seed202600.json"; }
-run_of() { echo "$DATA_ROOT/runs/$1/$2/$SCENE/$METHOD/$GENERATION/$OBSERVATION/$POLICY/seed$3"; }
+run_of() { echo "$DATA_ROOT/runs/$1/$2/$SCENE/$METHOD/$GEN_NAME/$OBSERVATION/$POLICY/seed$3"; }
 M() { make -s -C "$REPO" "$@"; }
 
 collect_bundle() {
@@ -55,7 +54,7 @@ collect_bundle() {
   for job in $ALL_JOBS; do
     IFS=: read -r gen image task <<< "$job"
     task_config_exists "$gen" "$task" || continue
-    args+=(--job "$gen/$task/$SCENE/$METHOD/$GENERATION/$OBSERVATION")
+    args+=(--job "$gen/$task/$SCENE/$METHOD/$GEN_NAME/$OBSERVATION")
   done
   for policy in $POLICIES; do
     python3 "$REPO/scripts/collect_results.py" --data-root "$DATA_ROOT" --out "$RESULTS_ROOT/reports/$BUNDLE_NAME/$policy" \

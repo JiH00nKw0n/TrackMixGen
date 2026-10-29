@@ -1,5 +1,5 @@
-"""AutoData adapter units that run without Isaac Sim: chunk spec and descriptor, graft anchors on AutoData-shaped code,
-image resize, camera lookup across observation groups."""
+"""DexMimicGen (AutoData stack) adapter units that run without Isaac Sim: chunk spec and descriptor for an Arena task and for
+Pick Place, graft anchors on AutoData-shaped code, image resize, camera lookup across observation groups, mixing graft."""
 import ast
 import json
 
@@ -25,6 +25,8 @@ def test_chunk_descriptor_changes_only_seed_trials_and_guarantee():
     assert out["generation_policy"] == {"name": "gr1_open_microwave", "num_trials": 250, "guarantee_success": True,
                                         "select_src_per_subtask": True, "seed": 30001}
     assert out["subtasks"] == OFFICIAL["subtasks"] and OFFICIAL["generation_policy"]["num_trials"] == 50
+    fixed = chunk_descriptor(OFFICIAL, seed=20001, num_trials=250, guarantee=False)     # ranking pools: trials are attempts
+    assert fixed["generation_policy"]["guarantee_success"] is False and fixed["generation_policy"]["num_trials"] == 250
 
 
 def test_autodata_chunk_spec(tmp_path, monkeypatch):
@@ -33,13 +35,14 @@ def test_autodata_chunk_spec(tmp_path, monkeypatch):
     (src / "autodata_examples" / "tasks" / "gr1_open_microwave.yaml").write_text(yaml.safe_dump(OFFICIAL))
     monkeypatch.setenv("TMG_DATA_ROOT", str(tmp_path))
     monkeypatch.setenv("TMG_AUTODATA_SRC", str(src))
-    cfg = resolved(compose("generate", ["generator=autodata", "task=microwave", "scene=ours", "method=none", "generation=pool_isaac", "cluster=ada"]))
+    cfg = resolved(compose("generate", ["generator=dexmimicgen", "task=microwave", "scene=ours", "method=none", "generation=pool_isaac", "cluster=ada"]))
     assert cfg["task"]["horizon"] == 600 and cfg["task"]["source_revision"] == "arena_v0.2_lab_v3.0"
     gen = make_generator(cfg)
     chunk = plan_chunks(1000, 250, 30000)[1]
     spec = gen.prepare_chunk(chunk, tmp_path / "c")
     args = spec.extra["script_args"]
     assert args[args.index("--env_name") + 1] == "gr1_open_microwave" and args[args.index("--alg") + 1] == "dexmimicgen"
+    assert args[args.index("--external_callback") + 1].startswith("isaaclab_arena.") and spec.extra["register_modules"] == []
     assert args[args.index("--generation_num_trials") + 1] == "250" and "--enable_cameras" in args and "--seed" not in args[:args.index("--")]
     assert "--headless" not in args and args[args.index("--viz") + 1] == "none"
     assert args[args.index("--") + 1:] == ["--seed", "30002"]
@@ -94,6 +97,24 @@ async def execute(self, datastream, success_term, env_id=0):
     assert code.index("_tmg.cmd(") < code.index("success = bool") < code.index("_tmg.step(")
     compiled = e.compile({"_tmg": None})
     assert compiled.__name__ == "execute"
+    (tmp_path / "ad_builder.py").write_text('''
+def build(self, eef_name, subtask_object_name, selected_boundary, src_ep):
+    src_subtask_eef_poses = src_ep.eef_pose[eef_name][selected_boundary[0]:selected_boundary[1]]
+    src_subtask_target_poses = src_ep.target_eef_pose[eef_name][selected_boundary[0]:selected_boundary[1]]
+    src_subtask_passthrough_actions = {k: v[selected_boundary[0]:selected_boundary[1]] for k, v in src_ep.passthrough_action.items()}
+    src_subtask_object_pose = (
+        src_ep.object_poses[subtask_object_name][selected_boundary[0]] if subtask_object_name is not None else None
+    )
+    seq = make_seq(src_subtask_eef_poses, src_subtask_target_poses, src_subtask_passthrough_actions)
+    return seq
+''')
+    mod2 = importlib.import_module("ad_builder")
+    sys.modules.pop("ad_builder", None)
+    b = Graft(mod2.build, expected_hash=None, label="build")
+    b.insert_after_assign("src_subtask_object_pose", "src_subtask_eef_poses, src_subtask_target_poses, src_subtask_passthrough_actions = _tmg.mix_segment(self, locals())")
+    b.insert_after_assign("seq", "_tmg.record_subtask(locals())")
+    code = ast.unparse(b.node)
+    assert code.index("src_subtask_object_pose = ") < code.index("_tmg.mix_segment(") < code.index("seq = make_seq") < code.index("_tmg.record_subtask(")
 
 
 def test_resize_frames_matches_dataset_and_evaluator():
@@ -132,10 +153,39 @@ def test_observation_input_finds_cameras_in_other_groups_and_resizes():
 
 def test_autodata_task_configs_and_driver_jobs():
     for task in ("microwave", "bottle_door"):
-        cfg = resolved(compose("resets", ["generator=autodata", f"task={task}", "scene=ours"]))
+        cfg = resolved(compose("resets", ["generator=dexmimicgen", f"task={task}", "scene=ours"]))
         assert cfg["task"]["cameras"] == ["robot_pov_cam_rgb"] and cfg["task"]["image_size"] == [128, 128]
         assert cfg["task"]["policy_overrides"]["diffusion_policy"] == {"crop_shape": None}
+        assert cfg["task"]["external_callback"].endswith("environment_registration_callback")
     assert json.dumps(OFFICIAL)   # sanity: fixture serializable
+
+
+def test_pick_place_runs_on_the_autodata_stack(tmp_path, monkeypatch):
+    """Pick Place: Isaac Lab Mimic's environment registered by isaaclab_mimic, our camera environment, no Arena callback."""
+    src = tmp_path / "AutoData"
+    (src / "autodata_examples" / "tasks").mkdir(parents=True)
+    official = {"name": "gr1t2_pick_place", "algo": "dexmimicgen",
+                "generation_policy": {"name": "gr1t2_pick_place", "seed": 1, "num_trials": 1000, "guarantee_success": True,
+                                      "select_src_per_subtask": False, "select_src_per_arm": False},
+                "subtasks": {"right": [{"object_ref": "object", "subtask_term_signal": "idle_right"}, {"object_ref": "object"}],
+                             "left": [{"object_ref": "object"}]}}
+    (src / "autodata_examples" / "tasks" / "gr1_pick_place.yaml").write_text(yaml.safe_dump(official))
+    monkeypatch.setenv("TMG_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("TMG_AUTODATA_SRC", str(src))
+    cfg = resolved(compose("generate", ["generator=dexmimicgen", "task=pick_place", "scene=ours", "method=trackmix", "generation=test/pilot20"]))
+    assert cfg["generator"]["image"] == "tmg/isaaclab-dex" and cfg["generator"]["package"] == "autodata_core"
+    gen = make_generator(cfg)
+    spec = gen.prepare_chunk(plan_chunks(20, 20, 9000)[0], tmp_path / "c")
+    args = spec.extra["script_args"]
+    assert "--external_callback" not in args and "--" not in args
+    assert args[args.index("--env_name") + 1] == "TMG-PickPlace-GR1T2-Images-Mimic-v0" and args[args.index("--generation_num_trials") + 1] == "20"
+    assert spec.extra["register_modules"] == ["isaaclab_mimic.envs"] and spec.extra["camera_module"].endswith("gr1_pickplace_cameras")
+    assert spec.extra["cameras"] == ["front_image", "side_image"] and spec.extra["layout"]["noise_draw_shapes"] == [3, 4, 3, 4]
+    assert spec.extra["layout"]["measure_links"] == {"left": "left_hand_pitch_link", "right": "right_hand_pitch_link"}
+    assert spec.method["mixing"]["max_anchor_rotation_deg"] == 40.0 and spec.method["tracking"]["gripper_events"]["columns"] == [0, 1, 2, 3]
+    written = yaml.safe_load((tmp_path / "c" / DESCRIPTOR).read_text())
+    assert written["generation_policy"]["guarantee_success"] is False and written["generation_policy"]["select_src_per_subtask"] is False
+    assert gen.demo_layout()["images_from_records"] is True
 
 
 def test_success_term_helpers_handle_classes_and_functions():

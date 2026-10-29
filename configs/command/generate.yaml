@@ -1,7 +1,7 @@
 # @package _global_
 # tmg generate: one pool of generation attempts for one (generator, task, scene, method, generation) choice.
 # Choose one file per group on the command line, e.g.
-#   tmg generate generator=mimicgen task=square scene=official_d1 method=none generation=pilot20
+#   tmg generate generator=mimicgen task=square scene=official_d1 method=none generation=test/pilot20
 defaults:
   - /paths: local
   - /cluster: local
@@ -9,7 +9,7 @@ defaults:
   - /task: ???
   - /scene: official_d1
   - /method: none
-  - /generation: pilot20
+  - /generation: test/pilot20
   - _self_
 
 # Result folder of the pool. Every stage writes exactly one folder.

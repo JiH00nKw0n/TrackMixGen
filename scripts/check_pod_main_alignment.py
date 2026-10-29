@@ -38,7 +38,7 @@ def check(ref):
     unexpected = [x['path'] for x in files if not x['identical'] and not x['execution_exception']]
     from tmg.config import compose, resolved
     configurations = []
-    for gen, task, horizon in [('softmimicgen','rope',400),('softmimicgen','towel',400),('dexmimicgen','pick_place',600),('autodata','microwave',600),('autodata','bottle_door',600)]:
+    for gen, task, horizon in [('softmimicgen','rope',400),('softmimicgen','towel',400),('dexmimicgen','pick_place',600),('dexmimicgen','microwave',600),('dexmimicgen','bottle_door',600)]:
         for policy in ['bc_rnn','diffusion_policy']:
             c = resolved(compose('train', [f'generator={gen}', f'task={task}', 'scene=ours', 'method=none', 'generation=pool_isaac',
                                             'observation=image', f'policy={policy}', 'seed=202601', 'cluster=pod', 'dataset.size=1000']))
@@ -53,7 +53,7 @@ def check(ref):
 
 if __name__ == '__main__':
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--main-ref',default='1ef296bdfa2f141a4fd93f049e63dd2ad2509542')
+    parser.add_argument('--main-ref',default='23fe484')
     parser.add_argument('--out',type=Path,required=True)
     args=parser.parse_args();result=check(args.main_ref)
     args.out.parent.mkdir(parents=True,exist_ok=True);args.out.write_text(json.dumps(result,indent=2))

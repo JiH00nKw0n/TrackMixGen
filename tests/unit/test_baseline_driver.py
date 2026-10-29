@@ -73,7 +73,7 @@ with open(str(p)+'.lock','w') as f:
 
     # All five real tasks must dispatch both policies and all three seeds.
     tasks = [('softmimicgen','rope'),('softmimicgen','towel'),('dexmimicgen','pick_place'),
-             ('autodata','bottle_door'),('autodata','microwave')]
+             ('dexmimicgen','bottle_door'),('dexmimicgen','microwave')]
     for gen, task in tasks:
         cfg=repo/f'configs/experiment/generator/{gen}/task/{task}.yaml'
         cfg.parent.mkdir(parents=True,exist_ok=True); cfg.write_text(f'name: {task}\n')
@@ -83,11 +83,11 @@ with open(str(p)+'.lock','w') as f:
         rs.parent.mkdir(parents=True,exist_ok=True); rs.touch()
     state.write_text(json.dumps({'active':0,'peak':0,'calls':[]}))
     env['SOFT_TASKS']='rope towel'
-    env['DEX_TASKS']='pick_place'
+    env['DEX_TASKS']='pick_place microwave bottle_door'
     env['AUTODATA_TASKS']='microwave bottle_door'
     result=subprocess.run(['bash',str(scripts/source.name)],env=env,capture_output=True,text=True,timeout=30)
     assert result.returncode == 0, result.stdout+result.stderr
     calls=json.loads(state.read_text())
     assert len(calls['calls'])==30 and calls['peak']==2
-    assert 'autodata:isaaclab-autodata:bottle_door' in result.stdout
-    assert 'autodata:isaaclab-autodata:microwave' in result.stdout
+    assert 'dexmimicgen:isaaclab-dex:bottle_door' in result.stdout
+    assert 'dexmimicgen:isaaclab-dex:microwave' in result.stdout

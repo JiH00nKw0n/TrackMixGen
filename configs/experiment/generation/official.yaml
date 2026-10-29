@@ -1,9 +1,0 @@
-defaults:
-  - pool_lowdim
-  - _self_
-# Not a generation: the name under which a dataset imported from an official release (MimicGen's core datasets,
-# scripts/import_robomimic_dataset.py) is stored and trained on, so the dataset, run and evaluation paths follow
-# the usual layout (<datasets>/<generator>/<task>/<scene>/none/official/low_dim/n<size>_seed<seed>.hdf5).
-# Training on it and evaluating with our evaluator measures our policy pipeline apart from our data generation.
-name: official
-attempts: 0

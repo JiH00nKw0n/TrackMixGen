@@ -1,4 +1,5 @@
-"""Episodes of ``tmg eval`` for the Isaac Lab generators (SoftMimicGen, DexMimicGen).
+"""Episodes of ``tmg eval`` for the Isaac Lab generators (SoftMimicGen on its Isaac Lab fork; DexMimicGen on the AutoData
+stack, Isaac Lab 3.0 with Arena).
 
 Runs inside the generator's image (``tmg/isaaclab-soft``, ``tmg/isaaclab-dex``) with the GPU. The environment is
 built the way Isaac Lab's own ``scripts/imitation_learning/robomimic/play.py`` builds it: ``parse_env_cfg`` of the
@@ -67,13 +68,18 @@ def launch_app(generator_cfg: dict, device: str):
     return app
 
 
-def register_arena_environment(generator_cfg: dict, task: dict, device: str, seed: int | None = None) -> None:
-    """AutoData tasks: register the Arena environment through Arena's callback, as AutoData's own script does
-    (``--task <name> --device <d> --num_envs 1 --enable_cameras`` plus the task's ``env_args``)."""
+def is_autodata_stack(generator_cfg: dict) -> bool:
+    """True for the DexMimicGen generator (AutoData's ``autodata_core`` on Isaac Lab 3.0), false for the Isaac Lab fork."""
+    return str(generator_cfg.get("package", "")).split(".")[0] == "autodata_core"
+
+
+def register_arena_environment(task: dict, device: str, seed: int | None = None) -> None:
+    """Arena tasks (``task.external_callback``): register the environment through Arena's callback, as AutoData's own script
+    does (``--task <name> --device <d> --num_envs 1 --enable_cameras`` plus the task's ``env_args``)."""
     import sys
 
-    callback = importlib.import_module(str(generator_cfg["external_callback"]).rsplit(".", 1)[0])
-    fn = getattr(callback, str(generator_cfg["external_callback"]).rsplit(".", 1)[1])
+    callback = importlib.import_module(str(task["external_callback"]).rsplit(".", 1)[0])
+    fn = getattr(callback, str(task["external_callback"]).rsplit(".", 1)[1])
     argv = ["--task", str(task["env_name"]), "--device", str(device), "--num_envs", "1", "--enable_cameras"]
     if seed is not None:
         argv += ["--seed", str(int(seed))]
@@ -90,19 +96,18 @@ def register_arena_environment(generator_cfg: dict, task: dict, device: str, see
 
 
 def import_task_modules(generator_cfg: dict, task: dict) -> None:
-    """Register the generator's environments (``<package root>.envs``, the task packages, the camera module)."""
-    if generator_cfg.get("external_callback"):      # AutoData / Arena: registered by register_arena_environment
-        return
-    root = str(generator_cfg["package"]).split(".")[0]          # softmimicgen | isaaclab_mimic
-    importlib.import_module(f"{root}.envs")
-    if "--enable_pinocchio" in [str(a) for a in (generator_cfg.get("extra_args") or [])]:
-        importlib.import_module(f"{root}.envs.pinocchio_envs")
-        importlib.import_module("isaaclab_tasks.manager_based.manipulation.pick_place")
-    for name in ("isaaclab_tasks", "softmimicgen_tasks"):
-        try:
-            importlib.import_module(name)
-        except ImportError:
-            pass
+    """Register the environments: the task's ``register_modules`` and camera module on the AutoData stack (an Arena task is
+    registered by ``register_arena_environment`` instead); ``<package root>.envs`` and the task packages on the Isaac Lab fork."""
+    if not is_autodata_stack(generator_cfg):
+        root = str(generator_cfg["package"]).split(".")[0]          # softmimicgen
+        importlib.import_module(f"{root}.envs")
+        for name in ("isaaclab_tasks", "softmimicgen_tasks"):
+            try:
+                importlib.import_module(name)
+            except ImportError:
+                pass
+    for module in list(task.get("register_modules") or []):
+        importlib.import_module(str(module))
     if task.get("camera_module"):
         importlib.import_module(str(task["camera_module"]))
 
@@ -115,7 +120,7 @@ def build_env(plain: dict, device: str):
     from isaaclab_tasks.utils import parse_env_cfg
 
     task = plain["task"]
-    autodata = bool(plain["generator"].get("external_callback"))
+    autodata = is_autodata_stack(plain["generator"])
     task_id = str(task.get("camera_env") or task["env_name"])
     env_cfg = parse_env_cfg(task_id, device=str(device), num_envs=1)
     env_cfg.observations.policy.concatenate_terms = False
@@ -244,8 +249,8 @@ def play_isaaclab(plain: dict, todo: list[dict], checkpoint: str, horizon: int, 
     task, obs_cfg, ev = plain["task"], plain["observation"], plain["evaluation"]
     device = str((plain.get("cluster") or {}).get("device", "cuda:0"))
     launch_app(plain["generator"], device)           # stays up until the interpreter exits
-    if plain["generator"].get("external_callback"):
-        register_arena_environment(plain["generator"], task, device, seed=int(ev["seed"]))
+    if task.get("external_callback"):
+        register_arena_environment(task, device, seed=int(ev["seed"]))
     import_task_modules(plain["generator"], task)
     env, success_term, task_id = build_env(plain, device)
     print(f"[tmg] Isaac Lab environment {task_id} on {device}; success term {getattr(success_term.func, '__name__', success_term.func)} "

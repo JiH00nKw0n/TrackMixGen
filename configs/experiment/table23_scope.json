@@ -24,35 +24,37 @@
       "integration": "connected"
     },
     {
-      "generator": "autodata",
+      "generator": "dexmimicgen",
       "task": "bottle_door",
       "display_name": "Bottle Placement and Door Closing",
       "integration": "connected",
       "official_task": "put_item_in_fridge_and_close_door",
       "source_dataset": "nvidia/Arena-GR1-Manipulation-PlaceItemCloseDoor-Task",
-      "runtime_image": "isaaclab-autodata",
-      "physical_preflight": "main runtime to be verified on Pod"
+      "runtime_image": "isaaclab-dex",
+      "physical_preflight": "Unified AutoData stack; existing native installation retained"
     },
     {
-      "generator": "autodata",
+      "generator": "dexmimicgen",
       "task": "microwave",
       "display_name": "Microwave Opening",
       "integration": "connected",
       "official_task": "gr1_open_microwave",
       "source_dataset": "nvidia/Arena-GR1-Manipulation-Task",
-      "runtime_image": "isaaclab-autodata",
-      "physical_preflight": "main runtime to be verified on Pod"
+      "runtime_image": "isaaclab-dex",
+      "physical_preflight": "Unified AutoData stack; existing native installation retained"
     },
     {
       "generator": "dexmimicgen",
       "task": "pick_place",
       "display_name": "Pick-and-Place",
-      "integration": "connected"
+      "integration": "connected",
+      "runtime_image": "isaaclab-dex",
+      "physical_preflight": "Unified AutoData stack; existing native installation retained"
     }
   ],
   "excluded_from_this_campaign": [
     "softmimicgen/jenga"
   ],
   "completion_rule": "All five tasks must complete both policies and all three seeds. Connection or preflight alone is not formal completion.",
-  "main_reference": "1ef296bdfa2f141a4fd93f049e63dd2ad2509542"
+  "main_reference": "23fe484"
 }

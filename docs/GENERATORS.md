@@ -60,8 +60,8 @@
 
 ### 1.4 원본 시연 선택 방식: 지금은 우리 값, 최종 평가는 공식 템플릿 값 (2026-10-27 결정)
 
-생성 프로토콜은 `configs/experiment/generation/pilot20.yaml`의 `protocol` 블록에 있고, 다른 generation 설정(`pool`, `pool_lowdim`,
-`rank3000`, `check200`, `pilot20_images`)은 이 블록을 물려받는다. 지금 값은 하위작업마다 원본 시연을 독립적으로 고르고
+생성 프로토콜은 `configs/experiment/generation/pool_robosuite_image.yaml`의 `protocol` 블록에 있고, 다른 generation 설정(`pool_robosuite_lowdim`,
+`rank_human_demos`, `pool_isaac`, `test/` 아래의 시험용 설정들)은 이 블록을 물려받는다. 지금 값은 하위작업마다 원본 시연을 독립적으로 고르고
 (`select_src_per_subtask: true`) 고르는 방식은 무작위다(`selection_strategy: random`). MimicGen 공식 설정 템플릿
 (`mimicgen/exps/templates/robosuite/*.json`)은 일곱 과제 모두 `select_src_per_subtask: false`(한 시도의 모든 하위작업이 같은 원본
 시연을 쓴다)이고, Square의 두 번째 하위작업과 Stack Three의 모든 하위작업은 `nearest_neighbor_object`(현재 물체 자세와 가장
@@ -95,9 +95,9 @@
 
 | 학습 데이터 (모두 D2 장면, 1,000개, 저차원 BC-RNN 시드 1, 10만 갱신) | 생성 성공률 | 25장면 검증 최고 | 300장면 시험(상한 600) |
 |---|---|---|---|
-| 우리 생성, 하위작업별 원본 독립 선택 (`pool_lowdim`) | 10.3% (11,000회 중 1,137회) | 9만 체크포인트 2/25 | 14/300 = 4.7% (95% 구간 2.8–7.7%) |
-| 우리 생성, 한 시도에 원본 하나 (`pool_lowdim_onesrc`, 공식 템플릿 값) | 29.1% (4,000회 중 1,166회) | 10만 체크포인트 4/25 | 14/300 = 4.7% (95% 구간 2.8–7.7%) |
-| 논문 공식 D2 데이터셋 (`scripts/import_robomimic_dataset.py`로 변환, `generation=official`) | 해당 없음 | 7만 체크포인트 2/25 | 8/300 = 2.7% (95% 구간 1.4–5.2%) |
+| 우리 생성, 하위작업별 원본 독립 선택 (`pool_robosuite_lowdim`) | 10.3% (11,000회 중 1,137회) | 9만 체크포인트 2/25 | 14/300 = 4.7% (95% 구간 2.8–7.7%) |
+| 우리 생성, 한 시도에 원본 하나 (`test/pool_robosuite_lowdim_onesrc`, 공식 템플릿 값) | 29.1% (4,000회 중 1,166회) | 10만 체크포인트 4/25 | 14/300 = 4.7% (95% 구간 2.8–7.7%) |
+| 논문 공식 D2 데이터셋 (`scripts/import_robomimic_dataset.py`로 변환, `generation=imported_official`) | 해당 없음 | 7만 체크포인트 2/25 | 8/300 = 2.7% (95% 구간 1.4–5.2%) |
 | 논문 보고값 | 31.3% | 해당 없음 | 38.7% (체크포인트별 50회 평가의 최대값, 시드 3개 중 최대) |
 
 측정으로 확인한 것은 다음과 같다.
@@ -138,8 +138,9 @@ robosuite 1.4.1, CPU torch 2.6)의 학습과 평가를 돌렸다. 설정은 공�
 두 생성기는 Isaac Lab의 `generate_dataset.py` 스크립트로 돈다. 스크립트는 인자를 읽은 뒤 Isaac Sim을 띄우고 나서야 Isaac Lab
 모듈을 들여오므로, 접목을 미리 설치할 수 없다. 청크 프로세스(`tmg/generation/generators/isaaclab/entrypoint.py`)는 스크립트
 소스를 읽어 `if __name__ == "__main__":` 바로 앞에 `_tmg_install(globals(), _tmg_spec)` 한 줄을 끼운 사본을 실행한다. 그
-함수는 스크립트의 들여오기가 끝난 뒤, `main()`이 돌기 전에 (1) 카메라 환경 모듈을 들여오고, (2) `setup_env_config`를 감싸
-장면 범위를 환경 설정에 써넣고, (3) 접목을 설치한다. 공식 파일은 디스크에서 바뀌지 않는다.
+함수는 스크립트의 들여오기가 끝난 뒤, `main()`이 돌기 전에 (1) 과제의 `register_modules`와 카메라 환경 모듈을 들여오고, (2)
+`setup_env_config`를 감싸 장면 범위를 환경 설정에 써넣고, (3) 접목을 설치한다. 공식 파일은 디스크에서 바뀌지 않는다. 2026-10-29부터
+이 스크립트 방식은 SoftMimicGen에 쓰이고, DexMimicGen은 같은 진입점으로 AutoData의 스크립트를 돈다(2.5절, 2.9절).
 
 패키지는 Soft가 `softmimicgen.datagen`, Dex가 `isaaclab_mimic.datagen`이다. 끼우는 자리는 다음과 같다.
 
@@ -195,7 +196,9 @@ Isaac Lab 평가를 만들 때도 성공 판정은 첫 행동 뒤부터 매 걸�
 | Dex GR1 Exhaust Pipe | 그렇다 (false) | nearest_neighbor_object | 0.003 | 오른손 5, 5 / 왼손 5 | 버린다 |
 
 여섯 과제 모두 `generation_guarantee`가 켜져 있어 `--generation_num_trials`는 성공 수를 뜻한다. 우리 `generation=pool_isaac`
-(성공 250개 청크 4개)도 이 뜻을 그대로 따르고, 기록기는 실패 시도까지 모두 남기므로 생성 성공률은 기록에서 계산한다.
+(성공 250개 청크 4개, `protocol.guarantee: true`)도 이 뜻을 그대로 따르고, 기록기는 실패 시도까지 모두 남기므로 생성 성공률은 기록에서
+계산한다. 시험용 설정과 순위 풀(`rank_human_demos`)은 `guarantee: false`여서 어댑터가 `generation_guarantee`를 꺼 적힌 수만큼만
+시도한다(2026-10-29부터).
 
 원본 시연 파일의 공개 여부는 다음과 같다. 측정한 사실이다.
 
@@ -269,7 +272,7 @@ Isaac Lab 평가를 만들 때도 성공 판정은 첫 행동 뒤부터 매 걸�
 
 Rope를 `tmg/isaaclab-soft` 이미지로 전체 경로를 한 번 돌렸다. 측정한 사실이다.
 
-- 생성(`generation=pilot20`, 성공 20개 보장): 26회 시도, 성공 20회, 834초(Isaac Sim 시작 포함, 시도당 평균 23.8초). 원본 3개가 모두
+- 생성(`generation=test/pilot20`, 성공 20개 보장): 26회 시도, 성공 20회, 834초(Isaac Sim 시작 포함, 시도당 평균 23.8초). 원본 3개가 모두
   선택되었다. 기록(`attempts.jsonl` 26줄, 라벨 npz)과 공식 `generated.hdf5`(성공 20개)가 맞았다.
 - 고정 장면 시드 파일(검증 25, 시험 300)과 영상 데이터셋(시연 10개, 1,710걸음, 128×128 두 카메라)을 썼다.
 - Diffusion Policy 200갱신 학습 뒤 `make validate`가 새 평가기로 검증 25장면을 모두 돌렸다. 오류 0, 모두 400걸음까지 실패(기대한 결과,
@@ -280,14 +283,15 @@ Dex Pick Place도 같은 경로를 `tmg/isaaclab-dex` 이미지로 끝까지 돌
 초기 물체 위치가 기록됨)까지 정상이었다. 생성 성공률 40%는 이전 Codex 실행의 34%(2,979회 중 1,000회)와 같은 수준이고 Isaac Lab 문서의
 65에서 80%보다 낮다. Towel과 Jenga는 생성 경로만 돌렸고 각각 24회와 약 20회 시도에서 성공 20개를 얻었다.
 
-## 2.5 AutoData (isaac-sim/AutoData @ 835f4aab): 논문 계획의 나머지 Dex 두 과제 (2026-10-29)
+## 2.5 AutoData (isaac-sim/AutoData @ 835f4aab): DexMimicGen 세 과제의 공통 실행 환경 (2026-10-29)
 
 논문 계획(`method_evaluation.tex`)의 DexMimicGen 과제는 Pick-and-Place, Microwave Opening, Bottle Placement and Door Closing이고,
 뒤의 둘은 NVIDIA AutoData가 Isaac Lab-Arena 위에서 제공하는 GR1 과제다. AutoData는 Isaac Lab Mimic의 생성 알고리즘을 자기
 패키지(`autodata_core`)로 다시 쓴 구현이라 `isaaclab_mimic`에 의존하지 않고, 스택도 다르다(Isaac Sim 6.1, Isaac Lab 3.0 @ 28a386f0,
-Arena @ 481f5ae5, Python 3.12, torch 2.11). 그래서 별도 이미지 `tmg/isaaclab-autodata`(`docker/isaaclab-autodata.Dockerfile`, Arena의
-uv 잠금 파일로 설치)와 별도 어댑터(`tmg/generation/generators/autodata/`)를 둔다. 생성기 이름은 `autodata`, 과제는 `microwave`와
-`bottle_door`다.
+Arena @ 481f5ae5, Python 3.12, torch 2.11). 이미지는 `tmg/isaaclab-dex`(`docker/isaaclab-dex.Dockerfile`, Arena의 uv 잠금 파일로 설치),
+어댑터는 `tmg/generation/generators/autodata/`, 생성기 이름은 `dexmimicgen`, 과제는 `pick_place`, `microwave`, `bottle_door`다.
+2026-10-29 결정으로 Pick Place도 이 환경에서 돈다(2.9절). 그 전에는 Pick Place가 Isaac Lab 2.x(3c6e67bb, Isaac Sim 5.1)의
+`isaaclab_mimic`으로 별도 이미지에서 돌았고, 두 Arena 과제는 `autodata`라는 별도 생성기 이름을 썼다.
 
 | 과제 | Arena 환경 이름 | 원본 시연 | 공식 생성 설정 (`autodata_examples/tasks/*.yaml`) | 에피소드 길이 |
 |---|---|---|---|---|
@@ -295,8 +299,8 @@ uv 잠금 파일로 설치)와 별도 어댑터(`tmg/generation/generators/autod
 | Bottle Placement and Door Closing (병을 냉장고에 넣고 문 닫기) | `put_item_in_fridge_and_close_door` | Hugging Face `nvidia/Arena-GR1-Manipulation-PlaceItemCloseDoor-Task`, 파일 `ranch_bottle_into_fridge/ranch_bottle_into_fridge_annotated.hdf5`, 같은 리비전, 주석 달린 시연 5개(카드에는 10개로 적혀 있다) | 하위작업마다 원본 선택, nearest_neighbor_object(nn_k 3), 행동 잡음 0.003, 보간 오른팔 5 왼팔 0, 종료 오프셋 [0, 0] | 10초 = 500걸음 |
 
 어댑터가 공식과 다르게 하는 것은 세 가지뿐이다. 청크마다 공식 기술 파일의 사본에 `generation_policy.seed`(청크 시드), `num_trials`
-(청크의 수), `guarantee_success: true`(Isaac Lab 과제처럼 수가 성공 수를 뜻하게)를 써 넣는다. 공식 기술 파일의 `guarantee_success`는
-false이고 `num_trials`는 50과 100이다.
+(청크의 수), `guarantee_success`(생성 설정의 `protocol.guarantee`. 본 풀은 true라 수가 성공 수를 뜻하고, 시험용 설정과 순위 풀은 false라
+시도 수를 뜻한다)를 써 넣는다. 공식 기술 파일의 `guarantee_success`는 false이고 `num_trials`는 50과 100이다.
 
 실행 방식은 AutoData의 자체 Arena 시험과 같다. `scripts/generate_dataset.py --external_callback
 isaaclab_arena.environments.isaaclab_interop.environment_registration_callback --env_name <환경> --alg dexmimicgen
@@ -404,7 +408,7 @@ Rope, Towel, Microwave의 공식 초기 상태 분포가 좁아 생성이 거의
 도 같은 `apply_scene`을 거치므로 검증과 시험 장면이 같은 분포에서 나온다. 전자레인지는 생성 기록에서 시도마다 자세가 달라지는 것을
 확인했다(x 0.38에서 0.42 m, y −0.07에서 −0.01 m).
 
-성공 50개를 채울 때까지 한 프로세스씩 돌린 결과다(`pilot50`, 청크 시드 9501, 세 프로세스 동시 실행).
+성공 50개를 채울 때까지 한 프로세스씩 돌린 결과다(`generation=test/pilot50`, 청크 시드 9501, 세 프로세스 동시 실행).
 
 | 과제 | 공식 (성공 20개 실행) | ours (성공 50개 실행) | ours 시간 |
 |---|---|---|---|
@@ -432,7 +436,45 @@ Rope가 가장 크게 떨어졌고 Towel은 거의 변하지 않았다. 공식 �
 (+ 방향 7.5° 이상)이 실패의 대부분을 만든다. 범위를 줄인다면 Rope 절반 변형의 회전을 공식 ±30°로 되돌리고, Towel 회전을 ±30°로 되돌리고
 x 상한을 +0.12 m로 낮추고, Microwave 회전을 −15°에서 +5°로 자르는 것이 측정값에 맞는 조정이다. 2026-10-29에 현재 범위를 그대로
 두기로 정했다. ours 장면의 생성 성공률은 위 표의 Rope 53.2%, Towel 76.9%, Microwave 75.8%가 기준값이고, 어려운 영역을 뺀 범위로
-바꾸려면 두 ours.yaml 파일의 해당 범위를 고친 뒤 pilot50을 다시 돌려 이 표를 갱신해야 한다.
+바꾸려면 두 ours.yaml 파일의 해당 범위를 고친 뒤 pilot50을 다시 돌려 이 표를 갱신해야 한다(`generation=test/pilot50`).
+
+## 2.9 Dex 세 과제를 한 실행 환경으로 합친 일 (2026-10-29)
+
+사용자 결정으로 Pick Place를 AutoData 환경으로 옮겨 DexMimicGen 세 과제가 이미지 하나(`isaaclab-dex`), 생성기 하나(`dexmimicgen`)로
+돈다. 확인한 사실과 바꾼 것은 다음과 같다.
+
+- Isaac Lab-Arena에 딸린 Isaac Lab 3.0은 Pick Place 환경 `Isaac-PickPlace-GR1T2-Abs-Mimic-v0`를 그대로 등록하고(`isaaclab_mimic.envs`),
+  AutoData는 공식 과제 기술 파일 `autodata_examples/tasks/gr1_pick_place.yaml`을 배포한다. 그 값(한 시도에 원본 하나, nearest_neighbor_object
+  nn_k 3, 행동 잡음 0.003, 보간 0과 3, 성공 보장)은 Isaac Lab 2.x의 환경 설정 `pickplace_gr1t2_mimic_env_cfg.py`와 같다. 원본 데이터
+  `dataset_annotated_gr1.hdf5`도 같은 파일을 쓴다(주석 필드 eef_pose, object_pose, target_eef_pose, subtask_term_signals, 행동 36차원).
+- Isaac Lab 3.0의 Pick Place 과제 설정은 `isaaclab_tasks.contrib.pick_place`로 옮겨졌고, 원격 조종용 머리 카메라 `robot_pov_cam`(450×720)이
+  정책 관측 그룹에 들어 있다. 우리 카메라 환경(`tmg/generation/simulators/isaaclab_tasks/gr1_pickplace_cameras.py`)은 그 카메라를 빼고
+  앞·옆 128×128 카메라 두 대를 `camera_obs` 관측 그룹에 넣는다. Isaac Lab 기록기는 `policy` 그룹만 저장하므로 생성 파일에 영상이
+  들어가지 않고, Arena 과제처럼 런타임이 매 걸음 영상을 읽어 `records/images_%06d.npz`에 쓴다. 카메라 위치와 해상도는 2026-10 재현
+  때의 값 그대로다.
+- 생성기 설정 `dexmimicgen.yaml`은 AutoData 스택의 값(패키지, 커밋, 스크립트, 임바디먼트 파일)을 갖고, Arena 콜백은 과제 파일의
+  `external_callback`으로 내려갔다(Pick Place는 null이고 대신 `register_modules: [isaaclab_mimic.envs]`와 카메라 모듈을 들여온다).
+  평가기(`tmg/evaluation/isaaclab_rollout.py`)는 생성기의 패키지가 `autodata_core`이면 AutoData의 `setup_env_config`처럼 종료 조건을
+  모두 떼고 Pink IK 행동 클래스를 공유 URDF 변환판으로 바꾼다. 이 처리가 이제 Pick Place에도 적용되므로, Isaac Lab 2.x에서 평가할 때
+  살아 있던 "물체 낙하" 종료 조건은 더 이상 에피소드를 끊지 않는다(상한까지 돈다).
+- 섞기(`mix_segment`)는 AutoData의 `generate_eef_subtask_trajectory`에서 `src_subtask_object_pose` 대입 뒤에 끼운다. 원본마다 구간
+  시작의 말단 자세, 목표 자세, 그 손의 통과 명령(11개 관절)과 기준 물체 자세를 섞기 모듈에 넘기는 것은 Isaac Lab 런타임과 같다.
+  추종은 `DataGenerator.generate`를 공유 경로 반복문으로 바꾼다(AutoData의 궤적 생성·병합 함수와 `MultiWaypoint.execute`, 기록기
+  수명주기를 그대로 쓴다). 잡음 장부의 draw 모양은 AutoData 순서(왼손 위치 3, 왼손 사원수 4, 오른손 위치 3, 오른손 사원수 4)이고,
+  잡음 크기가 0인 손은 draw를 하지 않으므로 장부의 묶음을 다 쓰지 않을 수 있다(공식 난수열과의 일치는 분포 수준이다).
+- 추종이 돌 수 있는 조건은 한 시도의 모든 하위작업이 같은 원본을 쓰는 것이다. Pick Place는 공식 설정이 그렇다. Microwave와 Bottle은
+  공식 기술 파일이 `select_src_per_subtask: true`라 추종을 켜면 첫 시도 전에 `NotImplementedError`로 멈춘다. 섞기는 세 과제 모두 된다.
+- 손가락 열림·닫힘 사건의 열(`gripper_events.columns: [0, 1, 2, 3]`)은 AutoData 임바디먼트 파일 `gr1_ik_abs.yaml`의 손 명령 순서
+  (근위 손가락 관절 index, middle, pinky, ring가 앞 네 개)에서 Isaac Lab 2.x 런타임과 같은 관절을 가리킨다.
+- 추종 오차는 Pink IK가 목표로 삼는 `*_hand_pitch_link`에서 잰다. Arena의 GR1 Pink 임바디먼트는 Isaac Lab Pick Place의 `ActionsCfg`를
+  그대로 쓰므로 세 과제의 목표 링크가 같다.
+- 이 브랜치의 파드 실행(`scripts/native_runtime.py`)은 `isaaclab-dex`를 버전 검사를 통과한 AutoData 환경에 연결한다. 기존
+  `isaaclab-autodata` 설치 경로를 재사용하고 옛 Isaac Lab 2.x 설치는 보존한다. 버전 검사 기록이 없거나 실패했으면 실행하지 않는다.
+- Isaac 서버에서는 기존 `tmg/isaaclab-autodata:latest` 이미지에 `tmg/isaaclab-dex:latest` 태그를 붙였고(옛 Isaac Lab 2.x 이미지는
+  `tmg/isaaclab-dex-lab2:latest`로 남겨 두었다), `sources`, `pools`, `datasets`, `runs`, `resets`의 `autodata/` 폴더를 `dexmimicgen/`으로
+  옮겼다. Isaac Lab 2.x로 만든 Pick Place의 `pilot20` 풀과 실행 폴더는 그대로 있고, 새 환경의 확인 실행은 `pilot50`으로 했다.
+
+확인 실행의 결과는 2.9.1절에 적는다.
 
 ## 3. CP-Gen (kevin-thankyou-lin/cpgen@1e7c1fc4)
 

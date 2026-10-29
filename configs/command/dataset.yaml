@@ -1,6 +1,6 @@
 # @package _global_
 # tmg dataset: one training dataset (common hdf5) from the successful attempts of a finished pool.
-#   tmg dataset task=square scene=ours method=trackmix generation=pool observation=image size=1000 seed=0
+#   tmg dataset task=square scene=ours method=trackmix generation=pool_robosuite_image observation=image size=1000 seed=0
 # `observation` decides what the file holds: image = the cameras and the robot state, low_dim = robot and object state.
 defaults:
   - /paths: local
@@ -9,7 +9,7 @@ defaults:
   - /task: ???
   - /scene: ours
   - /method: none
-  - /generation: pool
+  - /generation: pool_robosuite_image
   - /observation: image
   - _self_
 

@@ -133,6 +133,6 @@ def test_task_policy_overrides_follow_the_official_configs(tmp_path, monkeypatch
     dex = resolved(compose("train", ["generator=dexmimicgen", "task=pick_place", "scene=ours", "method=none", "generation=pool_isaac",
                                     "observation=image", "policy=diffusion_policy"]))
     assert dex["task"]["horizon"] == 600 and task_policy_overrides(dex["task"], "diffusion_policy") == {"crop_shape": None}
-    square = resolved(compose("train", ["generator=mimicgen", "task=square", "scene=ours", "method=none", "generation=pool",
+    square = resolved(compose("train", ["generator=mimicgen", "task=square", "scene=ours", "method=none", "generation=pool_robosuite_image",
                                        "observation=image", "policy=diffusion_policy"]))
     assert task_policy_overrides(square["task"], "diffusion_policy") == {} and square["policy"]["params"]["crop_shape"] == [76, 76]

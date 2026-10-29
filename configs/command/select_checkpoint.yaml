@@ -7,7 +7,7 @@ defaults:
   - /task: ???
   - /scene: ours
   - /method: none
-  - /generation: pool
+  - /generation: pool_robosuite_image
   - /observation: image
   - /policy: bc_rnn
   - /training: default

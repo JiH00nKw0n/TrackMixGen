@@ -1,8 +1,0 @@
-defaults:
-  - pool
-  - _self_
-# Full pool without images (same attempts, chunking and seeds as `pool`, so the trajectories are the same as
-# the image pool's): for low-dim datasets only. Generation is about 1.6x faster per step without rendering.
-name: pool_lowdim
-protocol:
-  camera_names: []

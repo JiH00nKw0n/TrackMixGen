@@ -2,7 +2,7 @@
 # config edits need no rebuild, and $(DATA_ROOT) is mounted at /data.
 #   make build IMAGE=robosuite
 #   make sources  TASK=square
-#   make generate TASK=square SCENE=official_d1 METHOD=none GENERATION=pilot20
+#   make generate TASK=square SCENE=official_d1 METHOD=none GENERATION=test/pilot20
 #   make show     TASK=square
 #   make check-scene TASK=hammer_cleanup SCENE=ours
 #   make test
@@ -22,7 +22,7 @@ DATA_ROOT  ?= $(or $(TMG_DATA_ROOT),$(call cluster_value,data_root),$(HOME)/tmg_
 TASK       ?= square
 SCENE      ?= official_d1
 METHOD     ?= none
-GENERATION ?= pilot20
+GENERATION ?= test/pilot20
 POLICY     ?= bc_rnn
 OBSERVATION ?= image
 SEED       ?= 1
@@ -105,7 +105,7 @@ help:  ## this help
 	@awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' $(firstword $(MAKEFILE_LIST))
 	@echo; grep -E '^[a-zA-Z0-9_-]+:.*## ' $(firstword $(MAKEFILE_LIST)) | sed -E 's/^([a-zA-Z0-9_-]+):.*## /  \1|/' | awk -F '|' '{ printf "%-16s %s\n", $$1, $$2 }'
 
-build:  ## build the docker image IMAGE (robosuite | cpgen | isaaclab-soft | isaaclab-dex | train)
+build:  ## build the docker image IMAGE (robosuite | cpgen | isaaclab-soft | isaaclab-dex (AutoData stack) | train)
 	DOCKER_BUILDKIT=1 docker build -f $(REPO)/docker/$(IMAGE).Dockerfile --build-arg TMG_REVISION=$(REVISION) -t tmg/$(IMAGE):$(TAG) $(REPO)
 
 sif:  ## build the singularity image SIF from a docker archive ARCHIVE (made with `docker save tmg/robosuite:latest -o ...`)
@@ -120,7 +120,7 @@ generate:  ## generate one pool (TASK, SCENE, METHOD, GENERATION, OVERRIDES)
 verify-baseline:  ## official generator vs adapter with method=none on one chunk; must be identical
 	$(PREP) && $(CONTAINER_RUN) verify_baseline generator=$(GENERATOR) task=$(TASK) scene=$(SCENE) generation=$(GENERATION) cluster=$(CLUSTER) $(OVERRIDES)
 
-rank-sources:  ## order TASK's source demonstrations from its baseline pool (GENERATION=rank3000) and write the ranking next to the generator config
+rank-sources:  ## order TASK's source demonstrations from its baseline pool (GENERATION=rank_human_demos) and write the ranking next to the generator config
 	$(PREP) && $(CONTAINER_RUN) rank_sources generator=$(GENERATOR) task=$(TASK) scene=$(SCENE) generation=$(GENERATION) cluster=$(CLUSTER) $(OVERRIDES)
 
 dataset:  ## write a training dataset from the finished pool (TASK, SCENE, METHOD, GENERATION, OBSERVATION=image|low_dim; OVERRIDES: size=... seed=...)

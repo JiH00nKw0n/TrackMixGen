@@ -21,11 +21,13 @@ def runtime_environment(image: str, data_root: str) -> tuple[Path, dict[str, str
     if image not in {"isaaclab-soft", "isaaclab-dex", "isaaclab-arena", "isaaclab-autodata", "train"}:
         raise ValueError(f"native runtime does not support {image!r}")
     root = Path(os.environ.get("TMG_NATIVE_ROOT") or "~/.local/share/tmg-native").expanduser().resolve()
-    venv = root / "envs" / image
+    # Keep the legacy Lab 2.x installation intact. The Dex name now selects the verified AutoData stack.
+    installed_image = "isaaclab-autodata" if image == "isaaclab-dex" else image
+    venv = root / "envs" / installed_image
     python = venv / "bin/python"
     if not python.is_file():
         raise FileNotFoundError(f"Run scripts/bootstrap_native.py {image} first: {python}")
-    if image == "isaaclab-autodata":
+    if installed_image == "isaaclab-autodata":
         verified = root / "install-records/isaaclab-autodata.versions.json"
         if not verified.is_file() or not json.loads(verified.read_text()).get("passed"):
             raise RuntimeError("AutoData installation has not passed the main package/source version check")
@@ -45,13 +47,13 @@ def runtime_environment(image: str, data_root: str) -> tuple[Path, dict[str, str
                 value += ":" + env[key]
             env[key] = value
     if image != "train":
-        env["TMG_ISAACLAB_SRC"] = str(root / "src" / image / "IsaacLab")
+        env["TMG_ISAACLAB_SRC"] = str(root / "src" / installed_image / "IsaacLab")
     if image == "isaaclab-arena":
-        env["TMG_ARENA_SRC"] = str(root / "src" / image / "IsaacLab-Arena")
-    if image == "isaaclab-autodata":
-        env["TMG_ARENA_SRC"] = str(root / "src" / image / "IsaacLab-Arena")
-        env["TMG_ISAACLAB_SRC"] = str(root / "src" / image / "IsaacLab-Arena/submodules/IsaacLab")
-        env["TMG_AUTODATA_SRC"] = str(root / "src" / image / "AutoData")
+        env["TMG_ARENA_SRC"] = str(root / "src" / installed_image / "IsaacLab-Arena")
+    if installed_image == "isaaclab-autodata":
+        env["TMG_ARENA_SRC"] = str(root / "src" / installed_image / "IsaacLab-Arena")
+        env["TMG_ISAACLAB_SRC"] = str(root / "src" / installed_image / "IsaacLab-Arena/submodules/IsaacLab")
+        env["TMG_AUTODATA_SRC"] = str(root / "src" / installed_image / "AutoData")
     if image == "isaaclab-soft":
         env["TMG_SOFTMIMICGEN_SRC"] = str(root / "src" / image / "SoftMimicGen")
     return python, env

@@ -7,7 +7,7 @@
 set -uo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 CLUSTER=${CLUSTER:-a100}; GPU=${GPU:-2}; WORKERS=${WORKERS:-4}; ATTEMPTS=${ATTEMPTS:-2500}; SIZE=${SIZE:-1000}
-TASK=coffee; SCENE=ours; METHOD=none; GENERATION=pool; OBSERVATION=image; POLICY=${POLICY:-diffusion_policy}; PORT=${PORT:-9200}
+TASK=coffee; SCENE=ours; METHOD=none; GENERATION=pool_robosuite_image; OBSERVATION=image; POLICY=${POLICY:-diffusion_policy}; PORT=${PORT:-9200}
 export SINGULARITYENV_CUDA_VISIBLE_DEVICES=$GPU CUDA_VISIBLE_DEVICES=$GPU
 DATA_ROOT=$(make -s -C "$REPO" print-data-root CLUSTER="$CLUSTER")
 LOG=$DATA_ROOT/logs/cpgen_coffee; mkdir -p "$LOG"
@@ -17,7 +17,7 @@ G="GENERATOR=cpgen IMAGE=cpgen CLUSTER=$CLUSTER TASK=$TASK SCENE=$SCENE"
 log "sources"
 make -s -C "$REPO" sources $G > "$LOG/sources.log" 2>&1 || { log "sources FAILED"; exit 1; }
 log "pilot: 20 attempts"
-make -s -C "$REPO" generate $G METHOD=$METHOD GENERATION=pilot20 OVERRIDES="cluster.max_workers=$WORKERS" > "$LOG/pilot20.log" 2>&1 \
+make -s -C "$REPO" generate $G METHOD=$METHOD GENERATION=test/pilot20 OVERRIDES="cluster.max_workers=$WORKERS" > "$LOG/pilot20.log" 2>&1 \
   || { log "pilot FAILED (see $LOG/pilot20.log)"; exit 1; }
 python3 - "$DATA_ROOT/pools/cpgen/$TASK/$SCENE/$METHOD/pilot20" <<'PY' | tee -a "$LOG/driver.log"
 import glob, json, sys
@@ -33,7 +33,7 @@ log "$(grep -h 'pool complete' "$LOG/pool.log" | tail -1 | cut -c1-100)"
 log "dataset ($SIZE demos, image)"
 make -s -C "$REPO" dataset $G METHOD=$METHOD GENERATION=$GENERATION OBSERVATION=$OBSERVATION OVERRIDES="size=$SIZE" > "$LOG/dataset.log" 2>&1 \
   || { log "dataset FAILED (see $LOG/dataset.log)"; exit 1; }
-DATASET_C=/data/datasets/cpgen/$TASK/$SCENE/$METHOD/$GENERATION/$OBSERVATION/n${SIZE}_seed0.hdf5
+DATASET_C=/data/datasets/cpgen/$TASK/$SCENE/$METHOD/${GENERATION##*/}/$OBSERVATION/n${SIZE}_seed0.hdf5
 log "fixed scenes in the generation environment"
 make -s -C "$REPO" resets $G OVERRIDES="dataset=$DATASET_C" > "$LOG/resets.log" 2>&1 || { log "resets FAILED (see $LOG/resets.log)"; exit 1; }
 log "policy stage: $POLICY, image, GPU $GPU"

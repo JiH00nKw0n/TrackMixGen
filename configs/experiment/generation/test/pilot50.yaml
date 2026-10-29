@@ -1,0 +1,13 @@
+defaults:
+  - /generation/pool_robosuite_image@_here_
+  - _self_
+# Scene check at 50 attempts in one chunk, chunk seed 9501, on every generator (the Isaac Lab generators too; the pools
+# of 2026-10-29 in docs/GENERATORS.md 2.8 were made before that change and hold 50 successes). The Isaac Lab driver's
+# MINI mode uses it (generation=test/pilot50).
+name: pilot50
+attempts: 50
+chunk: 50
+seed_offset: 9500
+protocol:
+  camera_names: []
+  camera_size: null

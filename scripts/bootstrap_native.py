@@ -257,7 +257,7 @@ print(json.dumps({'checked':checked,'mismatches':mismatch,'passed':not mismatch}
 
 
 def install(root, image):
-    if image == "isaaclab-autodata":
+    if image in {"isaaclab-dex", "isaaclab-autodata"}:
         return install_autodata(root)
     uv = tools(root)
     venv = root / "envs" / image
@@ -348,7 +348,7 @@ print(json.dumps(users))
 
 def verify_installation(root, image):
     """Check the installed pins and source revisions without reinstalling or importing Isaac Sim."""
-    if image == "isaaclab-autodata":
+    if image in {"isaaclab-dex", "isaaclab-autodata"}:
         return verify_autodata(root)
     uv = root / "bin/uv"
     python = root / "envs" / image / "bin/python"

@@ -1,46 +1,50 @@
-# tmg/isaaclab-dex: Isaac Sim 5.1 (pip) + Isaac Lab @ 3c6e67bb (isaaclab_mimic with the GR1 tasks) + tmg. GPU required.
-# Pins that the 2026-10 reproduction needed: robomimic v0.4.0, osqp 0.6.7.post3 with qpsolvers 4.3.1 (newer qpsolvers
-# import a SolverStatus that this OSQP lacks), pinocchio through Isaac Lab's `--enable_pinocchio`.
-# Build from the repository root:  make build IMAGE=isaaclab-dex
-FROM nvidia/cuda:12.8.1-cudnn-runtime-ubuntu22.04
+# tmg/isaaclab-dex: the DexMimicGen stack. NVIDIA AutoData (isaac-sim/AutoData @ 835f4aab, the DexMimicGen rewrite) on
+# Isaac Lab-Arena @ 481f5ae5 with its nested Isaac Lab 3.0 (28a386f0) and pip Isaac Sim 6.1.0, python 3.12, torch 2.11
+# (CUDA 12.8). Runs the three GR1 tasks of the paper plan: Pick Place (Isaac Lab Mimic's environment, registered by
+# isaaclab_mimic of the nested Isaac Lab) and the two Arena tasks Microwave Opening (gr1_open_microwave) and Bottle
+# Placement and Door Closing (put_item_in_fridge_and_close_door). The package set is Arena's own uv lock (what AutoData's
+# conda_installer.sh installs), so every version equals the upstream validated stack. GPU required.
+# Until 2026-10-29 this name was an Isaac Lab 2.x (3c6e67bb, Isaac Sim 5.1) image running isaaclab_mimic directly.
+# Build from the repository root (long: Isaac Sim is about 10 GB):  make build IMAGE=isaaclab-dex
+FROM nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04
 ARG TMG_REVISION=unknown
-ARG ISAACLAB_COMMIT=3c6e67bb5c7ada942a6d1884ab69338f57596f77
-ENV DEBIAN_FRONTEND=noninteractive PYTHONUNBUFFERED=1 ACCEPT_EULA=Y OMNI_KIT_ACCEPT_EULA=YES \
+ARG ARENA_COMMIT=481f5ae5f19df7bc5d24a17240fc0d96ac81eaf7
+ARG AUTODATA_COMMIT=835f4aab0fff759a789586454d939f12a9a40997
+ENV DEBIAN_FRONTEND=noninteractive PYTHONUNBUFFERED=1 ACCEPT_EULA=Y OMNI_KIT_ACCEPT_EULA=YES PRIVACY_CONSENT=Y \
     UV_LINK_MODE=copy UV_CACHE_DIR=/root/.cache/uv OMP_NUM_THREADS=4 MKL_NUM_THREADS=4
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      python3.11 python3.11-venv python3.11-dev git curl ca-certificates build-essential cmake ninja-build \
+      python3.12 python3.12-venv python3.12-dev git git-lfs curl ca-certificates build-essential cmake ninja-build \
       libgl1 libglu1-mesa libxt6 libxrandr2 libxinerama1 libxcursor1 libxi6 libglib2.0-0 libsm6 libxext6 ffmpeg \
       libvulkan1 vulkan-tools libegl1 libgbm1 libdrm2 libgles2 \
     && rm -rf /var/lib/apt/lists/*
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh && ln -s /root/.local/bin/uv /usr/local/bin/uv
-RUN uv venv --python python3.11 --seed /opt/venv
+RUN uv venv --python python3.12 --seed /opt/venv
 ENV PATH=/opt/venv/bin:$PATH
+# the submodule URLs are ssh; read them over https
+RUN git config --global url."https://github.com/".insteadOf git@github.com: \
+    && mkdir -p /opt/src && cd /opt/src \
+    && git clone -q https://github.com/isaac-sim/IsaacLab-Arena IsaacLab-Arena && git -C IsaacLab-Arena checkout -q $ARENA_COMMIT \
+    && git -C IsaacLab-Arena submodule update --init submodules/IsaacLab \
+    && git clone -q https://github.com/isaac-sim/AutoData AutoData && git -C AutoData checkout -q $AUTODATA_COMMIT
+# Arena's lock = the validated Sim/Lab/torch stack (isaacsim 6.1.0.0 pip wheels from pypi.nvidia.com, editable Isaac Lab
+# packages from the submodule, Arena editable). Same two exports as AutoData's conda_installer.sh.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --python /opt/venv/bin/python 'pip<26' 'setuptools<77' wheel toml ninja 'cmake<4' \
-    && uv pip install --python /opt/venv/bin/python --index-strategy unsafe-best-match --extra-index-url https://pypi.nvidia.com 'isaacsim[all,extscache]==5.1.0' \
-    && uv pip install --python /opt/venv/bin/python --index-url https://download.pytorch.org/whl/cu128 torch==2.7.0 torchvision==0.22.0
-RUN mkdir -p /opt/src && cd /opt/src \
-    && git clone -q https://github.com/isaac-sim/IsaacLab IsaacLab && git -C IsaacLab checkout -q $ISAACLAB_COMMIT
-RUN --mount=type=cache,target=/root/.cache/uv \
-    for p in isaaclab isaaclab_assets isaaclab_tasks isaaclab_mimic; do uv pip install --python /opt/venv/bin/python --no-build-isolation -e /opt/src/IsaacLab/source/$p; done \
-    && uv pip install --python /opt/venv/bin/python h5py 'robomimic @ git+https://github.com/ARISE-Initiative/robomimic.git@v0.4.0' \
-    && uv pip install --python /opt/venv/bin/python 'osqp==0.6.7.post3' 'qpsolvers==4.3.1' \
-    && uv pip install --python /opt/venv/bin/python --index-url https://download.pytorch.org/whl/cu128 'torch==2.7.0+cu128' 'torchvision==0.22.0+cu128' 'torchaudio==2.7.0+cu128'
-# Pillow follows Isaac Sim's exact pin (isaacsim-kernel 5.1: Pillow==11.3.0). Isaac Sim also pins packaging, click, idna and
-# psutil exactly, but those old versions break huggingface_hub and httpx (the source downloads), so they stay at the versions
-# the other packages resolved; `pip check` lists those four isaacsim lines, which the 2026-10-28 generation run showed harmless.
-RUN --mount=type=cache,target=/root/.cache/uv uv pip install --python /opt/venv/bin/python pillow==11.3.0
-# Kit (pip isaacsim) writes its cache, data and logs under the package folder; the containers run as the host user,
-# so those folders must be writable. Vulkan (libvulkan1) plus the driver libraries that NVIDIA_DRIVER_CAPABILITIES=all
-# mounts give Kit a GPU device inside docker (`--gpus all`).
-RUN K=/opt/venv/lib/python3.11/site-packages/isaacsim/kit && mkdir -p $K/cache $K/data $K/logs && chmod -R a+rwX $K/cache $K/data $K/logs
+    cd /opt/src/IsaacLab-Arena \
+    && uv export --frozen --no-dev --format pylock.toml --output-file pylock.toml --quiet \
+    && uv export --frozen --no-dev --format requirements.txt --no-emit-local --no-hashes --output-file constraints.txt --quiet \
+    && uv pip install --no-config --python /opt/venv/bin/python --requirements pylock.toml \
+    && uv pip install --no-config --python /opt/venv/bin/python --constraint constraints.txt --editable /opt/src/AutoData
+# Kit (pip isaacsim) writes its cache, data and logs under the package folder; the containers run as the host user
+RUN K=/opt/venv/lib/python3.12/site-packages/isaacsim/kit && mkdir -p $K/cache $K/data $K/logs && chmod -R a+rwX $K/cache $K/data $K/logs
 WORKDIR /opt/tmg
 COPY pyproject.toml README.md ./
 COPY tmg/ tmg/
 COPY configs/ configs/
-RUN --mount=type=cache,target=/root/.cache/uv uv pip install --python /opt/venv/bin/python --no-deps -e /opt/tmg \
-    && uv pip install --python /opt/venv/bin/python 'hydra-core>=1.3,<1.4' 'omegaconf>=2.3,<2.4' pyyaml scipy msgpack websockets
-ENV TMG_DATA_ROOT=/data TMG_IMAGE=tmg/isaaclab-dex TMG_REVISION=$TMG_REVISION TMG_ISAACLAB_SRC=/opt/src/IsaacLab \
+RUN --mount=type=cache,target=/root/.cache/uv uv pip install --no-config --python /opt/venv/bin/python --no-deps -e /opt/tmg \
+    && uv pip install --no-config --python /opt/venv/bin/python --constraint /opt/src/IsaacLab-Arena/constraints.txt \
+       'hydra-core>=1.3,<1.4' 'omegaconf>=2.3,<2.4' pyyaml scipy msgpack websockets h5py huggingface_hub pillow
+ENV TMG_DATA_ROOT=/data TMG_IMAGE=tmg/isaaclab-dex TMG_REVISION=$TMG_REVISION \
+    TMG_AUTODATA_SRC=/opt/src/AutoData TMG_ARENA_SRC=/opt/src/IsaacLab-Arena TMG_ISAACLAB_SRC=/opt/src/IsaacLab-Arena/submodules/IsaacLab \
     HF_HUB_DISABLE_TELEMETRY=1 NVIDIA_DRIVER_CAPABILITIES=all
 LABEL org.opencontainers.image.revision=$TMG_REVISION
 VOLUME ["/data"]

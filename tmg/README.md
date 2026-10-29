@@ -53,7 +53,7 @@ Each adapter folder has the same four files:
 | `sources.py` | Downloads and prepares the official source demonstrations. |
 
 `mimicgen/` also has `config_builder.py` (the official json config from the task template and our protocol).
-`isaaclab/` serves both SoftMimicGen and DexMimicGen. `cpgen/` is CP-Gen.
+`isaaclab/` is the Isaac Lab base (SoftMimicGen on its Isaac Lab fork; the chunk entrypoint and the mixing/tracking runtime), `autodata/` the DexMimicGen generator (NVIDIA AutoData's `autodata_core` on Isaac Lab 3.0 with Arena: Pick Place, Microwave, Bottle Door). `cpgen/` is CP-Gen.
 
 ### Adding a method variant
 

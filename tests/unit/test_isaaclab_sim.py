@@ -88,13 +88,13 @@ def test_shipped_isaaclab_scene_files_validate():
     from tmg.generation.simulators.isaaclab import validate_isaaclab_scene
 
     root = pathlib.Path(__file__).resolve().parents[2] / "configs" / "experiment" / "generator"
-    for gen in ("softmimicgen", "dexmimicgen", "autodata"):
+    for gen in ("softmimicgen", "dexmimicgen"):
         for f in (root / gen / "scene").glob("*.yaml"):
             validate_isaaclab_scene(yaml.safe_load(f.read_text()))
     ours = yaml.safe_load((root / "softmimicgen" / "scene" / "ours.yaml").read_text())
     assert ours["override_bounds"] is True and set(ours["bounds"]) == {"rope", "towel"}
     assert set(ours["bounds"]["rope"]["reset_object_position"]) == {"pose_range", "partial_pose_range"}
-    auto = yaml.safe_load((root / "autodata" / "scene" / "ours.yaml").read_text())
+    auto = yaml.safe_load((root / "dexmimicgen" / "scene" / "ours.yaml").read_text())
     assert all(e["add"] for e in auto["bounds"]["microwave"].values())
 
 
@@ -127,3 +127,17 @@ def test_measured_eef_poses_reads_the_configured_link():
     assert np.allclose(poses["left"][:3, :3], pose_from_pos_quat([0, 0, 0], [0.70710678, 0, 0, 0.70710678])[:3, :3])
     with pytest.raises(KeyError):
         measured_eef_poses(env, 0, {"left": "missing_link"})
+
+
+def test_pickplace_camera_quaternion_is_xyzw_and_looks_at_the_target():
+    """Isaac Lab 3.0 wants (x, y, z, w); the camera's forward axis (ROS: +z) must point from the eye to the target."""
+    from scipy.spatial.transform import Rotation
+
+    from tmg.generation.simulators.isaaclab_tasks.gr1_pickplace_cameras import FRONT, SIDE, look_at_quat_xyzw
+
+    for eye, target in (FRONT, SIDE):
+        q = look_at_quat_xyzw(eye, target)
+        forward = Rotation.from_quat(q).apply([0.0, 0.0, 1.0])          # scipy takes (x, y, z, w)
+        want = np.asarray(target, dtype=float) - np.asarray(eye, dtype=float)
+        want /= np.linalg.norm(want)
+        assert np.allclose(forward, want, atol=1e-6) and abs(np.linalg.norm(q) - 1.0) < 1e-9

@@ -1,6 +1,6 @@
 # @package _global_
 # tmg train: train one policy on one dataset with our loop (tmg/policy/trainer.py). Runs in the train image.
-#   tmg train task=square scene=ours method=trackmix generation=pool observation=image policy=bc_rnn seed=1
+#   tmg train task=square scene=ours method=trackmix generation=pool_robosuite_image observation=image policy=bc_rnn seed=1
 # `observation` (image | low_dim) picks the dataset variant and the policy's hyperparameter block.
 defaults:
   - /paths: local
@@ -9,7 +9,7 @@ defaults:
   - /task: ???
   - /scene: ours
   - /method: none
-  - /generation: pool
+  - /generation: pool_robosuite_image
   - /observation: image
   - /policy: bc_rnn
   - /training: default

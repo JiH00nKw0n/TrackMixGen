@@ -23,8 +23,8 @@ HELP = """commands:
   sources       download and prepare the human source demonstrations of a task
   show          print the composed configuration of a command without running it
 examples:
-  tmg generate task=square generation=pilot20
-  tmg generate task=square scene=ours method=trackmix generation=pool generation.attempts=5000
+  tmg generate task=square generation=test/pilot20
+  tmg generate task=square scene=ours method=trackmix generation=pool_robosuite_image generation.attempts=5000
   tmg show generate task=square
 """
 

@@ -189,7 +189,7 @@ def write_dataset(path: Path, chosen: list[dict], *, pool: Path, observation: di
                         stored = next((k for k in (key, f"camera_obs/{cam}") if k in demo["obs"]), None)
                         if stored is None:
                             raise DatasetError(f"{c['chunk']}/{c['demo_key']}: camera {cam} not in the pool; generate with "
-                                               f"generation.protocol.camera_names set (e.g. generation=pilot20_images)")
+                                               f"generation.protocol.camera_names set (e.g. generation=test/pilot20_images)")
                         arr = np.asarray(demo["obs"][stored])
                     if len(arr) != c["n_steps"]:
                         raise DatasetError(f"{c['chunk']}/{c['demo_key']}: {len(arr)} image frames vs {c['n_steps']} recorded steps")

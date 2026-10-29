@@ -1,0 +1,8 @@
+defaults:
+  - /generation/pool_robosuite_image@_here_
+  - _self_
+# Smoke run with the task's cameras: 20 attempts in one chunk, chunk seed 9001.
+name: pilot20_images
+attempts: 20
+chunk: 20
+seed_offset: 9000

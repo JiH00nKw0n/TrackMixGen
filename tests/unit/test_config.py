@@ -64,3 +64,19 @@ def test_select_checkpoint_uses_the_run_path_of_train():
 
     ov = ["task=square", "observation=low_dim", "policy=diffusion_policy", "seed=3"]
     assert compose("select_checkpoint", ov).output == compose("train", ov).output
+
+
+def test_every_generation_config_composes_and_is_named_after_its_file(tmp_path, monkeypatch):
+    """Generation configs live flat (full pools) or under test/ (small runs); each composes alone and its `name`, which
+    names the pool folder, equals the file name (the test/ folder is not part of the path)."""
+    import pathlib
+    monkeypatch.setenv("TMG_DATA_ROOT", str(tmp_path))
+    root = pathlib.Path(__file__).resolve().parents[2] / "configs/experiment/generation"
+    files = sorted(root.glob("*.yaml")) + sorted((root / "test").glob("*.yaml"))
+    assert len(files) >= 9
+    for f in files:
+        option = f.stem if f.parent == root else f"test/{f.stem}"
+        plain = resolved(compose("generate", ["generator=mimicgen", "task=square", "scene=ours", "method=none", f"generation={option}"]))
+        g = plain["generation"]
+        assert g["name"] == f.stem and {"attempts", "chunk", "seed_offset", "protocol"} <= set(g), option
+        assert plain["output"].endswith(f"/none/{f.stem}"), option

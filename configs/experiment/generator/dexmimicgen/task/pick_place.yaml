@@ -1,20 +1,28 @@
 name: pick_place
 display_name: GR1 Pick and Place
-env_name: Isaac-PickPlace-GR1T2-Abs-Mimic-v0
-camera_env: TMG-PickPlace-GR1T2-Images-Mimic-v0   # the official task has no cameras; registered by camera_module
-camera_module: tmg.generation.simulators.isaaclab_tasks.gr1_pickplace_cameras
+env_name: Isaac-PickPlace-GR1T2-Abs-Mimic-v0        # Isaac Lab Mimic's environment, registered by the nested Isaac Lab 3.0 (register_modules)
+camera_env: TMG-PickPlace-GR1T2-Images-Mimic-v0   # the official task's only camera is the 450x720 teleoperation head camera; our
+camera_module: tmg.generation.simulators.isaaclab_tasks.gr1_pickplace_cameras   # two 128x128 cameras replace it (not recorded in the hdf5)
+register_modules: [isaaclab_mimic.envs]           # imported in the chunk and evaluation processes before the environment is built
+external_callback: null                           # no Arena registration: the environment comes from isaaclab_mimic
+task_descriptor: autodata_examples/tasks/gr1_pick_place.yaml   # in the AutoData checkout; the chunk gets a copy with its seed
 source: ${paths.sources}/dexmimicgen/pick_place/source.hdf5
-source_url: https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/IsaacLab/Mimic/pick_place_datasets/dataset_annotated_gr1.hdf5   # Isaac Lab docs (teleop_imitation.rst, commit 3c6e67bb)
+source_url: https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/IsaacLab/Mimic/pick_place_datasets/dataset_annotated_gr1.hdf5   # Isaac Lab docs (humanoids_imitation.rst, also at Isaac Lab 3.0)
 num_sources: 5
 subtasks: [right idle until grasp, right place; left grasp and hold]
 reference_objects: [object, object]
 horizon: 600                        # evaluation step limit (project decision 2026-10-26: DexMimicGen 600; the environment's own episode length is 400 = 20 s at 20 Hz)
 eval_episode_length_s: 30.0         # the env's own limit is 20 s = 400 steps at 20 Hz; the evaluation must raise episode_length_s to cover the horizon
+env_args: []
 cameras: [front_image, side_image]
 image_size: [128, 128]
 robot_state: [left_eef_pos, left_eef_quat, right_eef_pos, right_eef_quat, hand_joint_state]
-object_state: []                    # low-dim training is not set up for the Isaac Lab tasks yet
+object_state: []                    # low-dim training is not set up for the Isaac Lab tasks yet (the recorded `object` term holds pos, quat, eef-to-object)
 instruction: pick up the object with the right hand and place it in the bin
+# Official generation settings (autodata_examples/tasks/gr1_pick_place.yaml @ 835f4aab = the Isaac Lab Mimic environment config
+# pickplace_gr1t2_mimic_env_cfg.py): one source for the whole attempt (select_src_per_subtask false), nearest_neighbor_object
+# (nn_k 3), action noise 0.003, interpolation 0 and 3 (right), 0 (left), success guaranteed. Used unchanged except the chunk's
+# seed and count (and `guarantee_success` from generation.protocol.guarantee).
 # Isaac Lab has no official image policy config for GR1 pick-and-place (only bc_rnn_low_dim.json). Decision 2026-10-29: the
 # Isaac Lab tasks share one rule, no image crop (SoftMimicGen's official Diffusion Policy trains without one); MimicGen's
 # tasks keep the official 76x76 crop. (Isaac Lab's other GR1 image configs crop 160x256 to 144x236, 90% of the side.)

@@ -1,0 +1,27 @@
+# Full pool of a robosuite generator (MimicGen, CP-Gen) with the images the policies train on: enough attempts for
+# 1,000 successes per task (attempts are set per task on the command line, generation.attempts=...), chunks of 250
+# attempts, chunk seeds 30001, 30002, ... This file holds the generation protocol that every other generation config
+# inherits (`pool_robosuite_lowdim`, `rank_human_demos`, `pool_isaac`, and the `test/` configs).
+#
+# Naming: pool_<simulator>_<observation> for the full pools; `test/` holds the small configs for smoke runs and checks.
+name: pool_robosuite_image
+attempts: 10000
+chunk: 250
+seed_offset: 30000                # chunk seeds are seed_offset + 1, + 2, ...
+protocol:
+  keep_failed: true
+  max_num_failures: null
+  guarantee: false                # fixed attempt count (successes are selected at the dataset stage)
+  select_src_per_subtask: true    # current exploration value. The final evaluation must use MimicGen's template values: false
+  selection_strategy: random      # (one source demo per attempt) and nearest_neighbor_object for Square subtask 2 and Stack Three
+                                  # (needs per-subtask values in config_builder and regenerated pools); see docs/GENERATORS.md 1.4
+  selection_strategy_kwargs: null
+  action_noise: 0.05
+  interpolation_steps: 5
+  num_fixed_steps: 0
+  collect_obs: true
+  camera_names: ${task.cameras}   # the full image pool stores the task's cameras (no replay rendering exists)
+  camera_size: ${task.image_size}
+  render_video: false
+  num_source_demos: null          # null = all
+on_config_change: error           # error | rebuild (finished chunks made under another config)
