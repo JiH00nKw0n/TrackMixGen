@@ -27,7 +27,7 @@ VAL_PARALLEL=${VAL_PARALLEL:-2}; TEST_SHARDS=${TEST_SHARDS:-3}; SEED_PARALLEL=${
 SEQUENTIAL_TASKS=${SEQUENTIAL_TASKS:-0}
 GENERATION=${GENERATION:-pool_isaac}; TRAIN_OVERRIDES=${TRAIN_OVERRIDES:-}; EVAL_EXTRA=${EVAL_EXTRA:-}
 if [ "${MINI:-0}" = 1 ]; then
-  GENERATION=test/pilot20; SIZE=10; VAL_PARALLEL=1; TEST_SHARDS=2
+  GENERATION=test/pilot50; SIZE=10; VAL_PARALLEL=1; TEST_SHARDS=2
   TRAIN_OVERRIDES="training.by_policy.diffusion_policy.image.updates=200 training.updates_per_epoch=100 training.checkpoint_every_epochs=2 $TRAIN_OVERRIDES"
   EVAL_EXTRA="max_scenes=6 $EVAL_EXTRA"
   BUNDLE_NAME=${BUNDLE_NAME:-isaaclab_mini_$(date +%Y%m%d)}

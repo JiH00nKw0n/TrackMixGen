@@ -36,9 +36,11 @@
 | Dex GR1 Microwave Opening (AutoData) | 10 | 아니다 (하위작업마다 고른다) | nearest_neighbor_object | 0.005 | 오른손 5, 5 / 왼손 0 |
 | Dex GR1 Bottle Placement and Door Closing (AutoData) | 5 | 아니다 (하위작업마다 고른다) | nearest_neighbor_object | 0.003 | 오른손 5, 5, 5, 5 / 왼손 0, 0 |
 
-Isaac Lab 세 과제는 공식 설정이 "성공 수 보장"(generation_guarantee)이어서, 생성 설정 `pool_isaac`의 시도 수 1,000은 성공 1,000개가
-나올 때까지 돈다는 뜻이다(성공 250개짜리 청크 4개). AutoData 두 과제의 공식 기술 파일은 성공을 보장하지 않지만, 우리 청크는 같은 뜻이
-되도록 사본에 `guarantee_success: true`를 써 넣는다. 실패 시도도 모두 기록되므로 생성 성공률은 기록에서 계산한다.
+Isaac Lab 세 과제는 공식 설정이 "성공 수 보장"(generation_guarantee)이어서, 생성 설정 `pool_isaac`(`protocol.guarantee: true`)의 시도 수
+1,000은 성공 1,000개가 나올 때까지 돈다는 뜻이다(성공 250개짜리 청크 4개). AutoData 두 과제의 공식 기술 파일은 성공을 보장하지 않지만,
+우리 청크는 같은 뜻이 되도록 사본에 `guarantee_success: true`를 써 넣는다. 실패 시도도 모두 기록되므로 생성 성공률은 기록에서 계산한다.
+시험용 설정(`test/pilot20`, `test/pilot50`)과 순위 풀(`rank_human_demos`)은 `guarantee: false`라 Isaac Lab 생성기에서도 적힌 수만큼
+시도하고 끝난다(2026-10-29부터. 그 전에 만든 pilot20, pilot50 풀은 성공 20개와 50개짜리다).
 
 초기 상태의 무작위화 범위(장면)는 두 가지다. `official`은 공식 환경 설정 그대로이고, 드라이버 기본값인 `ours`는 Rope, Towel, Microwave
 Opening의 범위를 넓힌 것이다(2026-10-29 결정, `configs/experiment/generator/<생성기>/scene/ours.yaml`). 규칙은 공식 범위의 중심을 두고
@@ -209,7 +211,7 @@ Isaac Sim 6.1 기반이라 가장 크고(약 30 GB) 오래 걸린다.
 
 ### 3.7 동작 확인
 
-아래 두 명령은 Rope의 원본 3개를 내려받고, 성공 20개짜리 시범 생성을 한 번 돈다. 끝나면
+아래 두 명령은 Rope의 원본 3개를 내려받고, 20회 시도짜리 시범 생성을 한 번 돈다. 끝나면
 `/data/tmg_data/pools/softmimicgen/rope/ours/none/pilot20/DONE.json`이 생기고 그 안에 시도 수와 성공 수가 적힌다.
 
 ```bash
@@ -224,9 +226,10 @@ make generate GENERATOR=softmimicgen IMAGE=isaaclab-soft TASK=rope SCENE=ours ME
 `/data/tmg_data/pools/softmimicgen/rope/ours/none/pilot20/logs/`에 있다. 여기까지 되면 4절의 전체 실행으로 넘어간다.
 
 다섯 과제의 전체 경로(원본, 생성, 장면 시드, 데이터셋, 학습, 검증, 선택, 시험, 결과 묶음)를 작은 규모로 끝까지 확인하려면 4절의
-명령에 `MINI=1`을 붙인다. 과제마다 성공 20개짜리 풀, 시연 10개 데이터셋, 200갱신 학습, 검증과 시험 각 6장면으로 같은 코드 경로를
+명령에 `MINI=1`을 붙인다. 과제마다 50회 시도짜리 풀, 시연 10개 데이터셋, 200갱신 학습, 검증과 시험 각 6장면으로 같은 코드 경로를
 돌고, 결과 묶음은 `/data/tmg_data/reports/isaaclab_mini_<날짜>.tar.gz`로 나온다. 정책 단계는 시드 하나에 과제마다 18분에서 41분이
-걸렸다(8절). MINI 실행은 생성 설정 `test/pilot20`을 쓰고 풀과 실행 폴더 이름에 `pilot20`이 들어가므로 뒤의 전체 실행(`pool_isaac`)과 파일이 겹치지 않는다.
+걸렸다(8절). MINI 실행은 생성 설정 `test/pilot50`을 쓰고 풀과 실행 폴더 이름에 `pilot50`이 들어가므로 뒤의 전체 실행(`pool_isaac`)과 파일이
+겹치지 않는다. 50회 시도로 두는 이유는 시연 10개가 필요한데 Pick Place의 생성 성공률이 약 40%여서 20회로는 모자랄 수 있기 때문이다.
 
 ```bash
 CLUSTER=ada MINI=1 SEEDS="202601" nohup scripts/run_isaaclab_baseline.sh > /data/tmg_data/mini_driver.out 2>&1 &

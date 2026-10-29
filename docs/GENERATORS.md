@@ -195,7 +195,9 @@ Isaac Lab 평가를 만들 때도 성공 판정은 첫 행동 뒤부터 매 걸�
 | Dex GR1 Exhaust Pipe | 그렇다 (false) | nearest_neighbor_object | 0.003 | 오른손 5, 5 / 왼손 5 | 버린다 |
 
 여섯 과제 모두 `generation_guarantee`가 켜져 있어 `--generation_num_trials`는 성공 수를 뜻한다. 우리 `generation=pool_isaac`
-(성공 250개 청크 4개)도 이 뜻을 그대로 따르고, 기록기는 실패 시도까지 모두 남기므로 생성 성공률은 기록에서 계산한다.
+(성공 250개 청크 4개, `protocol.guarantee: true`)도 이 뜻을 그대로 따르고, 기록기는 실패 시도까지 모두 남기므로 생성 성공률은 기록에서
+계산한다. 시험용 설정과 순위 풀(`rank_human_demos`)은 `guarantee: false`여서 어댑터가 `generation_guarantee`를 꺼 적힌 수만큼만
+시도한다(2026-10-29부터).
 
 원본 시연 파일의 공개 여부는 다음과 같다. 측정한 사실이다.
 
@@ -295,8 +297,8 @@ uv 잠금 파일로 설치)와 별도 어댑터(`tmg/generation/generators/autod
 | Bottle Placement and Door Closing (병을 냉장고에 넣고 문 닫기) | `put_item_in_fridge_and_close_door` | Hugging Face `nvidia/Arena-GR1-Manipulation-PlaceItemCloseDoor-Task`, 파일 `ranch_bottle_into_fridge/ranch_bottle_into_fridge_annotated.hdf5`, 같은 리비전, 주석 달린 시연 5개(카드에는 10개로 적혀 있다) | 하위작업마다 원본 선택, nearest_neighbor_object(nn_k 3), 행동 잡음 0.003, 보간 오른팔 5 왼팔 0, 종료 오프셋 [0, 0] | 10초 = 500걸음 |
 
 어댑터가 공식과 다르게 하는 것은 세 가지뿐이다. 청크마다 공식 기술 파일의 사본에 `generation_policy.seed`(청크 시드), `num_trials`
-(청크의 수), `guarantee_success: true`(Isaac Lab 과제처럼 수가 성공 수를 뜻하게)를 써 넣는다. 공식 기술 파일의 `guarantee_success`는
-false이고 `num_trials`는 50과 100이다.
+(청크의 수), `guarantee_success`(생성 설정의 `protocol.guarantee`. 본 풀은 true라 수가 성공 수를 뜻하고, 시험용 설정과 순위 풀은 false라
+시도 수를 뜻한다)를 써 넣는다. 공식 기술 파일의 `guarantee_success`는 false이고 `num_trials`는 50과 100이다.
 
 실행 방식은 AutoData의 자체 Arena 시험과 같다. `scripts/generate_dataset.py --external_callback
 isaaclab_arena.environments.isaaclab_interop.environment_registration_callback --env_name <환경> --alg dexmimicgen

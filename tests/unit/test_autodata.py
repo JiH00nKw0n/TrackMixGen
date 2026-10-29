@@ -25,6 +25,8 @@ def test_chunk_descriptor_changes_only_seed_trials_and_guarantee():
     assert out["generation_policy"] == {"name": "gr1_open_microwave", "num_trials": 250, "guarantee_success": True,
                                         "select_src_per_subtask": True, "seed": 30001}
     assert out["subtasks"] == OFFICIAL["subtasks"] and OFFICIAL["generation_policy"]["num_trials"] == 50
+    fixed = chunk_descriptor(OFFICIAL, seed=20001, num_trials=250, guarantee=False)     # ranking pools: trials are attempts
+    assert fixed["generation_policy"]["guarantee_success"] is False and fixed["generation_policy"]["num_trials"] == 250
 
 
 def test_autodata_chunk_spec(tmp_path, monkeypatch):

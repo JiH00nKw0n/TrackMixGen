@@ -11,7 +11,9 @@ That function runs after the script's imports and before its ``main()``:
 1. optionally imports the camera task module of the task (registers a camera-enabled environment);
 2. wraps the script's ``setup_env_config`` so that the scene ranges are written into the environment config
    (``simulators.isaaclab.apply_scene``), the chunk seed is written into ``datagen_config.seed`` (the official
-   scripts take no ``--seed``; they seed random, numpy and torch with that config value) and the override is logged;
+   scripts take no ``--seed``; they seed random, numpy and torch with that config value), ``generation_guarantee`` is
+   set from ``generation.protocol.guarantee`` (true: ``--generation_num_trials`` counts successes, the official value;
+   false: it counts attempts, for the test pilots and the ranking pools) and the overrides are logged;
 3. installs the grafts (``runtime.install``) and, when tracking is on, the shared-path ``generate``.
 
 The official script file is never modified; only the in-memory copy run by this process is.
@@ -37,6 +39,7 @@ def install(namespace: dict, spec: dict) -> None:
         print(f"[tmg] camera task module imported: {spec['extra']['camera_module']}", flush=True)
     scene, task_name = spec["scene"], str(spec["task"]["name"])
     chunk_seed = int(spec["chunk"]["seed"])
+    guarantee = bool((spec.get("protocol") or {}).get("guarantee", True))
     original_setup = namespace["setup_env_config"]
 
     @functools.wraps(original_setup)
@@ -48,6 +51,12 @@ def install(namespace: dict, spec: dict) -> None:
         if datagen is not None:        # the official script seeds random, numpy and torch with this value
             datagen.seed = chunk_seed
             print(f"[tmg] datagen_config.seed = {chunk_seed} (chunk seed)", flush=True)
+            # generation.protocol.guarantee decides what --generation_num_trials counts: successes (true, the official
+            # value of every Isaac Lab task; the full pools) or attempts (false; the test pilots and the ranking pools)
+            if hasattr(datagen, "generation_guarantee"):
+                datagen.generation_guarantee = guarantee
+                print(f"[tmg] datagen_config.generation_guarantee = {guarantee} (trials count "
+                      f"{'successes' if guarantee else 'attempts'})", flush=True)
         return (env_cfg, *rest) if rest else env_cfg
 
     namespace["setup_env_config"] = setup_env_config
