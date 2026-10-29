@@ -1,9 +1,57 @@
+# Python build and tool caches
 __pycache__/
 *.pyc
+*.egg-info/
+build/
+dist/
+.venv/
 .pytest_cache/
 .ruff_cache/
-.venv/
-*.egg-info/
+.mypy_cache/
+.pyright/
+.coverage
+.coverage.*
+htmlcov/
+
+# Experiment data and results: they live under the data root (TMG_DATA_ROOT), never in the repository
 /data/
+outputs/
+wandb/
+*.hdf5
+*.h5
+*.npz
+*.npy
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.mp4
+*.gif
+
+# Container images and bundles
+*.sif
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+
+# Logs and scratch
 logs/
+*.log
+*.out
+tmp/
+scratch/
+*.tmp
+
+# Editors, OS and local settings
 .DS_Store
+.idea/
+.vscode/
+.claude/
+*.swp
+*.swo
+*~
+*.orig
+*.rej
+.env
+.env.*
