@@ -25,6 +25,10 @@ def runtime_environment(image: str, data_root: str) -> tuple[Path, dict[str, str
     python = venv / "bin/python"
     if not python.is_file():
         raise FileNotFoundError(f"Run scripts/bootstrap_native.py {image} first: {python}")
+    if image == "isaaclab-autodata":
+        verified = root / "install-records/isaaclab-autodata.versions.json"
+        if not verified.is_file() or not json.loads(verified.read_text()).get("passed"):
+            raise RuntimeError("AutoData installation has not passed the main package/source version check")
     env = dict(os.environ)
     env.update(TMG_DATA_ROOT=str(Path(data_root).resolve()), TMG_IMAGE=f"native/{image}",
                VIRTUAL_ENV=str(venv), PYTHONUNBUFFERED="1", HF_HUB_DISABLE_TELEMETRY="1")

@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+import pytest
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -67,6 +68,13 @@ def test_autodata_uses_the_main_pinned_runtime_paths(tmp_path, monkeypatch):
     root=tmp_path/'native';py=root/'envs/isaaclab-autodata/bin/python'
     py.parent.mkdir(parents=True);py.touch()
     monkeypatch.setenv('TMG_NATIVE_ROOT',str(root))
+    with pytest.raises(RuntimeError,match='has not passed'):
+        module.runtime_environment('isaaclab-autodata',str(tmp_path/'data'))
+    proof=root/'install-records/isaaclab-autodata.versions.json'
+    proof.parent.mkdir();proof.write_text(json.dumps({'passed':False}))
+    with pytest.raises(RuntimeError,match='has not passed'):
+        module.runtime_environment('isaaclab-autodata',str(tmp_path/'data'))
+    proof.write_text(json.dumps({'passed':True}))
     actual,env=module.runtime_environment('isaaclab-autodata',str(tmp_path/'data'))
     assert actual==py
     assert env['TMG_ISAACLAB_SRC']==str(root/'src/isaaclab-autodata/IsaacLab-Arena/submodules/IsaacLab')
