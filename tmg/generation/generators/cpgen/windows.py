@@ -84,6 +84,7 @@ def _cpgen_modules(source_root: str):
     cwd = os.getcwd()
     os.chdir(source_root)                     # CP-Gen opens demo_aug/configs/... relative to its checkout
     try:
+        import cpgen_envs  # noqa: F401  registers CP-Gen's robosuite 1.5 environments (Coffee_D0, ...; robosuite.make needs them)
         from demo_aug.utils import demo_segmentation_utils as seg
     finally:
         os.chdir(cwd)
