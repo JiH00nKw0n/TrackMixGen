@@ -82,8 +82,9 @@ def main():
     if args.kind=='generate':
         # Separate processes, each with one unchanged simulator environment.
         # Admit gradually from actual usage; three is a cap, not a guarantee.
-        ram=(12 if args.task in ('rope','towel') else 16)*GIB
-        gpu=10240 if args.task in ('rope','towel') else 14336
+        measured=config.get('generation_budgets',{}).get(args.task,{})
+        ram=max(10,measured.get('ram_gib',12 if args.task in ('rope','towel') else 16))*GIB
+        gpu=max(10240,measured.get('gpu_mib',14336))
         count=0
     elif args.kind=='train':
         ram=12*GIB;gpu=12288;count=0
