@@ -58,7 +58,7 @@
 그 사이의 회전(0.3에서 0.7 rad)이 "추적 오차"로 잡히고, 기다려도 줄지 않는다. Isaac Lab 어댑터는 역기구학 목표 링크의 자세를
 직접 읽어 오차를 계산한다(2026-10-26 Dex 분석).
 
-### 1.4 원본 시연 선택 방식: 지금은 우리 값, 최종 평가는 공식 템플릿 값 (2026-10-27 결정)
+### 1.4 원본 시연 선택 방식: 지금은 우리 값, 최종 평가는 MimicGen 공식 값 (2026-10-27 결정)
 
 생성 프로토콜은 `configs/experiment/generation/pool_robosuite_image.yaml`의 `protocol` 블록에 있고, 다른 generation 설정(`pool_robosuite_lowdim`,
 `rank_human_demos`, `pool_isaac`, `test/` 아래의 시험용 설정들)은 이 블록을 물려받는다. 지금 값은 하위작업마다 원본 시연을 독립적으로 고르고
@@ -68,9 +68,12 @@
 `mimicgen/scripts/generate_core_configs.py`의 결과이고, 이 스크립트는 Stack Three(그리고 Stack, Pick Place)의
 `select_src_per_subtask`를 true로 바꾼다(논문 부록 N.6도 같다). 그래서 공식 선택은 다음과 같다. Square는 첫 하위작업(너트 잡기)에서
 현재 물체 자세와 가장 가까운 원본 3개 중 하나를 골라(`nearest_neighbor_object`, `nn_k: 3`) 시도 끝까지 쓰고, Stack Three는 모든
-하위작업에서 그렇게 다시 고르며, 나머지 다섯 과제는 시도마다 원본 하나를 무작위로 골라 끝까지 쓴다. 2026-10-30까지 이 문서와
-코드는 템플릿만 보고 Stack Three도 false라고 적었고, 공식 선택의 Stack Three 풀은 그 값으로 만들어졌다. 코드는 과제 설정의
-`official_select_src_per_subtask`(Stack Three: true)로 고쳤다.
+하위작업에서 그렇게 다시 고르며, 나머지 다섯 과제는 시도마다 원본 하나를 무작위로 골라 끝까지 쓴다. 공식 스크립트는 Square의 두
+하위작업 모두에 `nearest_neighbor_object`를 넣고 템플릿은 둘째 하위작업을 `random`으로 두지만, Square는 시도마다 첫 하위작업에서 한 번만
+고르므로 둘째 값은 쓰이지 않아 결과가 같다. 2026-10-30까지 이 문서와
+코드는 템플릿만 보고 Stack Three도 false라고 적었고, 코드는 과제 설정의 `official_select_src_per_subtask`(Stack Three: true)로
+고쳤다. 잘못된 값으로 만든 풀은 없다. 2026-10-30에 A100 서버와 Isaac 서버를 확인했을 때 공식 선택(`selection=official`)으로 만든
+MimicGen Stack Three 풀은 어느 서버에도 없었다.
 
 결정은 두 단계로 나뉜다.
 
@@ -82,12 +85,19 @@
   않는다.
 
 2026-10-29에 첫째 작업을 했고, 선택 규칙을 풀 설정과 분리한 독립 축으로 만들었다(사용자 결정). 설정 묶음 `configs/experiment/selection/`의
-`official`은 생성기의 공식 규칙(MimicGen은 템플릿 값, `config_builder`가 null을 받으면 하위작업별 템플릿 값을 그대로 둔다. CP-Gen은 원본 0번만),
+`official`은 생성기의 공식 규칙(MimicGen은 `generate_core_configs.py`가 템플릿 위에 덮어쓴 값이다. `config_builder`가 null을 받으면 하위작업별 선택 방식은 템플릿 값을 그대로 두고, `select_src_per_subtask`는 과제 설정의 `official_select_src_per_subtask`가 있으면 그 값을 쓴다. CP-Gen은 원본 0번만),
 `ours`는 우리 규칙(MimicGen은 하위작업별 무작위, CP-Gen은 원본 전부. CP-Gen 쪽은 시범별 제약 구간이 생기기 전까지 오류를 낸다)이다. 어느 풀
 설정(영상, 저차원, 순위, 시험용)과도 조합할 수 있고 기본값은 `official`이다. 풀·데이터셋·실행 폴더는 장면 다음에 선택 규칙 이름이 들어간다
 (`pools/<생성기>/<과제>/<장면>/<선택 규칙>/<방법>/<생성 설정>`). 2026-10에 만든 MimicGen 풀(순위 풀, 저차원 탐색 풀)은 모두 `ours` 규칙이고
 그 폴더로 옮겼으며, Isaac Lab과 CP-Gen 풀은 `official` 폴더로 옮겼다. 둘째 작업(공식 값으로 기준 풀 생성)은 MimicGen 기준선 실행
 (`scripts/run_mimicgen_baseline.sh`, 기본 `SELECTION=official`)이 한다.
+
+선택 규칙을 `official`로 두어도 MimicGen 생성 설정 전체가 공식 값이 되지는 않는다. `config_builder.py`는 모든 풀에 생성
+프로토콜(`configs/experiment/generation/pool_robosuite_image.yaml`의 `protocol` 블록)의 값을 함께 쓴다. 그중 행동 잡음 0.05, 보간 걸음 5,
+고정 걸음 0은 공식 값과 같다. 원본 수(`source.n: null`, 원본 파일의 시연 전부)는 공개 원본 파일마다 시연이 10개라서 공식 값 10과 같은
+원본을 쓴다. 성공 수 보장(우리는 끄고 정해진 수만큼 시도한 뒤 모자라면 시도를 늘린다. `generate_core_configs.py`는 성공 1,000개까지
+돈다), 영상 풀의 실패 시연 파일(우리는 쓰지 않고 템플릿은 쓴다), 실패 시연 보관 상한(우리는 없고 `generate_core_configs.py`는 25),
+시연 동영상 렌더링(우리는 끄고 `generate_core_configs.py`는 성공 10개와 실패 25개를 그린다)은 공식 값과 다르다.
 
 현재 값과 공식 값의 차이가 결과에 미치는 영향은 다음과 같이 측정하고 추정했다.
 
@@ -110,7 +120,11 @@
 | 우리 생성, 하위작업별 원본 독립 선택 (`pool_robosuite_lowdim`) | 10.3% (11,000회 중 1,137회) | 9만 체크포인트 2/25 | 14/300 = 4.7% (95% 구간 2.8–7.7%) |
 | 우리 생성, 한 시도에 원본 하나 (`test/pool_robosuite_lowdim_onesrc`, 공식 템플릿 값) | 29.1% (4,000회 중 1,166회) | 10만 체크포인트 4/25 | 14/300 = 4.7% (95% 구간 2.8–7.7%) |
 | 논문 공식 D2 데이터셋 (`scripts/import_robomimic_dataset.py`로 변환, `generation=imported_official`) | 해당 없음 | 7만 체크포인트 2/25 | 8/300 = 2.7% (95% 구간 1.4–5.2%) |
-| 논문 보고값 | 31.3% | 해당 없음 | 38.7% (체크포인트별 50회 평가의 최대값, 시드 3개 중 최대) |
+| 논문 보고값 | 31.3% | 해당 없음 | 38.7% (부록 O는 학습 중 체크포인트마다 50회 롤아웃하고, 각 에이전트가 시드 3개에 걸쳐 낸 최고 성공률을 보고한다고 적는다. 시드마다 최고 체크포인트를 고른 뒤 시드끼리 묶었는지, 시드 가운데 최대를 골랐는지는 그 문장으로 정해지지 않는다) |
+
+우리 보고 방식은 MimicGen과 CP-Gen 어느 쪽과도 다르다. 우리는 시드마다 체크포인트를 검증 25장면으로 고르고 그 하나를 시험
+300장면에서 평가하며, 학습 시드 3개의 평균과 표준편차를 적는다. MimicGen은 위 칸처럼 체크포인트별 최고값을 보고한다. CP-Gen(arXiv
+2508.03944)은 시드 3개 각각의 최고 체크포인트를 50회씩 돌리고 그 평균과 표준오차를 보고한다.
 
 측정으로 확인한 것은 다음과 같다.
 
@@ -125,7 +139,7 @@
 - 학습 손실은 robomimic과 비슷한 속도로 내려간다(음의 로그가능도: 우리 2만 갱신 -12.9, robomimic 7천 갱신 -11.8).
 
 남은 후보는 둘이었다. 학습기 구현의 세부 차이(robomimic BC-RNN-GMM과의 차이, 갱신 횟수 10만 대 공식 20만), 그리고 논문 보고 방식이
-주는 상향 편향(체크포인트 40개와 시드 3개 가운데 최대값). 이를 가르기 위해 같은 공식 데이터로 robomimic 원본 구현(robomimic 0.5.0,
+주는 상향 편향(시드마다 체크포인트 40개 가운데 최고값을 쓰는 방식. 시드 3개를 어떻게 묶었는지는 부록 O의 문장으로 정해지지 않는다). 이를 가르기 위해 같은 공식 데이터로 robomimic 원본 구현(robomimic 0.5.0,
 robosuite 1.4.1, CPU torch 2.6)의 학습과 평가를 돌렸다. 설정은 공식 저차원 BC-RNN 템플릿과 같고, 1,000에폭(10만 갱신), 100에폭마다
 50회 롤아웃, 상한 500, 시드 1개다(`/mnt/nvme0/jihoonkwon/tmg_data/robomimic_ref_three_piece_d2.py`, 로그 `logs/robomimic_ref/train.log`,
 출력 `/mnt/nvme0/jihoonkwon/tmg_data/runs/robomimic_ref`). 2026-10-27 18:29 UTC에 정상 종료했다.
@@ -139,7 +153,7 @@ robosuite 1.4.1, CPU torch 2.6)의 학습과 평가를 돌렸다. 설정은 공�
 - 측정으로 확인한 것. robomimic 원본 구현도 같은 데이터와 같은 갱신 횟수에서 최대 4%(체크포인트 10개 가운데 최대값)다. 우리 학습기와
   평가기의 결과(공식 데이터 2.7%, 우리 생성 데이터 4.7%)와 같은 수준이므로, Three Piece Assembly D2의 낮은 정책 성공률은 우리
   BC-RNN 학습기나 평가기의 구현 오류 때문이 아니다. 우리 파이프라인은 이 과제에서 robomimic 원본과 같게 동작한다.
-- 추정인 것. 논문의 38.7%와의 차이는 학습 예산(20만 갱신)과 보고 방식(시드 3개, 체크포인트별 최대값)에서 나온다고 보는 것이 지금까지의
+- 추정인 것. 논문의 38.7%와의 차이는 학습 예산(20만 갱신)과 보고 방식(체크포인트 가운데 최고값)에서 나온다고 보는 것이 지금까지의
   증거에 맞는다. 다만 10만 갱신까지의 추세(0%에서 4%로 느리게 오름)에서 추정한 것이고, 20만 갱신으로 늘렸을 때 38.7%에 이르는지는
   측정하지 않았다.
 - 따라서 Three Piece Assembly D2는 재현 조사를 여기서 끝내고, 우리 학습기와 평가기는 그대로 둔다. 최종 평가에서 이 과제를 쓸 때는 논문
@@ -191,26 +205,48 @@ Isaac Lab 평가를 만들 때도 성공 판정은 첫 행동 뒤부터 매 걸�
 소스 해시는 `configs/experiment/generator/{softmimicgen,dexmimicgen}.yaml`의 `graft_hashes`에 있다. 아직 `null`인 항목은
 첫 청크 실행이 설치된 해시를 로그에 찍으니, 그 값을 적어 고정한다. 고정 뒤에는 패키지가 바뀌면 청크가 시작하지 않는다.
 
-### 2.1 공식 생성 설정값과 원본 시연 (2026-10-28 조사)
+### 2.1 공식 생성 설정값과 원본 시연 (2026-10-28 조사, 2026-10-30 갱신)
 
-두 생성기는 우리 어댑터가 공식 스크립트에 시도 수, 시드, 입출력 파일만 넘기므로, 원본 시연 선택 방식과 행동 잡음 같은 생성기
-설정은 공식 환경 설정 파일의 값이 그대로 적용된다. `configs/experiment/generation/*.yaml`의 `protocol` 블록은 MimicGen에만
-적용된다. 아래 값은 공식 소스(SoftMimicGen `source/softmimicgen/softmimicgen/envs/*_mimic_env_cfg.py` @ c9d146ba, Isaac Lab
-`source/isaaclab_mimic/isaaclab_mimic/envs/pinocchio_envs/*_mimic_env_cfg.py` @ 3c6e67bb)에서 읽었다.
+두 생성기에서 원본 시연 선택 방식, 행동 잡음, 보간 걸음 수는 공식 설정 파일의 값이 그대로 적용된다.
+`configs/experiment/generation/*.yaml`의 `protocol` 블록에서 이 생성기들이 읽는 값은 `guarantee`와 `camera_names`(AutoData 어댑터만)
+둘뿐이다. 그러나 어댑터가 공식 스크립트에 넘기거나 바꾸는 것은 시도 수, 시드, 입출력 파일보다 많다. 그 밖에 바꾸는 것은 다음과 같다
+(`tmg/generation/generators/isaaclab/adapter.py`, `tmg/generation/generators/isaaclab/entrypoint.py`,
+`tmg/generation/generators/autodata/adapter.py`, `tmg/generation/generators/autodata/runtime.py`).
+
+- 성공 수 보장. 생성 설정의 `protocol.guarantee`로 덮어쓴다. SoftMimicGen은 환경 설정의 `generation_guarantee`를, AutoData는 과제 기술
+  파일 사본의 `guarantee_success`를 바꾼다. 본 풀(`pool_isaac`)은 true라서 Soft 과제와 Pick Place에서는 공식 값과 같고, Microwave와
+  Bottle Placement and Door Closing에서는 공식 기술 파일의 false와 달리 성공 수를 보장한다. 시험용 설정과 순위 풀은 false다.
+- 장면 범위. 진입점이 공식 스크립트의 `setup_env_config`를 감싸 장면 파일의 범위를 환경 설정에 써 넣는다. `scene=official`이면 범위를
+  바꾸지 않는다.
+- 저차원 관측 항목. 진입점이 과제 설정의 `lowdim_terms`를 `policy` 관측 그룹에 더한다(2.10절). 공식 환경에는 없는 항목이다.
+- 성공 판정 준비와 초기화. AutoData 런타임이 Arena의 클래스형 성공 판정을 생성 전에 한 번 인스턴스로 만들고, 시도마다 그 진행 상태를
+  지운다(2.6절). 공식 스크립트 그대로는 생성자 인자 오류가 난다.
+- 환경 선택. AutoData 어댑터는 `protocol.camera_names`가 카메라를 담으면 Pick Place를 우리 카메라 환경
+  `TMG-PickPlace-GR1T2-Images-Mimic-v0`(2.9절)으로, 비어 있으면(순위 풀) 공식 환경 `Isaac-PickPlace-GR1T2-Abs-Mimic-v0`으로 돌린다.
+  SoftMimicGen 과제는 공식 환경이 카메라를 이미 기록하므로 카메라 환경이 없다.
+- 제어기 임시 폴더. 진입점이 역기구학 제어기의 URDF 출력 폴더를 청크마다 따로 둔다. 병렬 청크가 `/tmp/urdf`를 함께 쓰던 문제를 막기
+  위해서다.
+
+아래 값은 공식 소스(SoftMimicGen `source/softmimicgen/softmimicgen/envs/*_mimic_env_cfg.py` @ c9d146ba, AutoData
+`autodata_examples/tasks/gr1_pick_place.yaml`, `gr1_open_microwave.yaml`, `gr1_put_and_close_door.yaml` @ 835f4aab)에서 읽었다. 2026-10-28
+조사 때 이 표의 Dex 줄은 Isaac Lab 2.x(@3c6e67bb)의 환경 설정에서 읽은 Pick Place, Nut Pour, Exhaust Pipe였다. Nut Pour와 Exhaust Pipe는
+원본 파일이 없어 계획에서 빠졌고(아래), 2026-10-29부터 Dex 과제는 AutoData로 도는 세 과제다(2.5절, 2.9절). Pick Place의 값은 두
+소스에서 같다.
 
 | 과제 | 한 시도에 원본 하나 사용 (select_src_per_subtask) | 원본 선택 방식 (selection_strategy, nn_k 3) | 행동 잡음 (action_noise) | 하위작업별 보간 걸음 수 | 실패 시도 기록 (keep_failed) |
 |---|---|---|---|---|---|
 | Soft Rope (밧줄을 U자로) | 그렇다 (false) | 정합 비용이 가장 낮은 3개 중 선택 (registration_cost) | 0.0 | 10, 5 | 기록한다 |
 | Soft Towel (수건 접기) | 그렇다 (false) | 같음 | 0.01 | 5, 5 | 기록한다 |
 | Soft Jenga (블록을 탑에 놓기) | 아니다 (true, 하위작업마다 고른다) | 잡기는 registration_cost, 놓기는 현재 물체 자세에 가장 가까운 3개 중 선택 (nearest_neighbor_object) | 0.01 | 5, 5 | 기록한다 |
-| Dex GR1 Pick Place | 그렇다 (false) | nearest_neighbor_object | 0.003 | 오른손 0, 3 / 왼손 0 | 버린다 |
-| Dex GR1 Nut Pour | 그렇다 (false) | nearest_neighbor_object | 0.003 | 오른손 5, 3, 3 / 왼손 5, 5 | 버린다 |
-| Dex GR1 Exhaust Pipe | 그렇다 (false) | nearest_neighbor_object | 0.003 | 오른손 5, 5 / 왼손 5 | 버린다 |
+| Dex GR1 Pick Place (AutoData) | 그렇다 (false) | nearest_neighbor_object | 0.003 | 오른손 0, 3 / 왼손 0 | 버린다 (false) |
+| Dex GR1 Microwave Opening (AutoData) | 아니다 (true, 하위작업마다 고른다) | nearest_neighbor_object | 0.005 | 오른손 5, 5 / 왼손 0 | 버린다 (기술 파일에 없어 AutoData 기본값 false) |
+| Dex GR1 Bottle Placement and Door Closing (AutoData) | 아니다 (true, 하위작업마다 고른다) | nearest_neighbor_object | 0.003 | 오른손 5, 5, 5, 5 / 왼손 0, 0 | 버린다 (기술 파일에 없어 AutoData 기본값 false) |
 
-여섯 과제 모두 `generation_guarantee`가 켜져 있어 `--generation_num_trials`는 성공 수를 뜻한다. 우리 `generation=pool_isaac`
-(성공 250개 청크 4개, `protocol.guarantee: true`)도 이 뜻을 그대로 따르고, 기록기는 실패 시도까지 모두 남기므로 생성 성공률은 기록에서
-계산한다. 시험용 설정과 순위 풀(`rank_human_demos`)은 `guarantee: false`여서 어댑터가 `generation_guarantee`를 꺼 적힌 수만큼만
-시도한다(2026-10-29부터).
+공식 성공 수 보장은 Soft 세 과제(`generation_guarantee`)와 Pick Place(`guarantee_success: true`)에서 켜져 있고, Microwave와 Bottle
+Placement and Door Closing에서는 꺼져 있다(`guarantee_success: false`, 공식 `num_trials`는 50과 100). 우리 `generation=pool_isaac`(성공
+250개 청크 4개, `protocol.guarantee: true`)은 모든 과제에서 `--generation_num_trials`가 성공 수를 뜻하게 하므로, 뒤의 두 과제에서는
+공식과 다르다. 기록기는 실패 시도까지 모두 남기므로 생성 성공률은 기록에서 계산한다. 시험용 설정과 순위 풀(`rank_human_demos`)은
+`guarantee: false`여서 어댑터가 보장을 꺼 적힌 수만큼만 시도한다(2026-10-29부터).
 
 원본 시연 파일의 공개 여부는 다음과 같다. 측정한 사실이다.
 
@@ -219,7 +255,8 @@ Isaac Lab 평가를 만들 때도 성공 판정은 첫 행동 뒤부터 매 걸�
   내려받을 때 `tmg sources`가 매니페스트에 적는다.
 - Dex GR1 Pick Place의 주석 달린 원본은 Isaac 자산 서버
   `Assets/Isaac/5.1/Isaac/IsaacLab/Mimic/pick_place_datasets/dataset_annotated_gr1.hdf5`(원본 5개)에 있다.
-- Dex GR1 Nut Pour와 Exhaust Pipe의 주석 달린 원본 파일은 2026-10-28 기준으로 찾지 못했다. Isaac 자산 서버의 `Mimic/` 아래 전체
+- Microwave Opening과 Bottle Placement and Door Closing의 주석 달린 원본은 Hugging Face의 Arena 데이터셋에 있다(2.5절 표).
+- (2026-10-28 기록, 지금 계획에 없는 과제) Dex GR1 Nut Pour와 Exhaust Pipe의 주석 달린 원본 파일은 2026-10-28 기준으로 찾지 못했다. Isaac 자산 서버의 `Mimic/` 아래 전체
   목록에는 두 과제의 USD 자산 폴더(`nut_pour_task/`, `exhaust_pipe_task/`)만 있고 hdf5가 없으며, Isaac Lab 문서(고정 커밋과 main)도
   두 과제의 데이터 파일을 안내하지 않는다. 따라서 두 과제는 원본을 직접 녹화하고 주석을 달지 않으면 돌릴 수 없다. 이 저장소에는
   두 과제의 설정 파일을 두지 않았다.
@@ -237,7 +274,7 @@ Isaac Lab 평가를 만들 때도 성공 판정은 첫 행동 뒤부터 매 걸�
 
 | 과제 | 공식 BC-RNN (영상) | 공식 Diffusion Policy (영상) | 공식 평가 상한 | 우리 적용 |
 |---|---|---|---|---|
-| Soft Rope, Towel (`softmimicgen_tasks/<task>/config/agents/robomimic/*.json`) | 128×128 영상을 76×76으로 무작위 자르기, ResNet18과 SpatialSoftmax 32, 1,200에폭, 배치 16, 순서 10 | 자르기 없음, 관측 1단계, 행동 8단계, 예측 16단계, DDPM 100, EMA, U-Net [256, 512, 1024], 1,200에폭, 배치 16 | Rope 250걸음, Towel 220걸음 (성공 시 종료) | 두 정책 모두 자르기 없음(2026-10-29 결정: Isaac Lab 과제는 한 규칙), 상한 400(결정값, 공식 250과 220이 아니다). Towel의 300×300 agentview는 128×128로 줄인다(공식과 다른 점, 2.6절) |
+| Soft Rope, Towel (`softmimicgen_tasks/<task>/config/agents/robomimic/*.json`) | 128×128 영상을 76×76으로 무작위 자르기, ResNet18과 SpatialSoftmax 32, 1,200에폭, 배치 16, 순서 10 | 자르기 없음, 관측 1단계, 행동 8단계, 예측 16단계, DDPM 100, EMA, U-Net [256, 512, 1024], 1,200에폭, 배치 16 | Rope 250걸음, Towel 220걸음 (성공 시 종료) | 두 정책 모두 자르기 없음(2026-10-29 결정: Isaac Lab 과제는 한 규칙), 상한 400(결정값, 공식 250과 220이 아니다). Towel의 300×300 agentview는 128×128로 줄인다(공식과 다른 점, 2.6절). Diffusion Policy의 구조와 배치는 MimicGen 과제와 같은 우리 설정이라 공식과 다르다. 우리는 관측 2단계, U-Net [512, 1024, 2048], 확산 단계 임베딩(잡음 단계 번호를 바꾼 벡터의 차원) 128, 배치 64이고, 공식 SoftMimicGen은 관측 1단계, U-Net [256, 512, 1024], 확산 단계 임베딩 256, 배치 16이다(`franka_rope`, `franka_towel`의 robomimic json) |
 | Dex GR1 Pick Place | 영상 설정 없음 (`bc_rnn_low_dim.json`만 있다) | 없음 | 환경 자체 길이 20초 = 400걸음 | 두 정책 모두 자르기 없음. 상한 600(결정값, 환경 자체 길이 400이 아니다). (참고로 Isaac Lab의 다른 GR1 영상 설정은 160×256을 144×236으로, 변의 90%로 자른다) |
 | MimicGen 7과제 | 84×84를 76×76 | 같음 | 과제별 | 76×76 (기본값) |
 
@@ -310,9 +347,11 @@ Arena @ 481f5ae5, Python 3.12, torch 2.11). 이미지는 `tmg/isaaclab-dex`(`doc
 | Microwave Opening (오른손으로 전자레인지 문 열기) | `gr1_open_microwave` | Hugging Face `nvidia/Arena-GR1-Manipulation-Task`, 파일 `arena_gr1_manipulation_dataset_annotated.hdf5`, 리비전 `arena_v0.2_lab_v3.0`, 주석 달린 시연 10개 | 하위작업마다 원본 선택(select_src_per_subtask true), nearest_neighbor_object(nn_k 3), 행동 잡음 0.005, 보간 오른팔 5 왼팔 0, 첫 하위작업 종료 오프셋 [10, 20] | 5초 = 250걸음 (50 Hz) |
 | Bottle Placement and Door Closing (병을 냉장고에 넣고 문 닫기) | `put_item_in_fridge_and_close_door` | Hugging Face `nvidia/Arena-GR1-Manipulation-PlaceItemCloseDoor-Task`, 파일 `ranch_bottle_into_fridge/ranch_bottle_into_fridge_annotated.hdf5`, 같은 리비전, 주석 달린 시연 5개(카드에는 10개로 적혀 있다) | 하위작업마다 원본 선택, nearest_neighbor_object(nn_k 3), 행동 잡음 0.003, 보간 오른팔 5 왼팔 0, 종료 오프셋 [0, 0] | 10초 = 500걸음 |
 
-어댑터가 공식과 다르게 하는 것은 세 가지뿐이다. 청크마다 공식 기술 파일의 사본에 `generation_policy.seed`(청크 시드), `num_trials`
-(청크의 수), `guarantee_success`(생성 설정의 `protocol.guarantee`. 본 풀은 true라 수가 성공 수를 뜻하고, 시험용 설정과 순위 풀은 false라
-시도 수를 뜻한다)를 써 넣는다. 공식 기술 파일의 `guarantee_success`는 false이고 `num_trials`는 50과 100이다.
+어댑터는 청크마다 공식 기술 파일의 사본에 세 값을 바꿔 쓴다. `generation_policy.seed`(청크 시드), `num_trials`(청크의 수),
+`guarantee_success`(생성 설정의 `protocol.guarantee`. 본 풀은 true라 수가 성공 수를 뜻하고, 시험용 설정과 순위 풀은 false라 시도 수를
+뜻한다)다. 두 Arena 과제의 공식 기술 파일은 `guarantee_success`가 false이고 `num_trials`가 50과 100이므로, 본 풀에서는 공식과 달리 성공
+수를 보장한다. 어댑터는 기술 파일 밖에서도 장면 범위, 저차원 관측 항목, 성공 판정 준비와 초기화, 카메라에 따른 환경 선택을 바꾼다
+(2.1절 목록).
 
 실행 방식은 AutoData의 자체 Arena 시험과 같다. `scripts/generate_dataset.py --external_callback
 isaaclab_arena.environments.isaaclab_interop.environment_registration_callback --env_name <환경> --alg dexmimicgen
@@ -518,6 +557,12 @@ x 상한을 +0.12 m로 낮추고, Microwave 회전을 −15°에서 +5°로 자�
 (24.0%, 영상 포함), 시연 10개의 영상 데이터셋, Diffusion Policy 200갱신 학습, 검증 6장면(성공 0)으로 체크포인트 선택, 시험 6장면(성공 0/6, 상한 600)이다.
 성공 0은 200갱신짜리 모형이라 예상된 값이고, 확인 대상은 경로가 끊기지 않는 것이었다. 결과 묶음은 Isaac 서버의 `reports/isaaclab_mini_dex_unified`에 있다.
 
+해결하지 못한 점이 하나 남아 있다. AutoData의 자체 성능 시험(`autodata_tests/datagen_perf/test_dexmimicgen_gr1_data_generation_success_rate.py`
+16행, `SUCCESS_RATE_THRESHOLD = 0.70`)은 Pick Place 생성 성공률이 70% 이상이어야 통과한다고 정하는데, 우리 통합 환경의 생성 성공률은
+50회 중 12회(24%)였다. 그 시험의 조건은 환경 `IsaacContrib-PickPlace-GR1T2-Abs`, 병렬 환경 100개, 시도 500회, 장치 CPU로 우리 실행과
+다르다. 위의 조사는 옛 Isaac Lab 2.x 환경과 비교했을 뿐 이 시험의 조건과 비교하지 않았고, 이 시험을 우리 이미지에서 돌리지도 않았다.
+차이의 원인은 모른다(2026-10-30 기준).
+
 ## 2.10 Isaac Lab 과제의 저차원 관측 (2026-10-29 결정과 확인)
 
 MimicGen과 CP-Gen의 저차원 정책은 robosuite의 `object` 관측(물체마다 위치 3, 회전 사원수 4, 관절이 있는 물체는 관절 각도, 말단에서 물체까지의
@@ -550,8 +595,10 @@ AutoData 어댑터는 `generation.protocol.camera_names`를 따른다(2026-10-29
 
 ### 3.0 장면: CP-Gen은 자기 Wide 환경에서 돈다 (2026-10-29 결정)
 
-CP-Gen 논문의 주 실험은 물체 크기가 리셋마다 바뀌는 "Wide" 환경(CP-Gen이 다시 구현한 MimicGen 환경의 D1 배치 범위 + 물체별 크기 배율,
-예를 들어 Coffee는 포드와 머신 0.6에서 1.1배, Threading은 바늘 0.8에서 1.2배에 삼각대는 바늘보다 1.1배 크게)이다. 결정은 "CP-Gen은 CP-Gen 환경에서,
+CP-Gen 논문의 주 실험은 물체 크기가 리셋마다 바뀌는 "Wide" 환경이다. 이 환경은 CP-Gen이 다시 구현한 MimicGen 환경의 D1 배치 범위에
+물체별 크기 배율을 더한 것이다. 예를 들어 Coffee는 포드와 머신의 크기를 0.6에서 1.1배로 바꾼다. Threading은 바늘과 삼각대 모두 x와 z
+축을 0.8에서 1.2배로 바꾸고, y 축은 바늘을 1배로 고정하고 삼각대를 0.9에서 1.1배로 바꾼다(`cpgen_envs/environments/manipulation/threading.py`의
+`ThreadingWide`). CP-Gen 논문은 Threading의 크기 범위를 0.9–1.1로 적어 코드의 범위와 다르고, 우리 생성은 코드의 범위로 돈다. 결정은 "CP-Gen은 CP-Gen 환경에서,
 MimicGen은 MimicGen 환경에서 따로"다. CP-Gen의 공식 장면 `official_wide`는 `<과제>Wide` 클래스 그대로이고, 우리 장면 `ours`는 그 클래스를 부모로
 우리 배치 범위(MimicGen의 `ours`와 같은 값)를 얹으므로 크기 변화가 함께 들어간다. MimicGen 쪽 환경(robosuite 1.4.1)에는 크기 조절 기능이 없고 두
 생성기를 한 환경에 맞추지 않는다. 장면 파일은 `env_class`와 `base_env_class`에 `"{env_prefix}Wide"`처럼 밑줄 없는 클래스 이름 패턴을 적을 수 있다.
@@ -591,8 +638,11 @@ MimicGen은 MimicGen 환경에서 따로"다. CP-Gen의 공식 장면 `official_
 
 CP-Gen은 원본 구간을 다시 재생하지 않는다. 시도마다 주석된 키포인트 제약을 새 물체 자세에 맞춰 다시 풀고(제약 걸음),
 그 시작점까지 cuRobo로 운동 계획을 세운다(계획 걸음). `CPPolicy.get_action`은 대기열이 비면 다음 제약을 풀어 계획 걸음과
-제약 걸음을 `action_queue`에 채우고, 한 걸음에 하나씩 꺼낸다. `DemoGenerator.generate_demo`는 꺼낸 행동에 공식 균등
-잡음을 더해 환경에 넣고, 꺼낸(잡음 없는) 행동을 저장한다. 그래서 CP-Gen의 저장 행동은 이미 잡음 전 라벨이다.
+제약 걸음을 `action_queue`에 채우고, 한 걸음에 하나씩 꺼낸다. `DemoGenerator.generate_demo`는 꺼낸 행동에 균등분포
+잡음을 더해 환경에 넣고, 꺼낸 행동을 저장한다. 잡음의 크기는 `SystemNoiseConfig`의 `motion_segment_noise_magnitude`(계획 걸음)와
+`constraint_segment_noise_magnitude`(제약 걸음)인데, 두 값의 기본값은 7차원 모두 0이고(`demo_aug/generate.py` 3397–3407행) 우리 설정도
+저자 실행 스크립트도 이 값을 바꾸지 않는다. 그래서 CP-Gen 생성에서 실제로 더해지는 잡음은 0이다. 공식 코드는 이때도 걸음마다 균등
+난수를 뽑아 0을 곱한다. 저장 행동과 실행 행동이 같으므로 CP-Gen의 저장 행동을 잡음 전 라벨로 써도 된다.
 
 끼우는 함수는 `DemoGenerator.generate_demo` 하나다(`tmg/generation/generators/cpgen/runtime.py`).
 
@@ -614,6 +664,21 @@ CP-Gen은 원본 구간을 다시 재생하지 않는다. 시도마다 주석된
 청크 출력은 CP-Gen의 `main`이 만든다. `generated_obs.hdf5`가 성공 시도들의 상태로부터 두 카메라(84x84)와 로봇·물체 상태를
 다시 그린 파일이고, `tmg dataset`은 이것을 읽는다. k번째 데모는 k번째 성공 시도다. 성공이 하나도 없으면 공식 `main`이 그릴
 파일이 없어 예외를 내는데, 모든 시도가 기록된 뒤라면 청크 프로세스는 이를 정상 종료로 처리한다.
+
+### 3.2 저자 실행 스크립트와 맞춘 값과 남은 차이 (2026-10-30)
+
+로봇 시작 자세 잡음은 저자 실행 스크립트의 값으로 맞췄다. 이 잡음은 리셋 때 로봇 관절의 시작 자세에 더하는 값이다. CP-Gen 생성 설정
+클래스(`demo_aug.generate.Config`)의 기본값은 정규분포 0.02이지만, 저자 실행 스크립트(`scripts/pipeline/run_datagen_and_training.sh`
+202–203행)는 정규분포 0.06을 준다. 2026-10-30 결정으로 우리 설정(`configs/experiment/generator/cpgen.yaml`의 `config.initialization`)도
+정규분포 0.06을 쓴다. 같은 스크립트의 선택 단계 `add-noise`(성공 시연의 행동에 표준편차 0.03의 잡음을 더해 다시 재생하고 새 데이터셋을
+쓰는 단계)는 쓰지 않는다. 스크립트의 주석이 이 단계를 뒤의 다른 프로젝트용이라고 적고, 우리가 재현하는 것은 생성 단계이기 때문이다.
+
+CP-Gen 이미지에 설치된 robomimic은 0.4.0이다. CP-Gen의 `pyproject.toml`은 robomimic 커밋 9273f9c를 적고 주석에서 v0.3.0이라고 부른다.
+이 차이가 생성이나 평가에 영향을 주는지는 확인하지 않았다.
+
+평가 상한은 우리 결정값 600걸음(2026-10-27 결정)이다. CP-Gen 저자 실행 스크립트의 평가 상한(`task.env_runner.max_steps`, 368–395행)은
+Coffee, Mug Cleanup, Threading이 450걸음이고 Hammer Cleanup과 Three Piece Assembly가 600걸음이다. 이 값들은 MimicGen의 평가
+상한(400 또는 500)과도 다르다.
 
 ### 3.x 실행 환경에서 확인한 두 가지 (2026-10-27, A100 Singularity)
 
@@ -660,3 +725,14 @@ CP-Gen은 원본 구간을 다시 재생하지 않는다. 시도마다 주석된
 
 `method=none`으로 만든 청크가 공식 스크립트 실행과 같은지는 2단계에서 과제마다 20회 생성으로 비교한다. 비교 대상은
 `demo.hdf5`와 `demo_failed.hdf5`의 상태, 행동, 관측 배열과 `important_stats.json`의 성공 수다.
+
+이 시험(`make verify-baseline`, `tmg/generation/verify.py`)은 MimicGen 청크 하나를 같은 `mg_config.json`으로 두 번, 접목을 끄고 한 번,
+접목을 켜고 `method=none`으로 한 번 돌려 출력을 바이트 단위로 비교한다. 그래서 방법이 꺼져 있을 때 우리 접목 코드가 결과를 바꾸지
+않는다는 것만 보인다. 두 실행이 같은 설정을 쓰므로 우리 생성 설정이 저자 설정과 같다는 것은 보이지 않는다. 예를 들어 1.4절의 Stack
+Three 원본 선택 오류는 이 시험으로 잡을 수 없었다.
+
+CP-Gen과 Isaac Lab 생성기는 GPU에서 실행마다 결과가 같지 않으므로 이 시험을 MimicGen에만 쓴다. 2026-10-30에 같은 커밋과 같은 시드로
+두 번 돌린 측정에서, CP-Gen은 첫 시도 안에서 계획된 행동이 1.4e-7만큼 달라지기 시작했고, SoftMimicGen은 첫 행동부터 1e-5에서 1e-3만큼
+달랐다. 20회 시도의 성공 수는 CP-Gen이 2회와 4회, SoftMimicGen이 12회와 12회였다. DexMimicGen(AutoData)도 같은 청크 시드에서 성공 20개를
+채우는 데 34회와 38회 시도가 걸렸다(2.7절). 따라서 이 생성기들은 설정이 같으면 결과의 분포가 같을 뿐 결과 자체가 같지는 않고, 20회
+시도 풀의 생성 성공률은 실행마다 몇 회씩 달라질 수 있다.

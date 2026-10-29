@@ -38,7 +38,7 @@ tmg/
 |---|---|
 | `base.py` | `SyntheticDataGenerator`, the contract every adapter implements: `fetch_sources`, `prepare_chunk`, `chunk_result`, `demo_layout`; a default `chunk_command` that runs the adapter's `entrypoint_module`; `_spec`, which builds the `ChunkSpec` the same way for every adapter; `apply_method_overrides` (the generator's `method_overrides` merged into the method config). |
 | `runner.py` | `run_pool`: plans the chunks, skips finished ones, runs the others as parallel processes, validates each result, writes `DONE.json`. Generator-independent. |
-| `verify.py` | `verify_baseline`: one chunk by the official generator and one through the adapter with `method=none`, compared byte for byte. |
+| `verify.py` | `verify_baseline`: one MimicGen chunk run two times with the same `mg_config.json`, without the grafts and with the grafts and `method=none`, compared byte for byte. It shows that the grafts change nothing when the method is off, not that our settings equal the authors' settings. MimicGen only (CP-Gen and the Isaac Lab generators are not deterministic from run to run on the GPU). |
 | `graft.py` | `Graft`: reads an official function's source, checks its hash, inserts our calls at named anchors in the syntax tree, recompiles. The official source is never copied or edited on disk. |
 | `execution.py` | `TrajectoryExecution`: the step bookkeeping of the MimicGen adapter (follower driving, noise accounting, pre-noise labels, feeding the recorder), and `SegmentTable`, the waypoint-to-record-segment map that the CP-Gen runtime also uses. |
 | `seeds.py` | The random streams we derive from a chunk seed (private noise stream: seed + 7919; per-attempt source pick of CP-Gen), named once so every adapter derives them the same way. |

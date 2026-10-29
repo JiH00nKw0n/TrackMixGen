@@ -4,9 +4,12 @@ How CP-Gen produces one attempt: the environment is reset, then ``CPPolicy.get_a
 control step. When its action queue is empty the policy solves the next constraint (an end-effector pose
 sequence from the annotated source segment, re-solved for the current object poses) and motion-plans to its
 start with cuRobo; the planned steps (``curr_motion_plan_steps``) followed by the constraint steps
-(``curr_constraint_steps``) fill ``action_queue`` and one action is popped per step. ``generate_demo`` adds the
-official uniform system noise to the popped action before stepping and stores the popped (noise-free) action
-as the label, so CP-Gen's saved actions are already pre-noise labels.
+(``curr_constraint_steps``) fill ``action_queue`` and one action is popped per step. ``generate_demo`` adds uniform
+noise scaled by ``SystemNoiseConfig`` (``motion_segment_noise_magnitude``, ``constraint_segment_noise_magnitude``) to
+the popped action before stepping and stores the popped action as the label. Both magnitudes default to 0 in all 7
+dimensions, and neither our config nor the authors' launcher sets them. So no noise is added during CP-Gen generation
+(the uniform draw still happens and is multiplied by 0), the saved actions equal the executed ones, and they are
+pre-noise labels.
 
 Anchors in ``generate_demo`` (by the name the official statement assigns):
 

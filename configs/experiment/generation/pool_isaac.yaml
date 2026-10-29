@@ -1,19 +1,21 @@
 defaults:
   - pool_robosuite_image
   - _self_
-# Full pool of an Isaac Lab generator (SoftMimicGen, DexMimicGen, AutoData): 1,000 successes in 4 chunks, chunk seeds
-# 30001..30004. The Isaac Lab adapters run the official `generate_dataset.py` with the task's official environment config,
-# so the inherited `protocol` block is NOT applied to them except `guarantee`: source selection, action noise and
-# interpolation steps are the official per-task values (listed in each task file and in docs/GENERATORS.md section 2.1).
-# `protocol.guarantee: true` keeps the official `generation_guarantee`, so `attempts` is the number of SUCCESSES each
-# chunk runs until (the official meaning of `--generation_num_trials`); the records still hold every attempt, so the
-# generation success rate is measured. The test pilots and `rank_human_demos` inherit `guarantee: false` and run a fixed
-# number of attempts on the Isaac Lab generators too.
-# Images are the official cameras of the task (Soft), the registered camera environment (Dex, `task.camera_env`) or
-# the Arena head camera captured per step (AutoData).
+# Full pool of an Isaac Lab generator (SoftMimicGen, DexMimicGen through AutoData): 1,000 successes in 4 chunks, chunk
+# seeds 30001..30004. The Isaac Lab adapters run the official `generate_dataset.py` with the task's official environment
+# config (SoftMimicGen) or task descriptor (DexMimicGen). Source selection, action noise and interpolation steps are the
+# official per-task values (listed in each task file and in docs/GENERATORS.md section 2.1). Of the inherited `protocol`
+# block they read only `guarantee` and, in the AutoData adapter, `camera_names`.
+# `protocol.guarantee: true` makes `attempts` the number of SUCCESSES each chunk runs until. This is the official setting
+# of Rope, Towel and Pick Place, but NOT of Microwave and Bottle Door, whose AutoData task files say
+# `guarantee_success: false` (a fixed number of attempts). The records still hold every attempt, so the generation
+# success rate is measured. The test pilots and `rank_human_demos` inherit `guarantee: false` and run a fixed number of
+# attempts on the Isaac Lab generators too.
+# Images are the official cameras of the task (Soft), our camera environment (Pick Place, `task.camera_env`) or the
+# Arena head camera (Microwave, Bottle Door). The DexMimicGen runtime captures its images per step.
 name: pool_isaac
 attempts: 1000
 chunk: 250
 seed_offset: 30000
 protocol:
-  guarantee: true                 # Isaac Lab generators: attempts count successes (official); the only protocol value they read
+  guarantee: true                 # attempts count successes (official for Soft and Pick Place, not for Microwave and Bottle Door)

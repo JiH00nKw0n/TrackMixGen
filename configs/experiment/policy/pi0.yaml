@@ -1,13 +1,17 @@
 # π0: LeRobot 0.6.1 PI0Policy started from the hub weights lerobot/pi0_base (PaliGemma 3B + 300M action expert).
-# Implemented, not yet exercised (stage 6): the fine-tuning values follow openpi's pi0_libero recipe through
-# LeRobot's presets (AdamW 2.5e-5, betas 0.9/0.95, weight decay 0.01, grad clip 1.0, cosine decay with 1,000 warmup
-# steps to 2.5e-6 over 30,000 steps). Images are resized with padding to 224x224 inside the policy; the task
-# instruction comes from the task config (`instruction`) and is tokenized by LeRobot's pipeline (tmg/policy/io.py).
+# Not used in the current experiments. The code will be aligned with openpi before π0 runs (decision 2026-10-30).
+# The code now applies LeRobot's PI0 optimizer preset (AdamW 2.5e-5, betas 0.9/0.95, weight decay 0.01, cosine decay
+# with 1,000 warmup steps to 2.5e-6 over 30,000 steps), the shared gradient-norm clip training.grad_clip_norm = 1000
+# (the preset's 1.0 is not used), no EMA, checkpoint selection by validation like every other policy, and 50 executed
+# actions per inference. It does NOT yet apply the openpi gradient clip 1.0, the openpi AdamW weight decay 1e-10, the
+# EMA 0.99 of pi0_libero, or the replanning every 5 actions of the openpi LIBERO example.
+# Images are resized with padding to 224x224 inside the policy. The task instruction comes from the task config
+# (`instruction`) and is tokenized by LeRobot's pipeline (tmg/policy/io.py).
 name: pi0
 pretrained_path: lerobot/pi0_base
 params:
   chunk_size: 50                 # predicted action steps (openpi action_horizon); TODO confirm against pi0_libero
-  n_action_steps: 50             # executed per prediction
+  n_action_steps: 50             # executed per prediction (openpi LIBERO replans every 5, not applied yet)
   dtype: bfloat16
   gradient_checkpointing: true
   freeze_vision_encoder: false

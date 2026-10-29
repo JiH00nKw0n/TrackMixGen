@@ -14,8 +14,9 @@ protocol:
                                   # pools keep them (their own files say so).
   max_num_failures: null
   guarantee: false                # fixed attempt count (successes are selected at the dataset stage)
-  # source selection comes from the `selection` group (selection=official | ours), independent of this file: official keeps
-  # MimicGen's template values (decision 2026-10-27, docs/GENERATORS.md 1.4), ours picks a source at random for every subtask
+  # source selection comes from the `selection` group (selection=official | ours), independent of this file. official: what
+  # MimicGen's scripts/generate_core_configs.py writes on top of the templates (Stack Three a source per subtask, see
+  # docs/GENERATORS.md 1.4). ours: a source at random for every subtask
   select_src_per_subtask: ${selection.select_src_per_subtask}
   selection_strategy: ${selection.selection_strategy}
   selection_strategy_kwargs: ${selection.selection_strategy_kwargs}
