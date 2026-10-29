@@ -96,6 +96,7 @@ def server(args):
                                     stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
         ticks = process_identity(proc.pid)
         record.write_text(json.dumps({"pid": proc.pid, "start_ticks": ticks, "command": command,
+                                     "resource_owner": int(env.get("TMG_RESOURCE_OWNER", "0")),
                                      "started_at": time.time()}, indent=2))
         if ticks is None:
             raise RuntimeError(f"policy server exited at launch; see {folder / (args.name + '.log')}")

@@ -14,6 +14,9 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 : "${TASK:?TASK=<generator/task> is required}"
 SCENE=${SCENE:-ours}; OBSERVATION=${OBSERVATION:-image}; CLUSTER=${CLUSTER:-local}; SPLIT=${SPLIT:-val}; GENERATOR=${GENERATOR:-mimicgen}
 PORT=${PORT:-8765}; SHARDS=${SHARDS:-1}; EXTRA=${EXTRA:-}; IMAGE=${IMAGE:-robosuite}
+if [ "$CLUSTER" = pod ] && [ -z "${TMG_RESOURCE_OWNER:-}" ] && [ -f "${TMG_RESULTS_ROOT:-}/reports/evaluation_capacity/selected.json" ]; then
+  exec python3 "$REPO/scripts/pod_resource_guard.py" --kind eval --task "$TASK" --evaluations "$SHARDS" -- bash "$0"
+fi
 CKPT=${CKPT:-$(for d in "$RUN"/checkpoints/[0-9]*/; do [ -f "$d/checkpoint.json" ] && echo "${d%/}"; done | sort | tail -1)}
 DATA_ROOT=$(make -s -C "$REPO" print-data-root CLUSTER="$CLUSTER")
 RUNTIME_DATA_ROOT=$(make -s -C "$REPO" print-runtime-data-root CLUSTER="$CLUSTER")

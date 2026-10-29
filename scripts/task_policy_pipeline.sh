@@ -26,6 +26,8 @@ assert r['max_evaluations'] in (2,4,6) and r['verified']
 print(r['max_evaluations']//2)
 PY
     ) || exit 1
+    # Other scenes have not been measured by the Rope capacity probe.
+    if [ "$TASK" != rope ] && [ "$parallel" -gt 2 ]; then parallel=2; fi
     VAL_PARALLEL=$parallel; TEST_SHARDS=$parallel
     export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
   fi
@@ -44,7 +46,11 @@ port_busy() { python3 -c "import socket,sys; s=socket.socket(); s.settimeout(1);
 
 log "train -> $RUN"
 if [ "${SKIP_TRAIN:-0}" = 1 ]; then log "train skipped (SKIP_TRAIN=1)"; else
-make -s -C "$REPO" train $C OVERRIDES="dataset.size=$SIZE ${TRAIN_OVERRIDES:-}" || { log "TRAIN FAILED"; exit 1; }
+train_guard=()
+if [ "$CLUSTER" = pod ] && [ -f "${TMG_RESULTS_ROOT:-}/reports/evaluation_capacity/selected.json" ]; then
+  train_guard=(python3 "$REPO/scripts/pod_resource_guard.py" --kind train --task "$TASK" --)
+fi
+"${train_guard[@]}" make -s -C "$REPO" train $C OVERRIDES="dataset.size=$SIZE ${TRAIN_OVERRIDES:-}" || { log "TRAIN FAILED"; exit 1; }
 fi
 log "validate checkpoints ($VAL_PARALLEL at a time)"
 i=0; pids=""
