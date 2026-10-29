@@ -61,19 +61,23 @@ endif
 ifeq ($(IMAGE),cpgen)
 DOCKER_GPU = --gpus all
 SING_NV    = --nv
-# CP-Gen rewrites cuRobo's task configs (it adds its straight-line cost) inside the cuRobo checkout, which is
-# read-only in the image (and root-owned under docker --user): a writable host copy, filled from the image on
-# first use, is mounted over that folder
-CUROBO_TASK_DIR = /opt/src/curobo/src/curobo/content/configs/task
-CPGEN_TASKCFG   = $(DATA_ROOT)/cpgen_writable/curobo_task
-SING_BIND_EXTRA  = -B $(CPGEN_TASKCFG):$(CUROBO_TASK_DIR)
-DOCKER_VOL_EXTRA = -v $(CPGEN_TASKCFG):$(CUROBO_TASK_DIR)
+# CP-Gen writes into two folders of the image: cuRobo's task configs (it adds its straight-line cost inside the cuRobo
+# checkout) and MimicGen's ShapeNet mug assets (Mug Cleanup writes a scaled mug xml next to the mesh). Both are read-only
+# in the image (and root-owned under docker --user), so a writable host copy of each, filled from the image on first use,
+# is mounted over the folder. Pairs are IMAGE_DIR:HOST_DIR.
+CUROBO_TASK_DIR   = /opt/src/curobo/src/curobo/content/configs/task
+MIMICGEN_MUGS_DIR = /opt/src/mimicgen/mimicgen/models/robosuite/assets/shapenet_core/mugs
+CPGEN_WRITABLE    = $(CUROBO_TASK_DIR):$(DATA_ROOT)/cpgen_writable/curobo_task $(MIMICGEN_MUGS_DIR):$(DATA_ROOT)/cpgen_writable/mimicgen_mugs
+img_dir  = $(word 1,$(subst :, ,$(1)))
+host_dir = $(word 2,$(subst :, ,$(1)))
+SING_BIND_EXTRA  = $(foreach p,$(CPGEN_WRITABLE),-B $(call host_dir,$(p)):$(call img_dir,$(p)))
+DOCKER_VOL_EXTRA = $(foreach p,$(CPGEN_WRITABLE),-v $(call host_dir,$(p)):$(call img_dir,$(p)))
 ifeq ($(RUNTIME),singularity)
-CPGEN_TASKCFG_FILL = singularity exec $(SIF) cp -r $(CUROBO_TASK_DIR)/. $(CPGEN_TASKCFG)/
+writable_fill = singularity exec $(SIF) cp -r $(call img_dir,$(1))/. $(call host_dir,$(1))/
 else
-CPGEN_TASKCFG_FILL = docker run --rm -v $(CPGEN_TASKCFG):/out --entrypoint cp tmg/$(IMAGE):$(TAG) -r $(CUROBO_TASK_DIR)/. /out/
+writable_fill = docker run --rm -v $(call host_dir,$(1)):/out --entrypoint cp tmg/$(IMAGE):$(TAG) -r $(call img_dir,$(1))/. /out/
 endif
-PREP_EXTRA = && { test -n "$$(ls -A $(CPGEN_TASKCFG) 2>/dev/null)" || { mkdir -p $(CPGEN_TASKCFG) && $(CPGEN_TASKCFG_FILL); }; }
+PREP_EXTRA = $(foreach p,$(CPGEN_WRITABLE),&& { test -n "$$(ls -A $(call host_dir,$(p)) 2>/dev/null)" || { mkdir -p $(call host_dir,$(p)) && $(call writable_fill,$(p)); }; })
 endif
 DOCKER_RUN  = docker run --rm -i $(if $(shell tty -s && echo t),-t,) --network host $(DOCKER_GPU) \
               -v $(DATA_ROOT):/data -v $(REPO):/opt/tmg $(DOCKER_VOL_EXTRA) \

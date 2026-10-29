@@ -17,12 +17,17 @@ constraints verbatim. The derived windows were reviewed on video on 2026-10-29 (
 second interaction (needle into the tripod) starts earlier than the released window in every demonstration because the
 needle is near the tripod well before the insertion the annotator marked.
 
-The simulator is driven the way CP-Gen's own ``demo_aug.generate.reset_to`` drives it (that function replaces robomimic's
+The simulator is reset the way CP-Gen's own ``demo_aug.generate.reset_to`` resets it (that function replaces robomimic's
 ``EnvRobosuite.reset_to`` when ``demo_aug.generate`` is imported, which this module does not do): the stored model xml of a
-demonstration is tried first and, when the installed robosuite cannot load it, the freshly reset model is kept and only the
-states are restored. The released sources were recorded with robosuite 1.4.1, whose xml names the ``mounts`` asset folder
-that robosuite 1.5 renamed to ``bases``, so in the CP-Gen image every demonstration takes that fall-back; the scene is the
-same because the object placement of a MimicGen D0 source lives in the state, not in the xml.
+demonstration is tried first and, when the installed robosuite cannot load it, the freshly reset model is kept and the
+states are restored into it. The released sources were recorded with robosuite 1.4.1 and their xml cannot be loaded by the
+robosuite 1.5 fork of the CP-Gen image (renamed asset folders, missing robot sites), so every demonstration takes that
+fall-back. Object placement lives in the state, but object *geometry* does not: MimicGen builds some objects with random
+dimensions at every reset (the hammer of Hammer Cleanup), so a fresh model would put a differently sized object under the
+recorded states and the body distances that decide the windows would change from reset to reset. :func:`reset_model`
+therefore copies the stored xml's body and geom placement and sizes into the fresh model by name (robot, gripper and
+mount bodies excluded), which makes the segmentation deterministic and the scene the recorded one. CP-Gen itself does not
+do this when it loads the sources; it does not need to, because it only reads the states and the constraint windows.
 
 Runs inside the CP-Gen image (robosuite 1.5, robomimic, CP-Gen's checkout on ``sys.path``); ``tmg sources`` calls
 :func:`annotate_source` for the CP-Gen tasks. The pure helpers (:func:`windowed_constraints`, :func:`best_threshold`) have
@@ -118,9 +123,58 @@ def make_env(demo_path: str):
     return EnvUtils.create_env_from_metadata(env_meta=env_meta, use_image_obs=False, render_offscreen=False, render=False)
 
 
+SKIP_BODY_PREFIXES = ("robot", "gripper", "mount")   # robot-side bodies: the fresh robosuite 1.5 model is authoritative for them
+
+
+def _floats(text: str | None, n: int, default: Sequence[float]) -> np.ndarray:
+    out = np.array(default, dtype=float)
+    if text:
+        vals = [float(x) for x in text.split()]
+        out[: len(vals)] = vals[:n]
+    return out
+
+
+def apply_stored_geometry(env, model_xml: str) -> int:
+    """Copy body placement (pos, quat) and geom placement and size from the stored model xml into the current model of
+    ``env`` for every body and geom of the same name, except robot-side bodies. Mesh geoms keep their mesh and size.
+    Returns the number of bodies and geoms updated. Used when the stored xml itself cannot be loaded."""
+    import xml.etree.ElementTree as ET
+
+    m = env.env.sim.model
+    n = 0
+    for body in ET.fromstring(model_xml).iter("body"):
+        name = body.get("name")
+        if not name or name.startswith(SKIP_BODY_PREFIXES):
+            continue
+        try:
+            bid = m.body_name2id(name)
+        except Exception:      # noqa: BLE001  body only in the stored model
+            continue
+        m.body_pos[bid] = _floats(body.get("pos"), 3, (0.0, 0.0, 0.0))
+        if not (body.get("euler") or body.get("axisangle")):
+            m.body_quat[bid] = _floats(body.get("quat"), 4, (1.0, 0.0, 0.0, 0.0))
+        n += 1
+        for geom in body.findall("geom"):
+            gname = geom.get("name")
+            if not gname or geom.get("fromto"):
+                continue
+            try:
+                gid = m.geom_name2id(gname)
+            except Exception:      # noqa: BLE001
+                continue
+            m.geom_pos[gid] = _floats(geom.get("pos"), 3, (0.0, 0.0, 0.0))
+            if not (geom.get("euler") or geom.get("axisangle")):
+                m.geom_quat[gid] = _floats(geom.get("quat"), 4, (1.0, 0.0, 0.0, 0.0))
+            if geom.get("type") != "mesh" and not geom.get("mesh") and geom.get("size"):
+                m.geom_size[gid] = _floats(geom.get("size"), 3, (0.0, 0.0, 0.0))
+            n += 1
+    return n
+
+
 def reset_model(env, model_xml: str) -> bool:
     """Reset ``env`` (a robomimic ``EnvRobosuite``) and try to load the demonstration's model xml, as CP-Gen's ``reset_to``
-    does; returns False when the xml cannot be loaded by the installed robosuite and the freshly reset model is kept."""
+    does. Returns False when the installed robosuite cannot load the xml; the freshly reset model is then kept and the
+    stored geometry is copied into it (:func:`apply_stored_geometry`)."""
     env.reset()
     try:
         from robosuite.utils.binding_utils import MjSim
@@ -130,6 +184,7 @@ def reset_model(env, model_xml: str) -> bool:
         ok = True
     except Exception:      # noqa: BLE001  CP-Gen logs and continues with the reset model
         ok = False
+        apply_stored_geometry(env, model_xml)
     env.env.sim.reset()
     return ok
 
