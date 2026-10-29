@@ -27,9 +27,12 @@ lowdim_terms:
     func: tmg.generation.simulators.isaaclab_lowdim:scene_object_state
     params: {objects: [{name: ranch_dressing_hope_robolab}, {name: refrigerator, joints: [fridge_door_joint]}], eef: {links: [left_hand_roll_link, right_hand_roll_link]}}
 instruction: put the bottle in the refrigerator and close the door
-# Official generation settings (autodata_examples/tasks/gr1_put_and_close_door.yaml @ 835f4aab), used unchanged except that
+# Official generation settings (autodata_examples/tasks/gr1_put_and_close_door.yaml @ 835f4aab), these values used unchanged except that
 # the chunk guarantees its success count: a source per subtask, nearest_neighbor_object (nn_k 3), action noise 0.003,
 # interpolation 5 (right arm) and 0 (left arm), term offsets [0, 0].
+# Our code also changes, for every DexMimicGen task: the reset ranges of the scene (scene file), the low-dim observation
+# terms added to the policy group, the Arena success term (prepared and reset per attempt), and with cameras stored the
+# environment itself (Pick Place runs TMG-PickPlace-GR1T2-Images-Mimic-v0).
 policy_overrides:
   bc_rnn: {crop_shape: null}
   diffusion_policy: {crop_shape: null}

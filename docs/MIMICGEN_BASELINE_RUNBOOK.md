@@ -1,8 +1,9 @@
 # MimicGen 기준선 실행 안내 (일곱 과제, Diffusion Policy와 BC-RNN)
 
 이 문서 하나로 GPU 한 장짜리 컴퓨터에서 MimicGen 기준선 실험을 처음부터 끝까지 돌리고, 분석에 필요한 결과 파일을 한 묶음으로
-받을 수 있다. 기준선이란 공식 MimicGen 생성기를 공식 설정 그대로 돌려 시연을 만들고, 그 시연으로 우리 설정(넓힌 장면, 영상 관측,
-평가 상한 600걸음, 고정 평가 장면)에서 정책을 학습하고 평가하는 것이다. 실험은 과제마다 "공식 원본 시연 10개 내려받기, 공식 설정으로
+받을 수 있다. 기준선이란 공식 MimicGen 생성기를 공식 원본 선택 방식, 행동 잡음, 보간 걸음 수로 돌려 시연을 만들고, 그 시연으로 정책을
+학습하고 평가하는 것이다. 생성, 학습, 평가는 모두 우리가 물체 배치 범위를 넓힌 장면 `ours`(1절)에서 돈다. 그래서 생성 단계부터
+공식 MimicGen 실험과 장면이 다르다. 학습과 평가에는 그 밖에도 우리 설정(영상 관측, 평가 상한 600걸음, 고정 평가 장면)을 쓴다. 실험은 과제마다 "공식 원본 시연 10개 내려받기, 공식 설정으로
 성공 시연 1,000개 이상 생성, 고정 평가 장면 만들기, 학습 데이터셋 1,000개 쓰기, 영상 Diffusion Policy와 영상 BC-RNN을 각각 시드
 3개(202601, 202602, 202603)로 학습, 시드마다 검증 25장면으로 체크포인트 선택, 시험 300장면 평가" 순서로 진행한다. 명령
 하나(`scripts/run_mimicgen_baseline.sh`)가 전부를 돌리고, 중단되면 같은 명령을 다시 실행하면 끝난 단계는 건너뛰고 이어서 돈다.
@@ -34,16 +35,30 @@
 | Threading (`threading`) | 바늘을 집어 삼각대의 구멍에 끼운다 | 2 |
 | Three Piece Assembly (`three_piece_assembly`) | 조각 두 개를 바닥판 위에 차례로 끼운다 | 4 |
 
-생성 설정은 MimicGen 공식 설정 템플릿(`mimicgen/exps/templates/robosuite/<과제>.json`)의 값을 그대로 쓴다. 우리 코드는 템플릿에
-시도 수, 시드, 입출력 경로, 저장할 카메라만 써 넣는다. 아래 표의 값은 그 템플릿에서 읽은 것이다. 원본 선택 규칙은 별도 설정 묶음
-`selection`으로 고르고(`configs/experiment/selection/official.yaml`, 드라이버 변수 `SELECTION`, 기본값 `official`), 이 값이면 선택 항목을
-비워 두어 템플릿 값이 남는다. `SELECTION=ours`를 주면 우리 규칙(하위작업마다 원본을 무작위로 고른다)으로 같은 영상 풀을 만들 수 있고,
+생성 설정의 공식 값은 MimicGen의 `mimicgen/scripts/generate_core_configs.py`가 공식 설정 템플릿
+(`mimicgen/exps/templates/robosuite/<과제>.json`) 위에 과제별 값을 덮어쓴 결과다. 일곱 과제에서 원본 선택이 템플릿과 다른 곳은 Stack
+Three의 `select_src_per_subtask: true` 하나이고, 우리 설정 작성기(`tmg/generation/generators/mimicgen/config_builder.py`)는 과제 설정의
+`official_select_src_per_subtask`로 이 값을 넣는다. 원본 선택 규칙은 별도 설정 묶음 `selection`으로 고르고
+(`configs/experiment/selection/official.yaml`, 드라이버 변수 `SELECTION`, 기본값 `official`), 이 값이면 선택 항목을 비워 두어 위의 공식
+선택이 적용된다. 설정 작성기는 그 위에 묶음마다 시도 수, 시드, 입출력 경로, 저장할 카메라와 영상 크기를 쓰고, 생성
+프로토콜(`configs/experiment/generation/pool_robosuite_image.yaml`의 `protocol` 블록)의 값도 쓴다. 프로토콜 값 가운데 행동 잡음 0.05,
+보간 걸음 5, 고정 걸음 0은 공식 값과 같고, 다음 다섯 값은 공식 값과 다르다.
+
+- 성공 수 보장. 우리는 끈다(`guarantee: false`). 묶음은 정해진 수만큼 시도하고, 풀의 성공이 모자라면 드라이버가 시도 수를 늘려 이어
+  생성한다. `generate_core_configs.py`는 켠다(성공 1,000개가 나올 때까지 시도한다).
+- 실패 시연 파일(`demo_failed.hdf5`). 영상 풀은 쓰지 않는다(`keep_failed: false`). 템플릿은 쓴다(`true`).
+- 실패 시연을 파일에 남길 때의 개수 상한. 우리는 두지 않는다(`max_num_failures: null`). `generate_core_configs.py`는 25다.
+- 시연 영상 렌더링. 우리는 끈다(`render_video: false`). `generate_core_configs.py`는 성공 10개와 실패 25개를 동영상으로 그린다.
+- 원본 시연 수. 우리는 원본 파일의 시연을 모두 쓴다(`source.n: null`). `generate_core_configs.py`는 10개를 쓰는데, 공개 원본 파일마다
+  시연이 10개라서 실제로 쓰는 원본은 같다.
+
+아래 표의 값은 이렇게 만든 설정의 값이다. `SELECTION=ours`를 주면 우리 규칙(하위작업마다 원본을 무작위로 고른다)으로 같은 영상 풀을 만들 수 있고,
 풀·데이터셋·실행 폴더가 `ours`로 갈려 기준선과 섞이지 않는다.
 
 | 항목 | 값 |
 |---|---|
 | 한 시도의 모든 하위작업이 같은 원본 시연을 쓰는가 | Stack Three만 아니다(하위작업마다 다시 고른다, `select_src_per_subtask: true`). 나머지 여섯 과제는 그렇다(`false`). MimicGen의 `scripts/generate_core_configs.py`와 논문 부록 N.6의 값이다 |
-| 원본 시연을 고르는 방식 | 무작위. 단, Square의 첫 하위작업(너트 잡기)과 Stack Three의 모든 하위작업은 현재 물체 자세와 가장 가까운 원본 3개 중에서 고른다(`nearest_neighbor_object`, `nn_k: 3`) |
+| 원본 시연을 고르는 방식 | 무작위. 단, Square의 첫 하위작업(너트 잡기)과 Stack Three의 모든 하위작업은 현재 물체 자세와 가장 가까운 원본 3개 중에서 고른다(`nearest_neighbor_object`, `nn_k: 3`). 공식 스크립트는 Square의 둘째 하위작업에도 같은 값을 넣지만, Square는 시도마다 한 번만 고르므로 쓰이지 않는다 |
 | 행동 잡음 | 0.05 (모든 하위작업) |
 | 하위작업 사이 보간 걸음 수 | 5, 고정 걸음 0 |
 | 시도 수 | 과제마다 다르다(아래). 성공 수를 보장하지 않고 정해진 수만큼 시도한 뒤 성공만 데이터셋에 쓴다 |
@@ -69,8 +84,9 @@ Assembly만 MimicGen D2 범위를 그대로 쓴다. 그 위에 모든 물체가 
 쓰이므로 검증·시험 장면도 이 분포에서 나온다. 환경 클래스 이름은 `<과제 접두어>_OURS`(예: `Square_OURS`)다.
 
 관측은 영상이다. 카메라는 `agentview`와 `robot0_eye_in_hand` 두 대, 84×84 색상 영상이고 생성 중에 그려 풀에 저장한다. 로봇 상태는
-말단 위치(3), 말단 회전 사원수(4), 집게 관절(2)이다. 두 정책 모두 학습 때 영상을 76×76으로 무작위로 자른다(MimicGen 공식 영상 정책의
-자르기와 같다).
+말단 위치(3), 말단 회전 사원수(4), 집게 관절(2)이다. 두 정책 모두 학습 때 영상을 76×76으로 무작위로 자르고(MimicGen 공식 영상 정책의
+자르기 크기와 같다), 평가 때는 가운데 76×76을 자른다. Diffusion Policy는 2026-10-30부터 배치 안의 영상마다 자르는 위치를 따로
+뽑는다(`tmg/policy/augment.py`). 공식 Diffusion Policy 구현이 이렇게 하고, LeRobot의 원래 구현은 배치 전체에 위치 하나를 쓴다.
 
 정책 둘의 설정은 다음과 같다. 학습 갱신 수와 배치 크기는 `configs/experiment/training/default.yaml`, 나머지는
 `configs/experiment/policy/<정책>.yaml`에 있다.
@@ -80,10 +96,19 @@ Assembly만 MimicGen D2 범위를 그대로 쓴다. 그 위에 모든 물체가 
 | 구현 | LeRobot 0.6.1의 DiffusionPolicy. 공식 영상 U-Net 값(채널 512/1024/2048, DDPM 100걸음, 엡실론 예측, GroupNorm ResNet18을 처음부터 학습, 공간 소프트맥스 32점) | robomimic의 BC_RNN_GMM을 MimicGen 공식 영상 설정 값으로 옮긴 것(`tmg/policy/bc_rnn.py`) |
 | 관측 걸음 수 / 예측 길이 / 실행 걸음 수 | 2 / 16 / 8 | 순차 길이 10 (학습과 실행에서 같은 길이의 은닉 상태) |
 | 망 크기 | 위와 같음 | LSTM 은닉 1000, 2층, 혼합 정규분포 5개, 공간 소프트맥스 32점, 시각 특징 64 |
-| 최적화 | Adam 1e-4, 코사인 일정과 예열 500걸음, 지수이동평균 가중치로 평가 | Adam 1e-4 |
-| 갱신 수 / 배치 | 100,000 / 64 | 100,000 / 16 |
+| 최적화 | AdamW(학습률 1e-4, beta 0.95와 0.999, 가중치 감쇠 1e-6, eps 1e-8), 코사인 일정과 예열 500걸음, 지수이동평균 가중치로 평가. 2026-10-30부터 공식 구현과 같다(LeRobot의 기본 최적화기는 Adam이다) | Adam. 학습률은 영상 관측 1e-4, 저차원 관측 1e-3이다(MimicGen `utils/config_utils.py`의 `set_learning_settings_for_bc_rnn`과 논문 부록 O, 2026-10-30부터) |
+| 정규화 | LeRobot 방식. 영상은 채널별 평균과 표준편차로 맞추고, 로봇 상태와 행동은 최솟값과 최댓값으로 [-1, 1]에 맞춘다. 공식 구현과 다르다(표 아래 문단) | 하지 않는다. 영상, 상태, 행동의 정규화 방식이 모두 항등(값을 바꾸지 않음)이다(`tmg/policy/bc_rnn.py`) |
+| 갱신 수 / 배치 | 100,000 / 64 (갱신 수가 공식과 다르다, 표 아래 문단) | 100,000 / 16 (갱신 수가 공식과 다르다, 표 아래 문단) |
 | 체크포인트 | 10,000갱신마다 (10개) | 같음 |
-| 기울기 노름 자르기 | 1000 | 1000 |
+| 기울기 노름 자르기 | 1000 (공식 Diffusion Policy 구현은 자르지 않는다) | 1000 (robomimic은 자르지 않는다) |
+
+표의 값 가운데 세 가지는 공식 설정과 다르다. 첫째, 학습 갱신 수는 모든 정책이 10만이다. MimicGen 공식 예산은 영상 BC-RNN이
+600에폭 × 500걸음 = 30만 갱신, 저차원 BC-RNN이 2,000에폭 × 100걸음 = 20만 갱신이다. 계산 비용 때문에 10만으로 정했다(2026-10-30
+결정). 둘째, Diffusion Policy의 정규화는 LeRobot 방식을 그대로 둔다. 공식 robomimic 영상 Diffusion Policy는 영상을 [0, 1]에서
+[-1, 1]로 옮긴다. MimicGen의 행동은 말단의 상대 이동 명령이라 이미 [-1, 1] 안에 있으므로 정규화하지 않고, 말단 회전 사원수도
+정규화하지 않으며, 말단 위치와 집게 관절만 최솟값과 최댓값으로 [-1, 1]에 맞춘다(real-stanford/diffusion_policy의
+`diffusion_policy/dataset/robomimic_replay_image_dataset.py` 148–185행). 셋째, 기울기 노름 자르기(기울기 벡터의 길이가 1000을 넘으면
+길이를 1000으로 줄이는 것)는 우리가 모든 정책에 넣은 것이고, robomimic과 공식 Diffusion Policy 구현에는 없다.
 
 평가는 고정 장면으로 한다. 과제마다 검증 25장면과 시험 300장면의 초기 배치를 시드 202600으로 미리 뽑아 파일로 두고(`resets/`), 모든
 정책, 시드가 같은 장면을 쓴다. 체크포인트 10개를 모두 검증 25장면에서 평가해 성공률이 가장 높은 것(동률이면 이른 것)을 고르고, 그 하나를
@@ -265,7 +290,7 @@ cd ~/TrackMixGen && CLUSTER=lab GPU=0 nohup scripts/run_mimicgen_baseline.sh > /
 |---|---|---|
 | `CLUSTER` | `local` | 3.5절의 머신 설정 이름 |
 | `GPU` | `0` | 학습과 정책 서버가 쓰는 CUDA 장치 번호 |
-| `SELECTION` | `official` | 원본 선택 규칙. `official`은 공식 템플릿 값(기준선), `ours`는 하위작업별 무작위 선택. 폴더 이름에 들어간다 |
+| `SELECTION` | `official` | 원본 선택 규칙. `official`은 MimicGen 공식 선택(`generate_core_configs.py`가 템플릿 위에 덮어쓴 값, 기준선), `ours`는 하위작업별 무작위 선택. 폴더 이름에 들어간다 |
 | `TASKS` | 일곱 과제 | 돌릴 과제 목록(공백으로 구분). 긴 풀부터 적혀 있다 |
 | `POLICIES` | `diffusion_policy bc_rnn` | 돌릴 정책 |
 | `SEEDS` | `202601 202602 202603` | 학습 시드 |

@@ -16,7 +16,7 @@ reference_objects: [microwave, microwave]
 horizon: 600                        # evaluation step limit (project decision 2026-10-26: DexMimicGen 600; the task's own episode length is 250 = 5 s at 50 Hz)
 eval_episode_length_s: 12.0         # 600 steps at 50 Hz; the evaluation raises episode_length_s to cover the horizon
 env_args: []                        # extra Arena options after "--" (embodiment gr1_pink is the default)
-cameras: [robot_pov_cam_rgb]        # Arena head camera, recorded at 512x512 and resized to image_size by `tmg dataset`
+cameras: [robot_pov_cam_rgb]        # Arena head camera, rendered at 512x512; the AutoData runtime resizes each frame to image_size when it captures it
 image_size: [128, 128]
 robot_state: [left_eef_pos, left_eef_quat, right_eef_pos, right_eef_quat, hand_joint_state]
 object_state: [microwave_state]     # 14 = microwave pose (7) + door joint microjoint (1) + both hands to the microwave (6)
@@ -27,9 +27,12 @@ lowdim_terms:
     func: tmg.generation.simulators.isaaclab_lowdim:scene_object_state
     params: {objects: [{name: microwave, joints: [microjoint]}], eef: {links: [left_hand_roll_link, right_hand_roll_link]}}
 instruction: open the microwave door with the right hand
-# Official generation settings (autodata_examples/tasks/gr1_open_microwave.yaml @ 835f4aab), used unchanged except that the
+# Official generation settings (autodata_examples/tasks/gr1_open_microwave.yaml @ 835f4aab), these values used unchanged except that the
 # chunk guarantees its success count: a source per subtask (select_src_per_subtask true), nearest_neighbor_object (nn_k 3),
 # action noise 0.005, interpolation 5 (right arm) and 0 (left arm), term offset [10, 20] on the first right subtask.
+# Our code also changes, for every DexMimicGen task: the reset ranges of the scene (scene file), the low-dim observation
+# terms added to the policy group, the Arena success term (prepared and reset per attempt), and with cameras stored the
+# environment itself (Pick Place runs TMG-PickPlace-GR1T2-Images-Mimic-v0).
 policy_overrides:
   bc_rnn: {crop_shape: null}
   diffusion_policy: {crop_shape: null}

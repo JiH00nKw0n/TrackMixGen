@@ -21,8 +21,11 @@ object_state: [object]              # 13 = object pos (3), quat (4), left and ri
 instruction: pick up the object with the right hand and place it in the bin
 # Official generation settings (autodata_examples/tasks/gr1_pick_place.yaml @ 835f4aab = the Isaac Lab Mimic environment config
 # pickplace_gr1t2_mimic_env_cfg.py): one source for the whole attempt (select_src_per_subtask false), nearest_neighbor_object
-# (nn_k 3), action noise 0.003, interpolation 0 and 3 (right), 0 (left), success guaranteed. Used unchanged except the chunk's
-# seed and count (and `guarantee_success` from generation.protocol.guarantee).
+# (nn_k 3), action noise 0.003, interpolation 0 and 3 (right), 0 (left), success guaranteed. These generation values are used
+# unchanged except the chunk's seed and count (and `guarantee_success` from generation.protocol.guarantee).
+# Our code also changes, for every DexMimicGen task: the reset ranges of the scene (scene file), the low-dim observation
+# terms added to the policy group, the Arena success term (prepared and reset per attempt), and with cameras stored the
+# environment itself (Pick Place runs TMG-PickPlace-GR1T2-Images-Mimic-v0).
 # Isaac Lab has no official image policy config for GR1 pick-and-place (only bc_rnn_low_dim.json). Decision 2026-10-29: the
 # Isaac Lab tasks share one rule, no image crop (SoftMimicGen's official Diffusion Policy trains without one); MimicGen's
 # tasks keep the official 76x76 crop. (Isaac Lab's other GR1 image configs crop 160x256 to 144x236, 90% of the side.)

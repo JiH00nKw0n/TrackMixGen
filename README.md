@@ -7,9 +7,9 @@ measured tracking error, with pre-noise actions kept as labels). The official ge
 edited: at run time the code reads the source of the official functions, checks their hashes and grafts one
 call per anchor into their syntax trees.
 
-Generators: MimicGen (robosuite), SoftMimicGen (Isaac Lab fork), DexMimicGen (NVIDIA AutoData on Isaac Lab 3.0 with Arena; GR1 Pick Place, Microwave Opening, Bottle Placement and Door Closing), CP-Gen (robosuite with cuRobo). The Isaac Lab
-baseline runs end to end on one GPU machine with `scripts/run_isaaclab_baseline.sh`; `docs/ISAACLAB_BASELINE_RUNBOOK.md` is the hand-off guide.
-The MimicGen baseline (seven tasks, Diffusion Policy and BC-RNN on images) runs with `scripts/run_mimicgen_baseline.sh`;
+Generators: MimicGen (robosuite), SoftMimicGen (Isaac Lab fork), DexMimicGen (NVIDIA AutoData on Isaac Lab 3.0 with Arena. GR1 Pick Place, Microwave Opening, Bottle Placement and Door Closing), CP-Gen (robosuite with cuRobo). The Isaac Lab
+baseline runs end to end on one GPU machine with `scripts/run_isaaclab_baseline.sh`, and `docs/ISAACLAB_BASELINE_RUNBOOK.md` is the hand-off guide.
+The MimicGen baseline (seven tasks, Diffusion Policy and BC-RNN on images) runs with `scripts/run_mimicgen_baseline.sh`, and
 `docs/MIMICGEN_BASELINE_RUNBOOK.md` is its hand-off guide (Korean).
 Pipeline: source demonstrations, generation pools, source rankings, datasets, policies (BC-RNN, Diffusion
 Policy, π0 through LeRobot 0.6.1), fixed-scene evaluation through a policy server. Every command composes one
@@ -18,7 +18,7 @@ config and writes one output folder with the resolved config and a provenance re
 This document is written to the rules of ASD-STE100 (Simplified Technical English). Four documents describe the
 repository: this file (structure and how to run), `tmg/README.md` (the package, folder by folder and module by
 module), `configs/README.md` (the configuration layers and groups) and `docs/GENERATORS.md` (how each official
-generator is grafted; Korean). `docs/MIXUP_EXPLORATION.md` is the plan for exploring the mixing design (Korean).
+generator is grafted. Korean). `docs/MIXUP_EXPLORATION.md` is the plan for exploring the mixing design (Korean).
 
 ## 1. Code structure
 
@@ -36,7 +36,7 @@ logic, its inputs and its outputs.
 | `tmg/core/poses.py`, `actions.py`, `workers.py`, `provenance.py` | Pose arithmetic, action column grouping by joint name prefix, worker count selection, and the `provenance.json` writer (code revision, package versions, image, host). |
 | `tmg/generation/base.py` | `SyntheticDataGenerator`, the abstract class every generator adapter implements. It defines `fetch_sources`, `prepare_chunk`, `chunk_result` and `demo_layout`, builds the chunk spec (`_spec`), and gives a default `chunk_command` that runs the adapter's `entrypoint_module`. |
 | `tmg/generation/runner.py` | `run_pool`. It plans the chunks, skips the finished ones, runs the others in parallel processes, validates each result, and writes `DONE.json`. |
-| `tmg/generation/verify.py` | `verify_baseline`. It runs one chunk with the official generator and one chunk with the adapter and `method=none`, then compares the outputs byte for byte. |
+| `tmg/generation/verify.py` | `verify_baseline`. It runs one MimicGen chunk two times with the same `mg_config.json`. The first run has no grafts. The second run has the grafts and `method=none`. Then it compares the outputs byte for byte. This shows that the grafts change nothing when the method is off. It does not show that our generation settings are equal to the settings of the authors. |
 | `tmg/generation/execution.py` | `TrajectoryExecution`. This is the step-by-step bookkeeping that is the same for every generator. It applies the path follower, counts the random draws, keeps the labels before noise and feeds the recorder. |
 | `tmg/generation/method/` | The TrackMix method. `guided_mix.py` is the source mixer. `tracking.py` is the error-adaptive follower. `grippers.py` finds the gripper events. `interfaces.py` defines the `SegmentMixer`, `PathFollower` and `Method` protocols and `build_method(cfg)`. |
 | `tmg/generation/simulators/` | Scene handling. `scenes.py` reads a generator's scene files (`configs/experiment/generator/<generator>/scene/`) and their inheritance chain for every generator. `robosuite.py` validates the placement bounds and registers an environment class with the configured bounds and reach constraint. |
@@ -49,7 +49,9 @@ logic, its inputs and its outputs.
 The two method hooks are the only places where the method changes the generator. The mixer changes the source
 segment of a subtask before the generator moves it to the current scene. The follower chooses the command of
 each control step while the trajectory of a subtask executes. When both hooks are off, the inserted calls draw no
-random numbers and the run is identical to the official run.
+random numbers. For MimicGen, `make verify-baseline` (section 3.4) shows that the run is then identical, byte for byte,
+to a run of the same generator config without the grafts. CP-Gen and the Isaac Lab generators do not give the same
+result from run to run on the GPU, so this check does not apply to them.
 
 ## 2. Configuration
 
@@ -82,14 +84,14 @@ tmg generate generator=mimicgen task=square scene=ours selection=official method
 | `paths` | `local` | The data root. `TMG_DATA_ROOT` overrides it. Inside the images it is `/data`. |
 | `cluster` | `local`, `isaac`, `a100`, `ada` | Container runtime, worker count, data root of one machine. `ada` is the single-GPU hand-off machine of the Isaac Lab baseline (`docs/ISAACLAB_BASELINE_RUNBOOK.md`). |
 | `generator` | `mimicgen` | The generator adapter, its pinned commit, and the source hashes of the grafted functions. |
-| `task` | MimicGen: `square`, `coffee`, `threading`, `stack_three`, `hammer_cleanup`, `mug_cleanup`, `three_piece_assembly`; SoftMimicGen: `rope`, `towel`, `jenga`; DexMimicGen: `pick_place`, `microwave`, `bottle_door`; CP-Gen: `coffee`, `threading`, `three_piece_assembly`, `hammer_cleanup`, `mug_cleanup` | The task of the chosen generator. |
+| `task` | MimicGen: `square`, `coffee`, `threading`, `stack_three`, `hammer_cleanup`, `mug_cleanup`, `three_piece_assembly`. SoftMimicGen: `rope`, `towel`, `jenga`. DexMimicGen: `pick_place`, `microwave`, `bottle_door`. CP-Gen: `coffee`, `threading`, `three_piece_assembly`, `hammer_cleanup`, `mug_cleanup` | The task of the chosen generator. |
 | `scene` | `official_d1`, `ours` | Object placement. `official_d1` runs the generator's own distribution unchanged and lists its ranges. `ours` keeps each D1 centre, doubles the x and y widths, clips to 0.35 m of the table centre, pulls back where the 2026-10-26 scene check found robot contacts, and redraws until every object is within 0.85 m of the robot base. |
 | `method` | `none`, `trackmix`, `mixup_only`, `tracking_only` | Which hooks are on. `none` runs the official generator unchanged. A generator may override a few values through `method_overrides` in its own file. |
-| `generation` | `pool_robosuite_image`, `pool_robosuite_lowdim`, `pool_isaac`, `rank_human_demos`, `imported_official`; small configs under `test/` (`test/pilot20`, `test/pilot20_images`, `test/pilot50`, `test/pool_robosuite_lowdim_onesrc`) | The attempt count, the chunk size, the seed offset and the generator protocol (noise, interpolation steps, whether cameras are rendered). `pool_robosuite_image` stores images, `pool_robosuite_lowdim` is the same pool without them. `pool_isaac` is the Isaac Lab pool (1,000 successes in 4 chunks; the protocol block does not apply to those generators, which keep their official settings). `rank_human_demos` is the 3,000-attempt pool for ranking the source demonstrations, `imported_official` the name under which an official dataset is imported. The pool folder is named after the config's `name` (the `test/` folder is not part of the path). |
+| `generation` | `pool_robosuite_image`, `pool_robosuite_lowdim`, `pool_isaac`, `rank_human_demos`, `imported_official`, and small configs under `test/` (`test/pilot20`, `test/pilot20_images`, `test/pilot50`, `test/pool_robosuite_lowdim_onesrc`) | The attempt count, the chunk size, the seed offset and the generator protocol (noise, interpolation steps, whether cameras are rendered). `pool_robosuite_image` stores images, `pool_robosuite_lowdim` is the same pool without them. `pool_isaac` is the Isaac Lab pool (1,000 successes in 4 chunks). The Isaac Lab generators keep the official source selection, action noise and interpolation steps. From the protocol block they read only `guarantee` (true here, so the count is a count of successes, which is not the official setting of Microwave and Bottle Door) and, for DexMimicGen, `camera_names`. The adapters also apply the scene ranges, add the low-dim observation terms, prepare and reset the Arena success term, and run Pick Place in our camera environment when cameras are stored (`docs/GENERATORS.md` section 2.1). `rank_human_demos` is the 3,000-attempt pool for ranking the source demonstrations, `imported_official` the name under which an official dataset is imported. The pool folder is named after the config's `name` (the `test/` folder is not part of the path). |
 | `observation` | `image`, `low_dim` | What the policy sees. `image`: the task's cameras (84x84) and the robot state, the paper setting. `low_dim`: the robot state and the task's object state (`task.object_state`, no images), for method exploration. It selects the dataset variant, the policy's `by_observation` values and the training batch size. |
 | `policy` | `bc_rnn`, `diffusion_policy`, `pi0` | Model values, with one override block per observation (`by_observation`). `pi0` has no low-dim form. |
 | `training` | `default` | Batch size and update budget per policy and observation, epoch length, checkpoint interval, gradient clip, selection rule. |
-| `evaluation` | `default` | Fixed scene counts (validation 25, test 300 per training seed), the training seeds 202601, 202602, 202603, the scene seed 202600 (robosuite: stored states; Isaac Lab: per-scene reset seeds), the policy server address. |
+| `evaluation` | `default` | Fixed scene counts (validation 25, test 300 per training seed), the training seeds 202601, 202602, 202603, the scene seed 202600 (robosuite: stored states. Isaac Lab: per-scene reset seeds), the policy server address. |
 
 Every command writes exactly one output folder. For `generate`, `dataset` and `train` they are:
 
@@ -99,9 +101,9 @@ Every command writes exactly one output folder. For `generate`, `dataset` and `t
 <paths.runs>/<generator>/<task>/<scene>/<selection>/<method>/<generation>/<observation>/<policy>/seed<seed>/
 ```
 
-A low-dim dataset can be written from an image pool or from a `pool_robosuite_lowdim` pool; an image dataset needs a pool
+A low-dim dataset can be written from an image pool or from a `pool_robosuite_lowdim` pool. An image dataset needs a pool
 that stored images. `make dataset`, `make train`, `make validate` and `make evaluate` take `OBSERVATION=image|low_dim`
-(default `image`); evaluation must use the observation the checkpoint was trained with, and the policy server
+(default `image`). Evaluation must use the observation the checkpoint was trained with, and the policy server
 reports its inputs so a mismatch stops with an error.
 
 The config is strict. A key that does not exist in the group file causes an error. Use `tmg show generate ...`
@@ -134,10 +136,18 @@ This command downloads the released MimicGen source file of the task and prepare
 make sources TASK=square
 ```
 
-### 3.4 Check that the adapter is identical to the official generator
+### 3.4 Check that the grafts change nothing when the method is off
 
-Do this check after each change of the generator adapter or of the pinned packages. The command runs the same
-chunk twice and writes `VERIFY.json`. The exit code is 0 only if the outputs are identical.
+Do this check after each change of the MimicGen adapter or of the pinned packages. The command runs one MimicGen
+chunk two times with the same `mg_config.json`. The first run has no grafts. The second run has the grafts and
+`method=none`. The command compares the two outputs byte for byte and writes `VERIFY.json`. The exit code is 0 only if the
+outputs are identical.
+
+The check has two limits. First, both runs use our config. Thus the check does not show that our generation settings
+are equal to the settings of the authors. For example, it could not find the wrong Stack Three source selection that
+was corrected on 2026-10-30. Second, the check is for MimicGen only. CP-Gen and the Isaac Lab generators do not give
+the same result from run to run on the GPU. On 2026-10-30, a second run of the same commit with the same seeds
+diverged in the first attempt.
 
 ```bash
 make verify-baseline TASK=square
@@ -188,7 +198,7 @@ The pool folder contains:
 
 If a chunk fails, the run stops with an error that names the log file of each failed chunk, and `DONE.json` is
 not written. If the failure was in the recorder, the chunk's `records/` folder also keeps `RECORD_ERROR.json`
-with the attempt, the error, the traceback and the time (the same four keys for every generator since 2026-10-29;
+with the attempt, the error, the traceback and the time (the same four keys for every generator since 2026-10-29.
 CP-Gen files written before that have no `error` key).
 
 ### 3.8 Run a method variant
@@ -235,11 +245,11 @@ overwritten.
    make evaluate RUN=<the same run> TASK=square SCENE=ours OBSERVATION=low_dim CLUSTER=a100
    ```
 
-   `validate` plays the 25 validation scenes of every checkpoint and appends to the run's `validation.jsonl`;
-   `tmg select_checkpoint` picks the checkpoint; `evaluate` plays the 300 test scenes of that checkpoint.
+   `validate` plays the 25 validation scenes of every checkpoint and appends to the run's `validation.jsonl`.
+   `tmg select_checkpoint` picks the checkpoint. `evaluate` plays the 300 test scenes of that checkpoint.
 
 5. Compare with the baseline (`METHOD=none`) and with `trackmix` run through the same commands. Keep the
-   generation config, the observation, the policy and the seeds equal; only `METHOD` differs.
+   generation config, the observation, the policy and the seeds equal. Only `METHOD` differs.
 
 ### 3.9 Run the tests
 

@@ -10,11 +10,15 @@ by_policy:
     image:   {batch_size: 64, updates: 100000}
     low_dim: {batch_size: 256, updates: 100000}
   pi0:
-    image:   {batch_size: 32, updates: 30000}   # validation off for π0 (last checkpoint, openpi recipe)
+    image:   {batch_size: 32, updates: 30000}   # π0 is not used yet. Its checkpoint is selected by validation like every
+                                                # other policy (`selection` below). The openpi rule (validation off, last
+                                                # checkpoint) is NOT implemented. π0 is aligned with openpi before it runs
 updates_per_epoch: 500            # one logging epoch
 checkpoint_every_epochs: 20       # write a checkpoint (and request validation) every 10,000 updates
 keep_checkpoints: all             # all | last (the selection needs all of them)
-grad_clip_norm: 1000.0            # L2 gradient-norm clip (BC-RNN pre-noise labels diverged without it)
+grad_clip_norm: 1000.0            # L2 gradient-norm clip for every policy (BC-RNN pre-noise labels diverged without it).
+                                  # robomimic and the official Diffusion Policy do not clip. openpi clips at 1.0, which
+                                  # the π0 code does NOT apply yet (it uses this value)
 action_key: actions               # dataset key the policy learns: actions (the pool's label) | actions_executed | actions_pre_noise
 cache: ram                        # ram | gpu: where the uint8 images live during training
 seed: 1

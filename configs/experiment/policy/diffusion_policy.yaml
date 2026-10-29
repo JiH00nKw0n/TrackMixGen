@@ -1,8 +1,15 @@
 # Diffusion Policy: LeRobot 0.6.1 DiffusionPolicy with the official image U-Net values (real-stanford/diffusion_policy,
-# robomimic image config). Only fields that differ from LeRobot's defaults are listed; the rest are LeRobot's
-# defaults, which already equal the official values (down_dims 512/1024/2048, kernel 5, 8 groups, step embed 128,
-# DDPM 100 steps squaredcos_cap_v2, epsilon prediction, clip_sample, spatial softmax 32, Adam 1e-4 betas .95/.999
-# wd 1e-6, cosine schedule with 500 warmup steps).
+# robomimic image config). Only fields that differ from LeRobot's defaults are listed.
+# The architecture and the noise schedule are the same as in the official implementation. They are LeRobot defaults (down_dims
+# 512/1024/2048, kernel 5, 8 groups, step embed 128, DDPM 100 steps squaredcos_cap_v2, epsilon prediction, clip_sample,
+# spatial softmax 32, cosine schedule with 500 warmup steps). Since 2026-10-30 the optimizer and the crop are too. The code
+# builds AdamW (LeRobot's preset is Adam) with the preset's values (lr 1e-4, betas 0.95/0.999, weight decay 1e-6, eps
+# 1e-8), and crops every training image at its own random location (tmg/policy/augment.py). Evaluation center-crops.
+# Normalization differs from the official implementation. It stays LeRobot's (images mean/std per channel, state and
+# actions min-max to [-1, 1]). The official robomimic-image Diffusion Policy maps images from [0, 1] to [-1, 1], keeps
+# relative actions and quaternions unchanged (identity) and min-maxes positions and gripper joints
+# (diffusion_policy/dataset/robomimic_replay_image_dataset.py lines 148-185). The gradient norm is clipped at 1000
+# (training.grad_clip_norm). The official implementation does not clip.
 name: diffusion_policy
 pretrained_path: null
 params:

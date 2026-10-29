@@ -24,11 +24,17 @@
 물체를 집어 상자에 넣기), Microwave Opening(전자레인지 문 열기), Bottle Placement and Door Closing(병을 냉장고에 넣고 문 닫기)이다.
 실행 스크립트는 다섯 과제를 모두 돈다. DexMimicGen 세 과제는 모두 NVIDIA AutoData(DexMimicGen을 다시 구현한 NVIDIA의 생성 도구,
 Isaac Lab 3.0과 Isaac Lab-Arena 위에서 돈다)로 생성하며 이미지 `isaaclab-dex` 하나를 쓴다(3.6절). Pick Place는 Isaac Lab Mimic의
-환경을 그 환경 안에서 그대로 쓰고, 나머지 두 과제는 Arena의 환경이다(2026-10-29 결정. 그 전에는 Pick Place가 Isaac Lab 2.x 이미지로,
+환경(`Isaac-PickPlace-GR1T2-Abs-Mimic-v0`)을 바탕으로 한다. 카메라를 저장하는 생성(영상 풀)은 그 환경에서 원격 조종용 머리 카메라를 빼고
+앞·옆 128×128 카메라 두 대를 넣은 우리 카메라 환경 `TMG-PickPlace-GR1T2-Images-Mimic-v0`
+(`tmg/generation/simulators/isaaclab_tasks/gr1_pickplace_cameras.py`, `docs/GENERATORS.md` 2.9절)에서 돌고, 카메라를 저장하지 않는
+생성(순위 풀)만 공식 환경을 그대로 쓴다. 나머지 두 과제는 Arena의 환경이다(2026-10-29 결정. 그 전에는 Pick Place가 Isaac Lab 2.x 이미지로,
 두 Arena 과제가 `autodata`라는 별도 생성기로 돌았다). Jenga 과제 설정도 있지만 계획에 없으므로 기본 목록에서 뺐다(`SOFT_TASKS`로 넣을 수 있다).
 
-생성기 설정은 공식 환경 설정 파일의 값을 그대로 쓴다. 우리 코드는 공식 생성 스크립트에 시도 수, 시드, 입출력 파일만 넘기고 나머지는
-건드리지 않는다. 아래 표의 값은 공식 소스에서 읽은 것이다.
+원본 선택 방식, 행동 잡음, 보간 걸음 수는 공식 설정 파일의 값을 그대로 쓴다. 아래 표의 값은 공식 소스에서 읽은 것이다. 우리 코드가
+공식 생성 스크립트에 넘기거나 바꾸는 것은 시도 수, 시드, 입출력 파일 말고도 다섯 가지가 더 있다. 성공 수 보장을 생성 설정의 값으로
+덮어쓰고(Microwave Opening과 Bottle Placement and Door Closing에서는 공식과 달리 켠다, 표 아래 문단), 장면 범위를 환경 설정에 써 넣고,
+저차원 관측 항목을 관측에 더하고, Arena 과제의 클래스형 성공 판정을 생성 전에 준비해 시도마다 초기화하고, 카메라를 저장하는 생성에서는
+Pick Place를 우리 카메라 환경으로 돌린다(`tmg/generation/generators/isaaclab/entrypoint.py`, `tmg/generation/generators/autodata/adapter.py`).
 
 | 과제 | 원본 시연 수 | 한 시도의 모든 하위작업이 같은 원본을 쓰는가 | 원본 선택 방식 | 행동 잡음 | 하위작업별 보간 걸음 수 |
 |---|---|---|---|---|---|
@@ -63,14 +69,18 @@ Opening의 범위를 넓힌 것이다(2026-10-29 결정, `configs/experiment/gen
 폴더 이름에는 장면 다음에 원본 선택 규칙 이름이 들어간다(`official`, 2026-10-29부터. Isaac Lab 생성기는 공식 규칙만 쓰므로 늘 `official`이고 드라이버 변수 `SELECTION`의 기본값이다).
 
 저차원 관측으로도 돌릴 수 있다(`OBSERVATION=low_dim`, 2026-10-29). 다섯 과제의 과제 설정에 robosuite의 object 관측 수준의 항목이 정의되어 있고
-(Rope 54차원, Towel 111차원, Pick Place 13차원, Microwave 14차원, Bottle Placement and Door Closing 27차원; `docs/GENERATORS.md` 2.10절), 생성과
+(Rope 54차원, Towel 111차원, Pick Place 13차원, Microwave 14차원, Bottle Placement and Door Closing 27차원, `docs/GENERATORS.md` 2.10절), 생성과
 평가가 그 항목을 환경의 관측에 넣는다. 영상 풀 하나에서 영상 데이터셋과 저차원 데이터셋을 모두 만들 수 있다. 2026-10-29 전에 만든 풀에는 이 항목이 없다.
 
 정책은 영상 Diffusion Policy 하나다(`configs/experiment/policy/diffusion_policy.yaml`, 10만 갱신, 배치 64, 체크포인트 1만 갱신마다).
-관측은 과제의 카메라 두 대(128×128)와 로봇 상태다. 세 과제 모두 영상을 자르지 않는다(SoftMimicGen 공식 Diffusion Policy 설정과
-같고, MimicGen 과제의 공식 76×76 자르기는 그쪽에만 남겨 둔다). 공식과 다른 점이 하나 있다. Towel의 공식 agentview 카메라는 300×300이고
-공식 Diffusion Policy(robomimic 구현)는 카메라마다 인코더가 따로 있어 그 크기 그대로 쓰지만, 우리가 쓰는 LeRobot 구현은 모든 카메라
-영상을 한 텐서로 쌓아야 해서 agentview를 128×128로 줄여 쓴다(2026-10-29 결정). 다른 네 과제의 카메라는 공식 크기와 같다. 평가 상한(한 시도에 허용하는 최대 걸음 수)은 2026-10-26 결정대로 SoftMimicGen 과제(Rope, Towel)
+관측은 과제의 카메라 영상(128×128)과 로봇 상태다. 카메라는 Rope와 Towel이 두 대(agentview와 손목), Pick Place가 우리 카메라 환경의
+앞·옆 두 대, Microwave Opening과 Bottle Placement and Door Closing이 Arena의 머리 카메라 한 대(`robot_pov_cam_rgb`)다. 다섯 과제 모두
+영상을 자르지 않는다(SoftMimicGen 공식 Diffusion Policy 설정과 같고, MimicGen 과제의 공식 76×76 자르기는 그쪽에만 남겨 둔다). 공식 크기와
+다른 카메라가 있다. Towel의 공식 agentview 카메라는 300×300이고 공식 Diffusion Policy(robomimic 구현)는 카메라마다 인코더가 따로 있어
+그 크기 그대로 쓰지만, 우리가 쓰는 LeRobot 구현은 모든 카메라 영상을 한 텐서로 쌓아야 해서 agentview를 128×128로 줄여 쓴다(2026-10-29
+결정). Microwave Opening과 Bottle Placement and Door Closing의 머리 카메라는 512×512로 찍히고 128×128로 줄여 쓴다. Pick Place의 두 카메라는
+공식 환경에 없는 우리 카메라다(공식 환경의 카메라는 원격 조종용 450×720 머리 카메라 하나이고, 이 과제의 공식 영상 정책 설정은 없다).
+Rope의 두 카메라와 Towel의 손목 카메라만 공식 크기 128×128 그대로다. 평가 상한(한 시도에 허용하는 최대 걸음 수)은 2026-10-26 결정대로 SoftMimicGen 과제(Rope, Towel)
 400걸음, DexMimicGen 계열 과제(Pick Place, Microwave Opening, Bottle Placement and Door Closing) 600걸음이다. 공식 값(Rope 250, Towel 220,
 Pick Place 400, Microwave 250, Bottle 500)과 다르며, 환경 자체의 에피소드 길이가 상한보다 짧은 과제는 평가기가 에피소드 길이를 상한까지 늘린다. 체크포인트 선택은 검증 25장면 성공률이 가장 높은 것(동률이면 이른 것)이다.
 

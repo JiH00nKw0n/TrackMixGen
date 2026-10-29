@@ -2,8 +2,13 @@
 # Sizes (decision 2026-10-27): 25 validation scenes select the checkpoint; 300 test scenes per training seed and 3
 # training seeds per condition. One seed's 300 scenes give a 95% interval of about +-5.2 points at a success rate
 # of 70%; the interval of the 3-seed mean is set mostly by the spread between seeds, which more rollouts do not
-# reduce. Tables report the mean and the standard deviation over the 3 seeds. The reference papers report 50
-# rollouts per checkpoint (MimicGen) or 3 x 50 (CP-Gen) and the maximum over seeds; we select on validation scenes.
+# reduce. Tables report the mean and the standard deviation over the 3 seeds. The reference papers report differently.
+# MimicGen (App. O) rolls out 50 episodes per checkpoint during training and reports "the maximum success rate achieved
+# by each agent across 3 seeds". That sentence fits two readings (the best checkpoint of each seed, then aggregated over
+# seeds, or the maximum over seeds). CP-Gen (arXiv 2508.03944) rolls out the best checkpoint of each of 3 seeds for 50
+# trials and reports the mean with its standard error. Our protocol differs from both. The checkpoint is selected on the
+# 25 validation scenes and tested on the 300 test scenes, and the table gives the mean and standard deviation over the 3
+# training seeds.
 name: default
 val_scenes: 25                    # validation scenes played at every checkpoint
 test_scenes: 300                  # test scenes of the final table (per training seed)

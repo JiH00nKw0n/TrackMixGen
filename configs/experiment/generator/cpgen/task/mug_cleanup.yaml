@@ -11,7 +11,8 @@ source_indices: [0, 1]              # CP-Gen's default: the first source demonst
 cpgen_config: {}                    # extra demo_aug.generate.Config fields for this task
 subtasks: ['open drawer', 'grasp mug', 'place mug and close drawer']
 reference_objects: ['drawer', 'object', 'drawer']
-horizon: 600                        # evaluation step limit (project decision 2026-10-27: 600 for every robosuite task; MimicGen's own values were 400/500)
+horizon: 600                        # evaluation step limit (project decision 2026-10-27: 600 for every robosuite task).
+                                    # CP-Gen's own launcher (scripts/pipeline/run_datagen_and_training.sh) evaluates this task with 450 steps
 cameras: ['agentview', 'robot0_eye_in_hand']
 image_size: [84, 84]
 robot_state: ['robot0_eef_pos', 'robot0_eef_quat', 'robot0_gripper_qpos']
