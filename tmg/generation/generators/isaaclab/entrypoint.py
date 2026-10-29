@@ -33,7 +33,7 @@ def install(namespace: dict, spec: dict) -> None:
     """Called from inside the official script after its imports (see the module docstring)."""
     import tmg.generation.generators.isaaclab.runtime as rt
     from tmg.generation.method import build_method
-    from tmg.generation.simulators.isaaclab import apply_scene
+    from tmg.generation.simulators.isaaclab import apply_scene, isolate_controller_scratch
     from tmg.generation.simulators.isaaclab_lowdim import add_lowdim_terms
 
     for module in list(spec["extra"].get("register_modules") or []):      # e.g. isaaclab_mimic.envs registers the GR1 tasks
@@ -54,6 +54,9 @@ def install(namespace: dict, spec: dict) -> None:
         print(f"[tmg] scene {scene.get('name')}: {'ranges applied ' + json.dumps(applied) if applied else 'official ranges kept'}", flush=True)
         added = add_lowdim_terms(env_cfg, spec["task"])       # low-dim object terms, recorded with the policy group
         print(f"[tmg] low-dim observation terms: {json.dumps(added) if added else 'none'}", flush=True)
+        moved = isolate_controller_scratch(env_cfg, spec["folder"])   # per-chunk URDF folder (parallel chunks shared /tmp/urdf)
+        if moved:
+            print(f"[tmg] controller URDF output folders: {json.dumps(moved)}", flush=True)
         datagen = getattr(env_cfg, "datagen_config", None)
         if datagen is not None:        # the official script seeds random, numpy and torch with this value
             datagen.seed = chunk_seed

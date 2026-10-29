@@ -141,3 +141,15 @@ def test_pickplace_camera_quaternion_is_xyzw_and_looks_at_the_target():
         want = np.asarray(target, dtype=float) - np.asarray(eye, dtype=float)
         want /= np.linalg.norm(want)
         assert np.allclose(forward, want, atol=1e-6) and abs(np.linalg.norm(q) - 1.0) < 1e-9
+
+
+def test_isolate_controller_scratch_gives_each_pink_controller_its_own_folder(tmp_path):
+    from tmg.generation.simulators.isaaclab import isolate_controller_scratch
+
+    pink = types.SimpleNamespace(controller=types.SimpleNamespace(urdf_output_dir="/tmp/urdf", usd_path="robot.usd"))
+    plain = types.SimpleNamespace(controller=types.SimpleNamespace(gains=1.0))       # no URDF conversion
+    env_cfg = types.SimpleNamespace(actions=types.SimpleNamespace(upper_body_ik=pink, gripper=plain, arm=types.SimpleNamespace()))
+    moved = isolate_controller_scratch(env_cfg, tmp_path / "chunk")
+    assert moved == {"upper_body_ik": str(tmp_path / "chunk" / "urdf" / "upper_body_ik")}
+    assert pink.controller.urdf_output_dir == str(tmp_path / "chunk" / "urdf" / "upper_body_ik") and (tmp_path / "chunk" / "urdf" / "upper_body_ik").is_dir()
+    assert plain.controller.gains == 1.0 and isolate_controller_scratch(types.SimpleNamespace(), tmp_path) == {}

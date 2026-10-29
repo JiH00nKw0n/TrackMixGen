@@ -208,3 +208,27 @@ def observed_eef_poses(env, env_id: int, eef_names: Sequence[str]) -> dict[str, 
     """The environment's own ``get_robot_eef_pose`` for each end effector (the observation link)."""
     return {eef: np.asarray(env.get_robot_eef_pose(eef_name=eef, env_ids=[env_id])[0].detach().cpu().numpy(), dtype=float)
             for eef in eef_names}
+
+
+def isolate_controller_scratch(env_cfg, folder) -> dict:
+    """Give every action controller that converts a USD to a URDF its own output folder under ``folder``.
+
+    Isaac Lab's Pink IK controller configs write the converted robot URDF to a fixed ``urdf_output_dir`` (``/tmp/urdf``
+    in the GR1 tasks). Chunk processes of one pool run in the same container and start together, so two of them write
+    and read the same file at once and one reads a half-written URDF ("does not contain a valid URDF model",
+    2026-10-29, Pick Place ranking pool with 3 workers). Returns ``{action name: new folder}``; actions without such a
+    controller are left alone.
+    """
+    from pathlib import Path
+
+    actions = getattr(env_cfg, "actions", None)
+    moved = {}
+    for name, action_cfg in list(vars(actions).items()) if actions is not None else []:
+        controller = getattr(action_cfg, "controller", None)
+        if controller is None or not hasattr(controller, "urdf_output_dir"):
+            continue
+        target = Path(folder) / "urdf" / str(name)
+        target.mkdir(parents=True, exist_ok=True)
+        controller.urdf_output_dir = str(target)
+        moved[str(name)] = str(target)
+    return moved
