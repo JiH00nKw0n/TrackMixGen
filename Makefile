@@ -48,14 +48,18 @@ DOCKER_GPU = --runtime=nvidia --gpus all -e NVIDIA_VISIBLE_DEVICES=all -e NVIDIA
 SING_NV    = --nv
 DOCKER_VOL_EXTRA = --shm-size 8g
 endif
+# robosuite (1.4 and 1.5) picks the offscreen EGL rendering device by index; on a host whose /dev/dri the user cannot
+# open (A100 under Singularity: Mesa software rendering, device index = cluster `egl_device_id`) the index must be set
+# explicitly for both robosuite images, or image pools and image evaluations fail with "Cannot initialize a EGL device
+# display" (2026-10-29). Docker hosts leave egl_device_id unset: Mesa inside the container finds its software device itself.
+ifneq (,$(filter robosuite cpgen,$(IMAGE)))
+EGL_DEVICE_ID ?= $(call cluster_value,egl_device_id)
+SING_ENV_EXTRA = $(if $(EGL_DEVICE_ID),--env MUJOCO_EGL_DEVICE_ID=$(EGL_DEVICE_ID),)
+endif
 # the CP-Gen image needs the GPU (cuRobo motion planning) also for generation and evaluation
 ifeq ($(IMAGE),cpgen)
 DOCKER_GPU = --gpus all
 SING_NV    = --nv
-# robosuite 1.5 picks the EGL device by index from CUDA_VISIBLE_DEVICES; on a host whose /dev/dri the user cannot
-# open (A100: Mesa software rendering, device index = cluster `egl_device_id`) the index must be set explicitly
-EGL_DEVICE_ID ?= $(call cluster_value,egl_device_id)
-SING_ENV_EXTRA = $(if $(EGL_DEVICE_ID),--env MUJOCO_EGL_DEVICE_ID=$(EGL_DEVICE_ID),)
 # CP-Gen rewrites cuRobo's task configs (it adds its straight-line cost) inside the cuRobo checkout, which is
 # read-only in the image (and root-owned under docker --user): a writable host copy, filled from the image on
 # first use, is mounted over that folder
