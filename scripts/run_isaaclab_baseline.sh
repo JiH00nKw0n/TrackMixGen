@@ -11,7 +11,7 @@
 #
 #   CLUSTER=ada scripts/run_isaaclab_baseline.sh
 # Variables: CLUSTER (ada), GPU (0), SOFT_TASKS ("rope towel"),
-#   DEX_TASKS ("pick_place bottle_placement_door_closing microwave_opening"), SEEDS ("202601 202602 202603"),
+#   DEX_TASKS ("pick_place"), AUTODATA_TASKS ("microwave bottle_door"), SEEDS ("202601 202602 202603"),
 #   POLICY (diffusion_policy), SIZE (1000), VAL_PARALLEL (2: checkpoints validated at a time, each one Isaac Sim),
 #   TEST_SHARDS (3: parallel shards of the 300 test scenes), SEED_PARALLEL (1: training runs at a time),
 #   ONLY_GENERATION (1: stop after the datasets), BUNDLE_NAME (results folder name under <result root>/reports),
@@ -21,7 +21,8 @@
 set -uo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 CLUSTER=${CLUSTER:-ada}; GPU=${GPU:-0}; SOFT_TASKS=${SOFT_TASKS-"rope towel"}
-DEX_TASKS=${DEX_TASKS-"pick_place bottle_placement_door_closing microwave_opening"}
+DEX_TASKS=${DEX_TASKS-"pick_place"}
+AUTODATA_TASKS=${AUTODATA_TASKS-"microwave bottle_door"}
 SEEDS=${SEEDS:-"202601 202602 202603"}; POLICY=${POLICY:-diffusion_policy}; SIZE=${SIZE:-1000}
 POLICIES=${POLICIES:-$POLICY}
 VAL_PARALLEL=${VAL_PARALLEL:-2}; TEST_SHARDS=${TEST_SHARDS:-3}; SEED_PARALLEL=${SEED_PARALLEL:-1}
@@ -29,7 +30,8 @@ SEQUENTIAL_TASKS=${SEQUENTIAL_TASKS:-0}
 if [ "${TMG_RETIRE_COMPLETED:-0}" = 1 ] && [ "$SEQUENTIAL_TASKS" != 1 ]; then
   echo 'Storage retirement requires SEQUENTIAL_TASKS=1' >&2; exit 1
 fi
-SCENE=ours; METHOD=none; GENERATION=pool_isaac; OBSERVATION=image
+SCENE=ours; METHOD=none; GENERATION=${GENERATION:-pool_isaac}; OBSERVATION=image
+TRAIN_OVERRIDES=${TRAIN_OVERRIDES:-}; EVAL_EXTRA=${EVAL_EXTRA:-}
 DATA_ROOT=$(make -s -C "$REPO" print-data-root CLUSTER="$CLUSTER")
 RESULTS_ROOT=${TMG_RESULTS_ROOT:-$DATA_ROOT}
 LOG=$RESULTS_ROOT/logs/isaaclab_baseline; mkdir -p "$LOG"
@@ -39,15 +41,9 @@ fail() { log "$1 FAILED (see $2)"; echo "$1" >> "$LOG/FAILURES"; }
 # generator/task pairs in run order (Soft first, then Dex; the two images are never needed at the same time in one lane)
 JOBS=""
 for t in $SOFT_TASKS; do JOBS="$JOBS softmimicgen:isaaclab-soft:$t"; done
-for t in $DEX_TASKS; do
-  image=isaaclab-dex
-  case "$t" in bottle_placement_door_closing|microwave_opening) image=isaaclab-arena ;; esac
-  JOBS="$JOBS dexmimicgen:$image:$t"
-done
+for t in $DEX_TASKS; do JOBS="$JOBS dexmimicgen:isaaclab-dex:$t"; done
+for t in $AUTODATA_TASKS; do JOBS="$JOBS autodata:isaaclab-autodata:$t"; done
 ALL_JOBS=$JOBS
-if [ "$CLUSTER" = pod ] && [[ "$JOBS" == *":isaaclab-arena:"* ]]; then
-  TMG_ARENA_PREFLIGHT=${TMG_ARENA_PREFLIGHT:-1}
-fi
 task_config_exists() { [ -f "$REPO/configs/experiment/generator/$1/task/$2.yaml" ]; }
 dataset_of() { echo "$DATA_ROOT/datasets/$1/$2/$SCENE/$METHOD/$GENERATION/$OBSERVATION/n${SIZE}_seed0.hdf5"; }
 resets_of() { echo "$DATA_ROOT/resets/$1/$2/$SCENE/val25_test300_seed202600.json"; }
@@ -76,7 +72,7 @@ generation_lane() {
     if [ -f "$(dataset_of $gen $task)" ] && [ -f "$(resets_of $gen $task)" ]; then log "[$gen/$task] dataset and resets exist, generation skipped"; continue; fi
     log "[$gen/$task] sources"
     M sources $common > "$LOG/sources_${gen}_$task.log" 2>&1 || { fail "sources $gen/$task" "$LOG/sources_${gen}_$task.log"; continue; }
-    log "[$gen/$task] pool ($GENERATION: 4 chunks of 250 successes)"
+    log "[$gen/$task] pool ($GENERATION; chunk count and size from the generation config)"
     M generate $common SCENE=$SCENE METHOD=$METHOD GENERATION=$GENERATION > "$LOG/pool_${gen}_$task.log" 2>&1 \
       || { fail "pool $gen/$task" "$LOG/pool_${gen}_$task.log"; continue; }
     log "[$gen/$task] pool done: $(grep -h 'pool complete' "$LOG/pool_${gen}_$task.log" | tail -1 | cut -c1-100)"
@@ -100,6 +96,7 @@ policy_task() {   # all seeds of one task, SEED_PARALLEL at a time; each seed ha
     SKIP=0; [ -f "$run/train_result.json" ] && SKIP=1
     CLUSTER=$CLUSTER GPU=$GPU GENERATOR=$gen IMAGE=$image SCENE=$SCENE METHOD=$METHOD GENERATION=$GENERATION OBSERVATION=$OBSERVATION \
       POLICY=$POLICY SEED=$seed SIZE=$SIZE VAL_PARALLEL=$VAL_PARALLEL TEST_SHARDS=$TEST_SHARDS SKIP_TRAIN=$SKIP \
+      TRAIN_OVERRIDES="$TRAIN_OVERRIDES" EXTRA="$EVAL_EXTRA" \
       "$REPO/scripts/task_policy_pipeline.sh" $task $port > "$LOG/policy_${gen}_${task}_${POLICY}_seed$seed.log" 2>&1 \
       || fail "policy $gen/$task $POLICY seed $seed" "$LOG/policy_${gen}_${task}_${POLICY}_seed$seed.log" &
     port=$((port + 40)); sleep 30
@@ -134,12 +131,6 @@ for job in $ALL_JOBS; do
     echo "$gen/$task" >> "$LOG/BLOCKED_TASKS"
   fi
 done
-if [ "${TMG_ARENA_PREFLIGHT:-0}" = 1 ] && [ "${ONLY_GENERATION:-0}" != 1 ]; then
-  log "checking both Arena tasks before formal work (at most two simulation jobs)"
-  python3 "$REPO/scripts/native_runtime.py" python --image isaaclab-arena --data-root "$DATA_ROOT" -- \
-    "$REPO/scripts/arena_preflight.py" > "$LOG/arena_preflight.log" 2>&1 \
-    || { fail "Arena task preflight" "$LOG/arena_preflight.log"; exit 1; }
-fi
 if [ "$SEQUENTIAL_TASKS" = 1 ]; then
   for one_job in $ALL_JOBS; do
     JOBS=$one_job

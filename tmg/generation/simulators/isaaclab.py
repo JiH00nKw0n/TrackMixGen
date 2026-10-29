@@ -84,11 +84,44 @@ def pose_range_of(entry: Mapping) -> dict:
     return out
 
 
+RANGE_PARAMS = ("pose_range", "partial_pose_range")
+
+
+def ranges_of(entry: Mapping) -> dict:
+    """``{parameter name: {axis: (lo, hi)}}`` of a scene event entry.
+
+    A flat entry (``{x: [lo, hi], ...}``) is the event's ``pose_range``; a nested entry lists the parameters by name
+    (``pose_range`` and, for Soft's rope, ``partial_pose_range``, the extra transform of one half of the rope).
+    """
+    nested = {k: entry[k] for k in RANGE_PARAMS if k in entry}
+    if nested:
+        return {k: pose_range_of(v) for k, v in nested.items()}
+    return {"pose_range": pose_range_of(entry)}
+
+
 def validate_isaaclab_scene(scene: Mapping) -> None:
-    """Check ``bounds: {task: {event name: {axis: [lo, hi], ...}}}`` of an Isaac Lab scene file."""
-    for events in (scene.get("bounds") or {}).values():
-        for entry in events.values():
-            pose_range_of(entry)
+    """Check ``bounds: {task: {event name: entry}}`` of an Isaac Lab scene file.
+
+    An entry either widens an existing reset event (its ``pose_range`` / ``partial_pose_range``) or, with
+    ``add: true``, adds a reset event the official config lacks: ``func`` (``module:attribute``), ``asset`` (scene
+    entity name) and optional ``pose_range`` / ``params`` (extra parameters of the function).
+    """
+    for task, events in (scene.get("bounds") or {}).items():
+        for name, entry in events.items():
+            if entry.get("add"):
+                if ":" not in str(entry.get("func", "")) or not entry.get("asset"):
+                    raise ValueError(f"added event {task}/{name} needs func 'module:attribute' and asset")
+                if any(k in entry for k in RANGE_PARAMS) or any(k in entry for k in AXES):
+                    ranges_of(entry)
+            else:
+                ranges_of(entry)
+
+
+def _import_attr(path: str):
+    import importlib
+
+    module, attr = str(path).split(":", 1)
+    return getattr(importlib.import_module(module), attr)
 
 
 def apply_scene(env_cfg, scene: Mapping, task_name: str) -> dict:
@@ -96,27 +129,44 @@ def apply_scene(env_cfg, scene: Mapping, task_name: str) -> dict:
 
     Args:
         env_cfg: the Isaac Lab environment config (``env_cfg.events.<name>.params['pose_range']``).
-        scene: the generator's scene dict; ``override_bounds`` false leaves ``env_cfg`` unchanged.
+        scene: the generator's scene dict; ``override_bounds`` false leaves ``env_cfg`` unchanged, and so does a
+            task the scene lists no bounds for (its official reset distribution is kept).
         task_name: key of ``scene['bounds']``.
 
     Returns:
-        ``{event name: applied pose_range}`` (empty when nothing was overridden).
+        ``{event name: applied ranges}`` (empty when nothing was overridden). Added events (entries with
+        ``add: true``) are appended after the official reset events, so they run after them at every reset.
     """
     if not scene.get("override_bounds", False):
         return {}
     bounds = (scene.get("bounds") or {}).get(task_name)
     if bounds is None:
-        raise KeyError(f"scene {scene.get('name')!r} overrides bounds but lists none for task {task_name!r}")
+        return {}
     applied = {}
     for event, entry in bounds.items():
+        if entry.get("add"):
+            if getattr(env_cfg.events, event, None) is not None:
+                raise KeyError(f"environment config already has a reset event {event!r}; drop 'add' to widen it")
+            from isaaclab.managers import EventTermCfg, SceneEntityCfg
+
+            params = {"asset_cfg": SceneEntityCfg(str(entry["asset"]))}
+            params.update(dict(entry.get("params") or {}))
+            if any(k in entry for k in RANGE_PARAMS) or any(k in entry for k in AXES):
+                params.update(ranges_of(entry))
+            setattr(env_cfg.events, event, EventTermCfg(func=_import_attr(entry["func"]), mode="reset", params=params))
+            applied[event] = {"added": entry["func"], **{k: v for k, v in params.items() if k != "asset_cfg"}}
+            continue
         term = getattr(env_cfg.events, event, None)
         if term is None:
             raise KeyError(f"environment config has no reset event {event!r} (scene {scene.get('name')!r})")
-        ranges = pose_range_of(entry)
-        current = dict(term.params.get("pose_range") or {})
-        current.update(ranges)
-        term.params["pose_range"] = current
-        applied[event] = current
+        applied[event] = {}
+        for param, ranges in ranges_of(entry).items():
+            current = dict(term.params.get(param) or {})
+            current.update(ranges)
+            term.params[param] = current
+            applied[event][param] = current
+        if list(applied[event]) == ["pose_range"]:
+            applied[event] = applied[event]["pose_range"]
     return applied
 
 

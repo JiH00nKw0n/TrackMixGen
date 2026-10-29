@@ -50,7 +50,7 @@ train_guard=()
 if [ "$CLUSTER" = pod ] && [ -f "${TMG_RESULTS_ROOT:-}/reports/evaluation_capacity/selected.json" ]; then
   train_guard=(python3 "$REPO/scripts/pod_resource_guard.py" --kind train --task "$TASK" --)
 fi
-"${train_guard[@]}" make -s -C "$REPO" train $C OVERRIDES="dataset.size=$SIZE ${TRAIN_OVERRIDES:-}" || { log "TRAIN FAILED"; exit 1; }
+"${train_guard[@]}" make -s -C "$REPO" train GENERATOR=$GENERATOR TASK=$TASK SCENE=$SCENE METHOD=$METHOD GENERATION=$GENERATION OBSERVATION=$OBSERVATION POLICY=$POLICY SEED=$SEED CLUSTER=$CLUSTER OVERRIDES="dataset.size=$SIZE ${TRAIN_OVERRIDES:-}" || { log "TRAIN FAILED"; exit 1; }
 fi
 log "validate checkpoints ($VAL_PARALLEL at a time)"
 i=0; pids=""

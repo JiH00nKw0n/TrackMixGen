@@ -10,7 +10,7 @@ params:
   horizon: 16                    # LeRobot default 64
   n_action_steps: 8              # LeRobot default 32
   drop_n_last_frames: 7          # horizon - n_action_steps - n_obs_steps + 1
-  crop_shape: [76, 76]           # official robomimic image crop
+  crop_shape: [76, 76]           # robomimic/MimicGen image crop (84x84 -> 76x76); tasks with other official crops set task.policy_overrides
   crop_is_random: true
   use_group_norm: true           # official: GroupNorm ResNet18 trained from scratch
   pretrained_backbone_weights: null

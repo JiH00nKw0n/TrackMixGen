@@ -8,7 +8,7 @@ source_file: annotated_dataset/annotated_dataset_franka_rope.hdf5   # file in ge
 num_sources: 3
 subtasks: [grasp rope, shape rope]
 reference_objects: [rope, rope]
-horizon: 400                        # evaluation step limit (project decision 2026-10-27)
+horizon: 400                        # evaluation step limit (project decision 2026-10-26: SoftMimicGen 400, DexMimicGen 600; the official robomimic rollout horizon is 250)
 eval_episode_length_s: 20.0         # the env's own limit is 10 s = 200 steps at 20 Hz; the evaluation must raise episode_length_s to cover the horizon
 cameras: [agentview_image, robot0_eye_in_hand_image]   # observation term names = hdf5 obs keys (2026-10-28 check of a generated file)
 image_size: [128, 128]
@@ -21,3 +21,11 @@ instruction: pick up the rope and shape it into a U
 # value; an evaluation must call the term after the first action onwards, never at reset, and leave the reset event
 # reset_rope_end_tracking in place.
 success_term: {name: rope_ends_close_tracked, first_call: after_first_action}
+# Official policy settings (softmimicgen_tasks/<task>/config/agents/robomimic/*.json @ c9d146ba): BC-RNN crops the 128x128
+# images to 76x76 (CropRandomizer), the Diffusion Policy uses NO crop randomizer; both train on agentview_image and
+# robot0_eye_in_hand_image with the three robot-state terms. The evaluation horizon above is the project decision, not the official 250.
+# Decision 2026-10-29: the Isaac Lab tasks share one rule, no image crop for either policy (the official BC-RNN config's 76x76
+# crop is not followed, so that Rope, Towel and Pick Place use the same preprocessing); MimicGen keeps its official 76x76.
+policy_overrides:
+  bc_rnn: {crop_shape: null}
+  diffusion_policy: {crop_shape: null}

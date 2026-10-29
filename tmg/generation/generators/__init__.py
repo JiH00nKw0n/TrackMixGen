@@ -23,4 +23,8 @@ def make_generator(cfg: dict) -> SyntheticDataGenerator:
         from tmg.generation.generators.cpgen.adapter import CPGenGenerator
 
         return CPGenGenerator(cfg)
-    raise KeyError(f"no generator adapter named {name!r} (available: mimicgen, softmimicgen, dexmimicgen, cpgen)")
+    if name == "autodata":
+        from tmg.generation.generators.autodata.adapter import AutoDataGenerator
+
+        return AutoDataGenerator(cfg)
+    raise KeyError(f"no generator adapter named {name!r} (available: mimicgen, softmimicgen, dexmimicgen, cpgen, autodata)")

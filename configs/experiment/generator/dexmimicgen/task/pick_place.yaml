@@ -8,10 +8,16 @@ source_url: https://omniverse-content-production.s3-us-west-2.amazonaws.com/Asse
 num_sources: 5
 subtasks: [right idle until grasp, right place; left grasp and hold]
 reference_objects: [object, object]
-horizon: 600                        # evaluation step limit (project decision 2026-10-27)
+horizon: 600                        # evaluation step limit (project decision 2026-10-26: DexMimicGen 600; the environment's own episode length is 400 = 20 s at 20 Hz)
 eval_episode_length_s: 30.0         # the env's own limit is 20 s = 400 steps at 20 Hz; the evaluation must raise episode_length_s to cover the horizon
 cameras: [front_image, side_image]
 image_size: [128, 128]
 robot_state: [left_eef_pos, left_eef_quat, right_eef_pos, right_eef_quat, hand_joint_state]
 object_state: []                    # low-dim training is not set up for the Isaac Lab tasks yet
 instruction: pick up the object with the right hand and place it in the bin
+# Isaac Lab has no official image policy config for GR1 pick-and-place (only bc_rnn_low_dim.json). Decision 2026-10-29: the
+# Isaac Lab tasks share one rule, no image crop (SoftMimicGen's official Diffusion Policy trains without one); MimicGen's
+# tasks keep the official 76x76 crop. (Isaac Lab's other GR1 image configs crop 160x256 to 144x236, 90% of the side.)
+policy_overrides:
+  bc_rnn: {crop_shape: null}
+  diffusion_policy: {crop_shape: null}

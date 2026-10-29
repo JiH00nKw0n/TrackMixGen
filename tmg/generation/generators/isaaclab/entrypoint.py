@@ -42,9 +42,6 @@ def install(namespace: dict, spec: dict) -> None:
     @functools.wraps(original_setup)
     def setup_env_config(*args, **kwargs):
         env_cfg, *rest = _as_tuple(original_setup(*args, **kwargs))
-        if spec["task"].get("arena_environment"):
-            from tmg.generation.simulators.isaaclab_tasks.arena import configure_observations
-            configure_observations(env_cfg, spec["task"])
         applied = apply_scene(env_cfg, scene, task_name)
         print(f"[tmg] scene {scene.get('name')}: {'ranges applied ' + json.dumps(applied) if applied else 'official ranges kept'}", flush=True)
         datagen = getattr(env_cfg, "datagen_config", None)
@@ -56,6 +53,12 @@ def install(namespace: dict, spec: dict) -> None:
     namespace["setup_env_config"] = setup_env_config
     if spec["extra"].get("disable_graft"):
         print("[tmg] grafts DISABLED (identity check)", flush=True)
+        return
+    if spec["extra"].get("runtime_module"):      # another generator family (AutoData) installs its own grafts
+        import importlib
+
+        info = importlib.import_module(str(spec["extra"]["runtime_module"])).install_from_spec(spec, namespace)
+        print(f"[tmg] grafts installed ({spec['extra']['runtime_module']}): {json.dumps(info, indent=1)}", flush=True)
         return
     layout = rt.IsaacLabLayout(**{k: (tuple(v) if k == "noise_draw_shapes" else v) for k, v in spec["extra"]["layout"].items()},
                                soft_object_subtasks={})
@@ -81,13 +84,6 @@ def main(argv=None):
     parser.add_argument("--spec", required=True)
     args = parser.parse_args(argv)
     spec = json.loads(Path(args.spec).read_text())
-    if spec["task"].get("arena_environment"):
-        # Upstream GR1 writes converted collision meshes under tempfile.gettempdir().
-        # Each process owns its directory so two official conversions cannot overwrite one another.
-        import tempfile
-        temp_dir = Path(spec["folder"]) / "runtime_tmp"
-        temp_dir.mkdir(parents=True, exist_ok=True)
-        tempfile.tempdir = str(temp_dir)
     script = Path(spec["extra"]["script"])
     source = script.read_text()
     tree = ast.parse(source, str(script))

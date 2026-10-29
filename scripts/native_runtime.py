@@ -18,7 +18,7 @@ REPO = Path(__file__).resolve().parents[1]
 
 def runtime_environment(image: str, data_root: str) -> tuple[Path, dict[str, str]]:
     """Return an environment's interpreter and process-local paths, without changing the host."""
-    if image not in {"isaaclab-soft", "isaaclab-dex", "isaaclab-arena", "train"}:
+    if image not in {"isaaclab-soft", "isaaclab-dex", "isaaclab-arena", "isaaclab-autodata", "train"}:
         raise ValueError(f"native runtime does not support {image!r}")
     root = Path(os.environ.get("TMG_NATIVE_ROOT") or "~/.local/share/tmg-native").expanduser().resolve()
     venv = root / "envs" / image
@@ -44,6 +44,10 @@ def runtime_environment(image: str, data_root: str) -> tuple[Path, dict[str, str
         env["TMG_ISAACLAB_SRC"] = str(root / "src" / image / "IsaacLab")
     if image == "isaaclab-arena":
         env["TMG_ARENA_SRC"] = str(root / "src" / image / "IsaacLab-Arena")
+    if image == "isaaclab-autodata":
+        env["TMG_ARENA_SRC"] = str(root / "src" / image / "IsaacLab-Arena")
+        env["TMG_ISAACLAB_SRC"] = str(root / "src" / image / "IsaacLab-Arena/submodules/IsaacLab")
+        env["TMG_AUTODATA_SRC"] = str(root / "src" / image / "AutoData")
     if image == "isaaclab-soft":
         env["TMG_SOFTMIMICGEN_SRC"] = str(root / "src" / image / "SoftMimicGen")
     return python, env

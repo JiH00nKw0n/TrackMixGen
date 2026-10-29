@@ -118,3 +118,21 @@ def test_trajectory_store_reads_isaaclab_camera_keys(tmp_path):
         g.create_dataset("actions", data=np.zeros((4, 7), np.float32))
     store = TrajectoryStore.load(path)
     assert store.cameras == ["agentview_image"] and store.images["agentview_image"][0].shape == (4, 8, 8, 3)
+
+
+def test_task_policy_overrides_follow_the_official_configs(tmp_path, monkeypatch):
+    def task_policy_overrides(task, name):   # mirrors tmg.policy.lerobot_policies.task_policy_overrides (that module needs lerobot)
+        return dict(((task or {}).get("policy_overrides") or {}).get(name) or {})
+
+    monkeypatch.setenv("TMG_DATA_ROOT", str(tmp_path))
+    rope = resolved(compose("train", ["generator=softmimicgen", "task=rope", "scene=ours", "method=none", "generation=pool_isaac",
+                                     "observation=image", "policy=diffusion_policy"]))
+    assert rope["task"]["horizon"] == 400
+    assert task_policy_overrides(rope["task"], "diffusion_policy") == {"crop_shape": None}
+    assert task_policy_overrides(rope["task"], "bc_rnn") == {"crop_shape": None}
+    dex = resolved(compose("train", ["generator=dexmimicgen", "task=pick_place", "scene=ours", "method=none", "generation=pool_isaac",
+                                    "observation=image", "policy=diffusion_policy"]))
+    assert dex["task"]["horizon"] == 600 and task_policy_overrides(dex["task"], "diffusion_policy") == {"crop_shape": None}
+    square = resolved(compose("train", ["generator=mimicgen", "task=square", "scene=ours", "method=none", "generation=pool",
+                                       "observation=image", "policy=diffusion_policy"]))
+    assert task_policy_overrides(square["task"], "diffusion_policy") == {} and square["policy"]["params"]["crop_shape"] == [76, 76]

@@ -268,20 +268,19 @@ def compute_stats(store: TrajectoryStore, *, max_image_frames: int = 20000, seed
     for cam in store.cameras:
         total = sum(len(x) for x in store.images[cam])
         indices = np.sort(rng.choice(total, size=max_image_frames, replace=False)) if total > max_image_frames else np.arange(total)
-        count, offset = 0, 0
-        sums, squares = np.zeros(3), np.zeros(3)
-        lo, hi = np.full(3, np.inf), np.full(3, -np.inf)
+        x = np.empty((len(indices), *store.image_shape), dtype=np.float32)
+        offset, filled = 0, 0
         for frames in store.images[cam]:
             local = indices[(indices >= offset) & (indices < offset + len(frames))] - offset
             offset += len(frames)
             for start in range(0, len(local), 64):
-                x = frames[local[start:start + 64]].astype(np.float32) / 255.0
-                x = x.reshape(-1, 3)
-                count += len(x)
-                sums += x.sum(0, dtype=np.float64)
-                squares += np.square(x.astype(np.float64)).sum(0)
-                lo, hi = np.minimum(lo, x.min(0)), np.maximum(hi, x.max(0))
-        mean = sums / count
-        per_channel = {"min": lo, "max": hi, "mean": mean, "std": np.sqrt(np.maximum(squares / count - mean**2, 0))}
+                batch = frames[local[start:start + 64]].astype(np.float32) / 255.0
+                x[filled:filled + len(batch)] = batch
+                filled += len(batch)
+        assert filled == len(indices)
+        # Same dtype, shape, order and reductions as main's compute_stats.
+        per_channel = {"min": x.min(axis=(0, 1, 2)), "max": x.max(axis=(0, 1, 2)), "mean": x.mean(axis=(0, 1, 2)),
+                       "std": x.std(axis=(0, 1, 2))}
+        del x
         stats[f"observation.images.{cam}"] = {k: v.astype(np.float32).reshape(3, 1, 1) for k, v in per_channel.items()}
     return stats

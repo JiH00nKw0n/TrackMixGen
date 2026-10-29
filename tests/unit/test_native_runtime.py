@@ -58,3 +58,17 @@ esac
     assert result.returncode != 0
     assert "serve-detached" in calls.read_text()
     assert "serve-stop" not in calls.read_text()
+
+
+def test_autodata_uses_the_main_pinned_runtime_paths(tmp_path, monkeypatch):
+    import importlib.util
+    spec=importlib.util.spec_from_file_location('native_autodata',REPO/'scripts/native_runtime.py')
+    module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+    root=tmp_path/'native';py=root/'envs/isaaclab-autodata/bin/python'
+    py.parent.mkdir(parents=True);py.touch()
+    monkeypatch.setenv('TMG_NATIVE_ROOT',str(root))
+    actual,env=module.runtime_environment('isaaclab-autodata',str(tmp_path/'data'))
+    assert actual==py
+    assert env['TMG_ISAACLAB_SRC']==str(root/'src/isaaclab-autodata/IsaacLab-Arena/submodules/IsaacLab')
+    assert env['TMG_ARENA_SRC']==str(root/'src/isaaclab-autodata/IsaacLab-Arena')
+    assert env['TMG_AUTODATA_SRC']==str(root/'src/isaaclab-autodata/AutoData')

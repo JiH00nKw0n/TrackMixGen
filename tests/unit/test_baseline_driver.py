@@ -50,7 +50,7 @@ with open(str(p)+'.lock','w') as f:
 ''')
     pipeline.chmod(0o755)
     (scripts/'collect_results.py').write_text('pass\n')
-    env=dict(os.environ,PATH=f'{binary}:'+os.environ['PATH'],SOFT_TASKS='rope',DEX_TASKS='',
+    env=dict(os.environ,PATH=f'{binary}:'+os.environ['PATH'],SOFT_TASKS='rope',DEX_TASKS='',AUTODATA_TASKS='',
              POLICIES='bc_rnn diffusion_policy',SEEDS='202601 202602 202603',SEED_PARALLEL='2',
              SEQUENTIAL_TASKS='1',TMG_RETIRE_COMPLETED='0',TMG_RESULTS_ROOT=str(tmp_path/'results'))
     result=subprocess.run(['bash',str(scripts/source.name)],env=env,capture_output=True,text=True,timeout=20)
@@ -73,7 +73,7 @@ with open(str(p)+'.lock','w') as f:
 
     # All five real tasks must dispatch both policies and all three seeds.
     tasks = [('softmimicgen','rope'),('softmimicgen','towel'),('dexmimicgen','pick_place'),
-             ('dexmimicgen','bottle_placement_door_closing'),('dexmimicgen','microwave_opening')]
+             ('autodata','bottle_door'),('autodata','microwave')]
     for gen, task in tasks:
         cfg=repo/f'configs/experiment/generator/{gen}/task/{task}.yaml'
         cfg.parent.mkdir(parents=True,exist_ok=True); cfg.write_text(f'name: {task}\n')
@@ -83,10 +83,11 @@ with open(str(p)+'.lock','w') as f:
         rs.parent.mkdir(parents=True,exist_ok=True); rs.touch()
     state.write_text(json.dumps({'active':0,'peak':0,'calls':[]}))
     env['SOFT_TASKS']='rope towel'
-    env['DEX_TASKS']='pick_place bottle_placement_door_closing microwave_opening'
+    env['DEX_TASKS']='pick_place'
+    env['AUTODATA_TASKS']='microwave bottle_door'
     result=subprocess.run(['bash',str(scripts/source.name)],env=env,capture_output=True,text=True,timeout=30)
     assert result.returncode == 0, result.stdout+result.stderr
     calls=json.loads(state.read_text())
     assert len(calls['calls'])==30 and calls['peak']==2
-    assert 'dexmimicgen:isaaclab-arena:bottle_placement_door_closing' in result.stdout
-    assert 'dexmimicgen:isaaclab-arena:microwave_opening' in result.stdout
+    assert 'autodata:isaaclab-autodata:bottle_door' in result.stdout
+    assert 'autodata:isaaclab-autodata:microwave' in result.stdout

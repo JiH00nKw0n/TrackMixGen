@@ -213,6 +213,19 @@ Isaac Lab 평가를 만들 때도 성공 판정은 첫 행동 뒤부터 매 걸�
 `robot0_eye_in_hand_image`, `robot0_eef_pos`, `robot0_eef_quat`, `robot0_gripper_qpos`)로 바꿨고, Pick Place의 원본 주소를 위 경로로
 바꿨다.
 
+### 2.1.0 공식 정책 설정과 우리 적용 (2026-10-29)
+
+과제별 공식 정책 설정 파일에서 읽은 값과 우리 적용은 다음과 같다. 정책 구조와 학습 예산은 생성기 전체가 공유하는 우리 설정을 쓰고,
+영상 자르기와 평가 상한은 과제별로 둔다(`task.policy_overrides`, `task.horizon`). 2026-10-29 결정으로 Isaac Lab 세 과제는 모두
+자르지 않고(Soft 공식 Diffusion Policy와 같다), MimicGen은 공식 76×76을 유지한다. 평가 상한은 공식 값이 아니라 2026-10-26 결정
+(SoftMimicGen 400, DexMimicGen 계열 600)을 쓴다. 2026-10-29에 공식 값으로 바꾼 커밋이 있었으나 결정에 어긋나 같은 날 되돌렸다.
+
+| 과제 | 공식 BC-RNN (영상) | 공식 Diffusion Policy (영상) | 공식 평가 상한 | 우리 적용 |
+|---|---|---|---|---|
+| Soft Rope, Towel (`softmimicgen_tasks/<task>/config/agents/robomimic/*.json`) | 128×128 영상을 76×76으로 무작위 자르기, ResNet18과 SpatialSoftmax 32, 1,200에폭, 배치 16, 순서 10 | 자르기 없음, 관측 1단계, 행동 8단계, 예측 16단계, DDPM 100, EMA, U-Net [256, 512, 1024], 1,200에폭, 배치 16 | Rope 250걸음, Towel 220걸음 (성공 시 종료) | 두 정책 모두 자르기 없음(2026-10-29 결정: Isaac Lab 과제는 한 규칙), 상한 400(결정값, 공식 250과 220이 아니다). Towel의 300×300 agentview는 128×128로 줄인다(공식과 다른 점, 2.6절) |
+| Dex GR1 Pick Place | 영상 설정 없음 (`bc_rnn_low_dim.json`만 있다) | 없음 | 환경 자체 길이 20초 = 400걸음 | 두 정책 모두 자르기 없음. 상한 600(결정값, 환경 자체 길이 400이 아니다). (참고로 Isaac Lab의 다른 GR1 영상 설정은 160×256을 144×236으로, 변의 90%로 자른다) |
+| MimicGen 7과제 | 84×84를 76×76 | 같음 | 과제별 | 76×76 (기본값) |
+
 ### 2.1.1 컨테이너에서 Isaac Sim이 GPU를 잡기까지 (2026-10-28, Isaac 서버)
 
 처음 빌드한 Isaac Lab 이미지에서 Isaac Sim은 `vkCreateInstance failed ... ERROR_INCOMPATIBLE_DRIVER`로 GPU 장치를 만들지 못했다.
@@ -262,7 +275,164 @@ Rope를 `tmg/isaaclab-soft` 이미지로 전체 경로를 한 번 돌렸다. 측
 - Diffusion Policy 200갱신 학습 뒤 `make validate`가 새 평가기로 검증 25장면을 모두 돌렸다. 오류 0, 모두 400걸음까지 실패(기대한 결과,
   200갱신 모형), 에피소드당 평균 89초, 리셋 직후 밧줄 마디 위치가 에피소드 기록에 남았다. `validation.jsonl`에 행이 추가되었다.
 
-Dex Pick Place는 같은 방식의 시범 실행을 이어서 돌린다.
+Dex Pick Place도 같은 경로를 `tmg/isaaclab-dex` 이미지로 끝까지 돌렸다(2026-10-28). 생성 50회 시도에 성공 20회(40%, 1,940초, 시도당
+39초), 고정 장면과 데이터셋(시연 10개, 1,329걸음, 두 카메라 128×128), 200갱신 학습, 검증 25장면(오류 0, 에피소드당 약 2.9분,
+초기 물체 위치가 기록됨)까지 정상이었다. 생성 성공률 40%는 이전 Codex 실행의 34%(2,979회 중 1,000회)와 같은 수준이고 Isaac Lab 문서의
+65에서 80%보다 낮다. Towel과 Jenga는 생성 경로만 돌렸고 각각 24회와 약 20회 시도에서 성공 20개를 얻었다.
+
+## 2.5 AutoData (isaac-sim/AutoData @ 835f4aab): 논문 계획의 나머지 Dex 두 과제 (2026-10-29)
+
+논문 계획(`method_evaluation.tex`)의 DexMimicGen 과제는 Pick-and-Place, Microwave Opening, Bottle Placement and Door Closing이고,
+뒤의 둘은 NVIDIA AutoData가 Isaac Lab-Arena 위에서 제공하는 GR1 과제다. AutoData는 Isaac Lab Mimic의 생성 알고리즘을 자기
+패키지(`autodata_core`)로 다시 쓴 구현이라 `isaaclab_mimic`에 의존하지 않고, 스택도 다르다(Isaac Sim 6.1, Isaac Lab 3.0 @ 28a386f0,
+Arena @ 481f5ae5, Python 3.12, torch 2.11). 그래서 별도 이미지 `tmg/isaaclab-autodata`(`docker/isaaclab-autodata.Dockerfile`, Arena의
+uv 잠금 파일로 설치)와 별도 어댑터(`tmg/generation/generators/autodata/`)를 둔다. 생성기 이름은 `autodata`, 과제는 `microwave`와
+`bottle_door`다.
+
+| 과제 | Arena 환경 이름 | 원본 시연 | 공식 생성 설정 (`autodata_examples/tasks/*.yaml`) | 에피소드 길이 |
+|---|---|---|---|---|
+| Microwave Opening (오른손으로 전자레인지 문 열기) | `gr1_open_microwave` | Hugging Face `nvidia/Arena-GR1-Manipulation-Task`, 파일 `arena_gr1_manipulation_dataset_annotated.hdf5`, 리비전 `arena_v0.2_lab_v3.0`, 주석 달린 시연 10개 | 하위작업마다 원본 선택(select_src_per_subtask true), nearest_neighbor_object(nn_k 3), 행동 잡음 0.005, 보간 오른팔 5 왼팔 0, 첫 하위작업 종료 오프셋 [10, 20] | 5초 = 250걸음 (50 Hz) |
+| Bottle Placement and Door Closing (병을 냉장고에 넣고 문 닫기) | `put_item_in_fridge_and_close_door` | Hugging Face `nvidia/Arena-GR1-Manipulation-PlaceItemCloseDoor-Task`, 파일 `ranch_bottle_into_fridge/ranch_bottle_into_fridge_annotated.hdf5`, 같은 리비전, 주석 달린 시연 5개(카드에는 10개로 적혀 있다) | 하위작업마다 원본 선택, nearest_neighbor_object(nn_k 3), 행동 잡음 0.003, 보간 오른팔 5 왼팔 0, 종료 오프셋 [0, 0] | 10초 = 500걸음 |
+
+어댑터가 공식과 다르게 하는 것은 세 가지뿐이다. 청크마다 공식 기술 파일의 사본에 `generation_policy.seed`(청크 시드), `num_trials`
+(청크의 수), `guarantee_success: true`(Isaac Lab 과제처럼 수가 성공 수를 뜻하게)를 써 넣는다. 공식 기술 파일의 `guarantee_success`는
+false이고 `num_trials`는 50과 100이다.
+
+실행 방식은 AutoData의 자체 Arena 시험과 같다. `scripts/generate_dataset.py --external_callback
+isaaclab_arena.environments.isaaclab_interop.environment_registration_callback --env_name <환경> --alg dexmimicgen
+--task_descriptor <청크 사본> --embodiment autodata_examples/embodiments/gr1_ik_abs.yaml --enable_cameras`이고, `--` 뒤의 `--seed`는
+Arena에 전달된다. 기록 그라프트는 AutoData의 자리(`initial_state` 대입 뒤, 두 `return GenerationResult` 앞, `seq = WaypointSequence.from_poses`
+뒤, `play_action = datastream.target_eef_pose_to_action` 뒤, `execute`의 마지막 반환값)에 들어가며, 잡음 전 라벨은
+`datastream.target_eef_pose_to_action`을 감싸 얻는다. 혼합과 추종은 AutoData에 아직 연결하지 않았다(`method=none`만 된다).
+
+관측은 Arena GR1 임바디먼트의 `left_eef_pos`, `left_eef_quat`, `right_eef_pos`, `right_eef_quat`, `hand_joint_state`(Isaac Lab Pick Place와
+같은 이름)와 머리 카메라 `robot_pov_cam_rgb`(512×512, 관측 그룹 `camera_obs`)다. 데이터셋 단계와 평가기가 같은 함수로 128×128로
+줄인다(`tmg/data/images.py`). 평가기는 Arena 콜백으로 환경을 등록한 뒤 AutoData처럼 종료 조건을 모두 떼고 성공 판정 항목만 꺼내
+쓰며, Arena의 성공 판정은 클래스(`TaskSuccessTerm`)라 한 번 인스턴스로 만들어 매 걸음 부른다. 행동은 36차원(양손 자세 14 + 손가락 22)이다.
+
+이 절의 내용은 코드와 설정을 기준으로 적었고, Isaac 서버의 시범 실행 결과는 2.6절에 덧붙인다.
+
+## 2.6 AutoData 시범 실행 결과 (2026-10-28, Isaac 서버)
+
+전자레인지 과제를 `tmg/isaaclab-autodata` 이미지로 돌려 세 가지 공식 쪽 문제를 찾아 어댑터에서 처리했다. 측정한 사실이다.
+
+- AutoData 스크립트는 Arena의 클래스형 성공 판정(`TaskSuccessTerm`)을 함수처럼 바로 불러 생성자 인자 오류가 난다. Isaac Lab 3.0의
+  `initialize_success_term`으로 생성 전에 인스턴스를 만들고, 시도마다 `reset_success_term`으로 환경의 진행 상태를 지운다.
+- Isaac Lab 3.0의 앱 실행기는 `--headless`와 `--enable_cameras` 플래그가 없다(`--viz none`과 생성자 인자 `enable_cameras`). 어댑터와 평가기는
+  실행기가 아는 쪽을 고른다.
+- Isaac Lab 기록기는 `policy` 관측 그룹만 저장하므로 Arena의 머리 카메라(`camera_obs` 그룹, 512×512)는 공식 `generated.hdf5`에 없다.
+  기록 그라프트가 매 걸음 행동 직전에 카메라를 읽어 128×128로 줄여 두고, 성공한 시도의 영상을 `records/images_%06d.npz`로 쓴다.
+
+그 뒤 생성은 20회 시도에 성공 20회(100%), 1,020초(Isaac Sim 시작 포함, 시도당 약 50초)였고, 고정 장면 시드 파일, 데이터셋(시연 10개,
+984걸음, 128×128 한 카메라), 200갱신 학습까지 정상이었다. 평가기 검증도 Arena 환경에서 25장면을 오류 없이 돌았다(에피소드당 평균
+68초, 25장면 39분). 200갱신 모형이 25장면 중 2장면에서 성공으로 판정되었는데(한 번은 21걸음 만에), 거의 학습되지 않은 정책이므로
+문 손잡이를 우연히 밀었거나 성공 기준(열림 0.8)이 느슨한 경우로 보인다. 전체 규모 실행에서 성공률과 함께 다시 본다.
+
+병 놓기·문 닫기 과제(`bottle_door`, Arena의 `put_item_in_fridge_and_close_door`)도 같은 이미지로 전체 경로를 통과했다. 원본은
+`nvidia/Arena-GR1-Manipulation-PlaceItemCloseDoor-Task`의 주석 달린 시연 5개이고, 생성은 34회 시도에 성공 20회(58.8%), 3,401초(시도당
+약 100초)였다. 데이터셋은 시연 10개에 3,244걸음(에피소드당 약 324걸음)이고, 200갱신 학습 뒤 검증 25장면이 오류 없이 돌았다(상한 500걸음,
+모두 실패해 끝까지 돌았고 에피소드당 평균 158초, 25장면 66분). 에피소드 기록의 초기 배치에는 병(`ranch_dressing_hope_robolab`)의 자세와
+냉장고(`refrigerator`)의 자세와 관절값이 들어 있다.
+
+두 과제의 장면 무작위화는 공식 환경 정의를 그대로 따르며, 그 범위를 생성 기록과 평가 기록에서 측정했다.
+
+- 전자레인지 과제(`gr1_open_microwave_environment.py`)는 로봇(x −0.4 m), 전자레인지(x 0.4 m, y −0.00586 m, z 0.22773 m), 문의 시작
+  열림 정도(0.2)를 모두 고정값으로 두고 무작위화 항목이 없다. 생성 20회 시도의 초기 자세가 모두 같았고, 검증과 시험 에피소드 24개의
+  초기 배치도 모두 같았다. 따라서 이 과제의 검증 25장면과 시험 300장면은 초기 상태가 같고 정책 시드(에피소드마다 다르게 고정)와
+  물리 시뮬레이션의 비결정성만 다르다. 장면 시드 파일은 다른 과제와 같은 형식으로 만들어지지만 이 과제에서는 초기 상태를 바꾸지 않는다.
+- 병 놓기·문 닫기 과제(`gr1_put_and_close_door_environment.py`)는 병만 `RandomAroundSolution(x_half_m=0.03, y_half_m=0.01)`로 흔들고
+  냉장고와 로봇은 고정이다. 측정한 병 위치의 폭은 생성 38회 시도에서 x 8.2 mm, y 3.6 mm, 평가 12에피소드에서도 같은 크기였다. 코드가
+  선언한 상자(x ±30 mm, y ±10 mm)보다 좁은 것은 Arena의 배치기(`ObjectPlacer`)가 범위를 적용하는 방식 때문으로 보이며, 생성과 평가가
+  같은 공식 재설정 경로를 쓰므로 두 쪽의 분포는 일치한다. 원인은 더 파지 않았다.
+
+Towel의 공식 agentview 카메라는 300×300이고 손목 카메라는 128×128이다. 정책은 카메라 영상을 쌓아 쓰므로 데이터셋 단계에서 과제의
+`image_size`(128×128)로 줄이며(`tmg/data/images.py`), 평가기도 같은 함수로 실시간 영상을 줄인다. 2026-10-28 MINI 전체 실행에서 이
+크기 차이로 Towel 학습이 실패해 찾은 것이다.
+이 축소는 공식과 다른 점이다. 공식 Diffusion Policy(robomimic 구현)는 카메라마다 인코더를 따로 두어 300×300을 그대로 넣고, LeRobot
+구현은 카메라별 인코더 옵션을 켜도 모든 카메라 영상을 (배치, 관측 단계, 카메라, 채널, 높이, 너비) 한 텐서로 쌓으므로 크기가 같아야 한다.
+두 카메라를 300×300으로 키우는 대안은 픽셀 수가 약 5.5배라 택하지 않았고, agentview를 128×128로 줄이는 쪽으로 2026-10-29에 정했다.
+
+## 2.7 드라이버 MINI 전체 실행 결과 (2026-10-28, Isaac 서버)
+
+`MINI=1 scripts/run_isaaclab_baseline.sh`(생성 20개 성공, 데이터셋 시연 10개, 200갱신, 검증과 시험 각 6장면, 시드 202601과 202602)로
+Rope, Towel, Pick Place, Microwave 네 과제가 학습, 검증, 선택, 시험을 거쳐 결과 묶음(`reports/isaaclab_mini_20261028.tar.gz`,
+`reports/isaaclab_mini_towel.tar.gz`)까지 만들어졌다. 묶음에는 과제마다 생성 시도 기록(`generation/attempts.jsonl`), 장면 시드 파일,
+데이터셋 기록, 시드마다 학습 기록(`train_log.jsonl`), 검증 줄(`validation.jsonl`), 선택 결과(`SELECTED.json`), 검증과 시험의 에피소드별
+기록(`eval/<split>_h<상한>/<체크포인트>/episodes.jsonl`)과 요약(`eval_summary.json`)이 들어 있는 것을 확인했다.
+
+| 과제 | 생성 성공률 | 시드당 정책 단계 시간 (학습 200갱신 + 검증 6장면 + 시험 6장면) | 시험 성공 (200갱신 모형) |
+|---|---|---|---|
+| Rope | 20/26 | 약 18분 | 0/6, 0/6 |
+| Towel | 20/24 | 약 21분 | 0/6, 0/6 |
+| Pick Place | 20/50 | 약 34분 | 0/6, 0/6 |
+| Microwave | 20/20 | 약 33분 | 0/6, 1/6 |
+| Microwave (AutoData만 따로, 처음부터) | 20/20 | 약 35분 | 1/6, 0/6 |
+| Bottle Placement and Door Closing (처음부터) | 20/38 | 약 41분 | 0/6, 0/6 |
+
+200갱신 모형의 성공률은 파이프라인이 끝까지 도는지 보려는 값이라 뜻이 없다. 첫 MINI 실행에서 실패한 네 건은 모두 원인을 찾아 고쳤다.
+
+표의 마지막 두 줄은 2026-10-28 22:04 UTC에 AutoData 두 과제만으로 드라이버를 처음부터(원본 내려받기부터 결과 묶음까지) 돌린 것이고,
+실패 없이 끝났다(`reports/isaaclab_mini_autodata.tar.gz`). 생성 레인은 전자레인지 풀 941초, 병 놓기·문 닫기 풀 3,637초였고, 정책 레인은
+그 사이 전자레인지 시드 두 개를 돌렸다. 병 놓기·문 닫기는 같은 청크 시드(9001)로 시범 실행에서는 34회 시도에 20개 성공, 드라이버 실행에서는
+38회 시도에 20개 성공이 나왔다. AutoData 생성은 GPU 물리와 비동기 실행 때문에 시드를 고정해도 시도 수가 조금씩 달라진다는 뜻이며, 성공
+수(`num_trials`)는 그대로 보장된다.
+
+- Towel 학습 실패는 300×300 agentview 영상과 128×128 손목 영상의 크기 차이였다(2.6절). 데이터셋 단계의 크기 조절을 넣고 다시 돌려 통과했다.
+- 병 놓기·문 닫기의 원본 단계가 `docker: invalid reference format`으로 실패한 것은 드라이버가 `AUTODATA_TASKS` 기본값을 단어로
+  나누지 않아 생성기 이름이 빈 문자열로 들어간 버그였다. 고쳤다.
+- Microwave 풀 청크 실패는 같은 풀 폴더에 시범 실행 프로세스를 동시에 돌려 청크 파일을 서로 덮어쓴 운영 실수였다. 풀 폴더 하나에
+  생성 프로세스는 하나만 돌려야 한다(안내서 9절).
+- Rope 시드 202601의 검증 줄은 앞선 시범 실행이 상한 400걸음으로 남긴 것을 그대로 썼다. `validation.jsonl`에 줄이 있는 체크포인트는
+  다시 검증하지 않으므로, 상한을 바꾸면 그 줄과 `eval/val_h*` 폴더를 지워야 한다(안내서 9절). 새 기계에서는 생기지 않는다.
+
+## 2.8 넓힌 장면 `ours`의 생성 성공률 (2026-10-29, Isaac 서버)
+
+Rope, Towel, Microwave의 공식 초기 상태 분포가 좁아 생성이 거의 실패하지 않으므로(2.7절), `ours` 장면을 공식과 다르게 넓혔다
+(결정 2026-10-29). 규칙은 MimicGen의 `ours`와 같다. 공식 범위의 중심을 두고 폭을 두 배로 하며, 공식이 0으로 둔 축은 좌우 대칭으로
+연다. 로봇 관절의 시작 잡음은 공식값(표준편차 0.02 rad)을 유지해 바뀌는 것이 물체 분포만이 되게 했다. 세 과제의 성공 판정은 모두
+물체의 위치와 방향에 무관하다(Rope는 두 끝의 거리, Towel은 주성분 분석으로 잰 펼친 면적의 비율, Microwave는 문 관절의 열림 정도).
+
+| 과제 | 공식 | ours | 구현 |
+|---|---|---|---|
+| Rope 전체 이동 | x [0, 0.1] m | x [−0.05, 0.15], y [−0.1, 0.1], yaw ±30° | 재설정 이벤트 `reset_object_position`의 `pose_range` |
+| Rope 절반 변형 | x [0, 0.1], y [0, 0.1], yaw ±30° | x [−0.05, 0.15], y [−0.05, 0.15], yaw ±60° | 같은 이벤트의 `partial_pose_range` (`apply_scene`이 중첩 매개변수를 지원하도록 확장) |
+| Towel | x [0, 0.1], y ±0.05, yaw ±30° | x [−0.05, 0.15], y ±0.1, yaw ±60° | `reset_object_position`의 `pose_range` |
+| Microwave 자세 | 고정 | x ±0.05, y ±0.1, yaw ±15° | 공식 환경에 재설정 이벤트가 없어 `isaaclab.envs.mdp.reset_root_state_uniform`을 추가(`add: true`) |
+| Microwave 문 시작 열림 | 0.2 고정 | 0.1에서 0.3 균등 | `tmg.generation.simulators.isaaclab_events.set_joint_percentage_uniform` 추가. Arena의 고정값 재설정 뒤에 돈다 |
+
+추가한 이벤트는 환경 설정의 기존 이벤트 뒤에 붙어 매 재설정에서 공식 이벤트 다음에 실행되며, 평가기(`tmg/evaluation/isaaclab_rollout.py`)
+도 같은 `apply_scene`을 거치므로 검증과 시험 장면이 같은 분포에서 나온다. 전자레인지는 생성 기록에서 시도마다 자세가 달라지는 것을
+확인했다(x 0.38에서 0.42 m, y −0.07에서 −0.01 m).
+
+성공 50개를 채울 때까지 한 프로세스씩 돌린 결과다(`pilot50`, 청크 시드 9501, 세 프로세스 동시 실행).
+
+| 과제 | 공식 (성공 20개 실행) | ours (성공 50개 실행) | ours 시간 |
+|---|---|---|---|
+| Rope | 20/26 = 76.9% | 50/94 = 53.2% | 3,758초 (시도당 40초) |
+| Towel | 20/24 = 83.3% | 50/65 = 76.9% | 3,367초 (시도당 52초) |
+| Microwave | 20/20 = 100% | 50/66 = 75.8% | 2,508초 (시도당 38초) |
+
+Rope가 가장 크게 떨어졌고 Towel은 거의 변하지 않았다. 공식 쪽 표본이 20개라 두 비율의 차이에는 표본 오차가 크다. 기존 `ours` 이름으로
+공식 범위에서 만들어 두었던 Isaac 서버의 시범 풀(`pilot20`), 데이터셋, 장면 시드, 실행 폴더는
+`<data_root>/<종류>_stale/<생성기>/<과제>/ours_officialranges_20261029`로 옮겨 두었다.
+
+### 2.8.1 실패가 나오는 영역 (2026-10-29)
+
+실패는 넓힌 범위 전체에 고르게 퍼지지 않고 특정 영역에 몰린다. Rope와 Towel은 공식 스크립트가 남기는 실패 기록(`generated_failed.hdf5`)의
+초기 노드 위치에서 물체 중심, 주축 방향(주성분 분석), 로프의 양 끝 거리를 계산했고, 공식 범위 실행(성공 20개, 26회와 24회 시도)의 같은
+값으로 공식 분포의 발자국을 잡았다. Microwave는 시도 기록의 초기 자세를 썼다.
+
+| 과제 | 공식 발자국 안의 시도 | 공식 발자국 밖의 시도 | 실패가 몰리는 영역 |
+|---|---|---|---|
+| Rope | 7/11 성공 (64%) | 43/83 (52%) | 로프가 많이 굽은 시작 모양. 양 끝 거리 0.78–0.81 m(거의 곧음)에서 20/24 = 83%, 0.69–0.74 m에서 7/23 = 30%, 0.60–0.69 m에서 10/24 = 42%. 공식 범위의 양 끝 거리는 0.69–0.80 m라 0.69 m 아래는 넓힌 절반 변형(회전 ±60°, y 최대 +15 cm)이 만든 모양이다. 중심 y가 +9에서 +16 cm인 쪽도 9/24 = 38%로 낮다 |
+| Towel | 7/7 (100%) | 43/58 (74%) | 중심 x가 0.59–0.64 m(로봇에서 가장 먼 4분위)에서 7/17 = 41%, 그 안쪽 세 구간은 94%, 94%, 76%. 회전이 공식 한계(±30°)를 넘는 ±32–45°에서 11/17 = 65%, 공식 범위 안의 회전에서는 31/34 = 91% |
+| Microwave | 모든 범위의 안쪽 절반(x ±2.5 cm, y ±5 cm, 회전 ±7.5°)에서 7/7 (100%) | 43/59 (73%) | 회전 방향 한쪽. 회전 +7.5°에서 +15°에서 5/16 = 31%, 0°에서 +7.5°에서 9/13 = 69%, 반대쪽 −15°에서 0°에서는 36/37 = 97%. 실패 16회 중 15회가 + 방향 회전이다. y −10에서 −5 cm도 10/17 = 59%로 낮다. 문 시작 열림의 영향은 실패 시도의 관절값이 기록에 없어 보지 못했다 |
+
+정리하면 Rope는 절반 변형을 두 배로 넓혀 생긴 심하게 굽은 모양이, Towel은 로봇에서 먼 x 끝과 공식 한계를 넘는 회전이, Microwave는 한쪽 회전
+(+ 방향 7.5° 이상)이 실패의 대부분을 만든다. 범위를 줄인다면 Rope 절반 변형의 회전을 공식 ±30°로 되돌리고, Towel 회전을 ±30°로 되돌리고
+x 상한을 +0.12 m로 낮추고, Microwave 회전을 −15°에서 +5°로 자르는 것이 측정값에 맞는 조정이다. 2026-10-29에 현재 범위를 그대로
+두기로 정했다. ours 장면의 생성 성공률은 위 표의 Rope 53.2%, Towel 76.9%, Microwave 75.8%가 기준값이고, 어려운 영역을 뺀 범위로
+바꾸려면 두 ours.yaml 파일의 해당 범위를 고친 뒤 pilot50을 다시 돌려 이 표를 갱신해야 한다.
 
 ## 3. CP-Gen (kevin-thankyou-lin/cpgen@1e7c1fc4)
 

@@ -10,7 +10,7 @@
 
 1. 돌리는 과제와 공식 설정. 네 과제의 생성기 설정값과 원본 시연 수를 적는다.
 2. 요구 사항. 운영체제, 드라이버, 도커, 디스크, 네트워크 조건을 적는다.
-3. 준비. 드라이버 확인, git과 Docker 설치, NVIDIA Container Toolkit 설치, 저장소 받기, 데이터 폴더와 머신 설정, 이미지 세 개 빌드, 동작 확인을 순서대로 적는다.
+3. 준비. 드라이버 확인, git과 Docker 설치, NVIDIA Container Toolkit 설치, 저장소 받기, 데이터 폴더와 머신 설정, 이미지 네 개 빌드, 동작 확인을 순서대로 적는다.
 4. 실행. 전체 실행 명령과 진행 상황을 보는 방법, 중단 뒤 재시작 방법을 적는다.
 5. 결과 파일. 결과 묶음의 폴더 구조와 각 파일이 담는 내용, 수치를 읽는 방법을 적는다.
 6. 난수와 재현성. 어떤 시드가 어디에 쓰이고 무엇이 같게 유지되는지 적는다.
@@ -20,9 +20,10 @@
 
 ## 1. 돌리는 과제와 공식 설정
 
-기본 과제는 네 개다. SoftMimicGen의 Rope(밧줄을 U자로 만들기), Towel(수건 접기), Jenga(블록을 탑에 놓기)와 DexMimicGen의 GR1
-Pick Place(사람형 로봇이 물체를 집어 상자에 넣기)다. DexMimicGen의 Nut Pour와 Exhaust Pipe는 공개된 주석 달린 원본 시연 파일이
-없어서 돌릴 수 없다(9절).
+논문 계획의 다섯 과제는 SoftMimicGen의 Rope(밧줄을 U자로 만들기), Towel(수건 접기)와 DexMimicGen의 GR1 Pick Place(사람형 로봇이
+물체를 집어 상자에 넣기), Microwave Opening(전자레인지 문 열기), Bottle Placement and Door Closing(병을 냉장고에 넣고 문 닫기)이다.
+실행 스크립트는 다섯 과제를 모두 돈다. 뒤의 두 과제는 NVIDIA AutoData(Isaac Lab-Arena 위의 DexMimicGen)로 돌며 네 번째 이미지
+`isaaclab-autodata`가 필요하다(3.6절). Jenga 과제 설정도 있지만 계획에 없으므로 기본 목록에서 뺐다(`SOFT_TASKS`로 넣을 수 있다).
 
 생성기 설정은 공식 환경 설정 파일의 값을 그대로 쓴다. 우리 코드는 공식 생성 스크립트에 시도 수, 시드, 입출력 파일만 넘기고 나머지는
 건드리지 않는다. 아래 표의 값은 공식 소스에서 읽은 것이다.
@@ -31,14 +32,37 @@ Pick Place(사람형 로봇이 물체를 집어 상자에 넣기)다. DexMimicGe
 |---|---|---|---|---|---|
 | Soft Rope | 3 | 그렇다 | 변형체 정합 비용이 가장 낮은 3개 중 무작위 (registration_cost) | 0.0 | 10, 5 |
 | Soft Towel | 내려받을 때 매니페스트에 기록 | 그렇다 | 같음 | 0.01 | 5, 5 |
-| Soft Jenga | 내려받을 때 매니페스트에 기록 | 아니다 (하위작업마다 고른다) | 잡기는 registration_cost, 놓기는 현재 물체 자세에 가장 가까운 3개 중 무작위 (nearest_neighbor_object) | 0.01 | 5, 5 |
 | Dex GR1 Pick Place | 5 | 그렇다 | nearest_neighbor_object | 0.003 | 오른손 0, 3 / 왼손 0 |
+| Dex GR1 Microwave Opening (AutoData) | 10 | 아니다 (하위작업마다 고른다) | nearest_neighbor_object | 0.005 | 오른손 5, 5 / 왼손 0 |
+| Dex GR1 Bottle Placement and Door Closing (AutoData) | 5 | 아니다 (하위작업마다 고른다) | nearest_neighbor_object | 0.003 | 오른손 5, 5, 5, 5 / 왼손 0, 0 |
 
-네 과제 모두 공식 설정이 "성공 수 보장"(generation_guarantee)이어서, 생성 설정 `pool_isaac`의 시도 수 1,000은 성공 1,000개가 나올
-때까지 돈다는 뜻이다(성공 250개짜리 청크 4개). 실패 시도도 모두 기록되므로 생성 성공률은 기록에서 계산한다.
+Isaac Lab 세 과제는 공식 설정이 "성공 수 보장"(generation_guarantee)이어서, 생성 설정 `pool_isaac`의 시도 수 1,000은 성공 1,000개가
+나올 때까지 돈다는 뜻이다(성공 250개짜리 청크 4개). AutoData 두 과제의 공식 기술 파일은 성공을 보장하지 않지만, 우리 청크는 같은 뜻이
+되도록 사본에 `guarantee_success: true`를 써 넣는다. 실패 시도도 모두 기록되므로 생성 성공률은 기록에서 계산한다.
+
+초기 상태의 무작위화 범위(장면)는 두 가지다. `official`은 공식 환경 설정 그대로이고, 드라이버 기본값인 `ours`는 Rope, Towel, Microwave
+Opening의 범위를 넓힌 것이다(2026-10-29 결정, `configs/experiment/generator/<생성기>/scene/ours.yaml`). 규칙은 공식 범위의 중심을 두고
+폭을 두 배로 하는 것이며, 공식이 0으로 둔 축은 좌우 대칭으로 연다. 같은 범위가 생성 환경과 평가 환경에 함께 적용되므로 검증과 시험
+장면도 이 분포에서 나온다. Pick Place와 Bottle Placement and Door Closing은 두 장면이 같다(공식 범위 유지). 공식 범위로 돌리려면
+`SCENE=official`을 준다.
+
+| 과제 | 공식 (`official`) | 넓힌 범위 (`ours`) | 생성 성공률 공식 → ours (Isaac 서버 측정) |
+|---|---|---|---|
+| Rope, 로프 전체 이동 | x 0에서 +10 cm, y와 회전 없음 | x −5에서 +15 cm, y ±10 cm, 회전 ±30° | 20/26 (77%) → 50/94 (53%) |
+| Rope, 로프 절반 변형 (한쪽 절반만 추가로 옮겨 모양을 바꿈) | x 0에서 +10 cm, y 0에서 +10 cm, 회전 ±30° | x −5에서 +15 cm, y −5에서 +15 cm, 회전 ±60° | 위와 같은 실행 |
+| Towel | x 0에서 +10 cm, y ±5 cm, 회전 ±30° | x −5에서 +15 cm, y ±10 cm, 회전 ±60° | 20/24 (83%) → 50/65 (77%) |
+| Microwave Opening | 없음 (로봇, 전자레인지, 문 시작 열림 0.2 고정) | 전자레인지 x ±5 cm, y ±10 cm, 회전 ±15°, 문 시작 열림 0.1에서 0.3 (재설정 이벤트 두 개 추가) | 20/20 (100%) → 50/66 (76%) |
+
+로봇 관절의 시작 잡음(정규분포, 표준편차 0.02 rad)은 세 과제 모두 공식값이다. 공식 쪽 성공률은 성공 20개짜리 실행에서, ours는 성공
+50개짜리 실행에서 센 것이라 표본 크기가 다르다.
 
 정책은 영상 Diffusion Policy 하나다(`configs/experiment/policy/diffusion_policy.yaml`, 10만 갱신, 배치 64, 체크포인트 1만 갱신마다).
-관측은 과제의 카메라 두 대(128×128)와 로봇 상태다. 체크포인트 선택은 검증 25장면 성공률이 가장 높은 것(동률이면 이른 것)이다.
+관측은 과제의 카메라 두 대(128×128)와 로봇 상태다. 세 과제 모두 영상을 자르지 않는다(SoftMimicGen 공식 Diffusion Policy 설정과
+같고, MimicGen 과제의 공식 76×76 자르기는 그쪽에만 남겨 둔다). 공식과 다른 점이 하나 있다. Towel의 공식 agentview 카메라는 300×300이고
+공식 Diffusion Policy(robomimic 구현)는 카메라마다 인코더가 따로 있어 그 크기 그대로 쓰지만, 우리가 쓰는 LeRobot 구현은 모든 카메라
+영상을 한 텐서로 쌓아야 해서 agentview를 128×128로 줄여 쓴다(2026-10-29 결정). 다른 네 과제의 카메라는 공식 크기와 같다. 평가 상한(한 시도에 허용하는 최대 걸음 수)은 2026-10-26 결정대로 SoftMimicGen 과제(Rope, Towel)
+400걸음, DexMimicGen 계열 과제(Pick Place, Microwave Opening, Bottle Placement and Door Closing) 600걸음이다. 공식 값(Rope 250, Towel 220,
+Pick Place 400, Microwave 250, Bottle 500)과 다르며, 환경 자체의 에피소드 길이가 상한보다 짧은 과제는 평가기가 에피소드 길이를 상한까지 늘린다. 체크포인트 선택은 검증 25장면 성공률이 가장 높은 것(동률이면 이른 것)이다.
 
 ## 2. 요구 사항
 
@@ -159,7 +183,7 @@ sudo mkdir -p /data/tmg_data && sudo chown -R $USER:$USER /data/tmg_data
 make print-data-root CLUSTER=ada
 ```
 
-### 3.6 이미지 세 개 빌드
+### 3.6 이미지 네 개 빌드
 
 저장소 최상위에서 실행하며, 각각 1에서 2시간 걸리고 인터넷이 필요하다. 코드와 설정은 실행 때 컨테이너에 마운트되므로 저장소를
 갱신해도 다시 빌드하지 않는다(의존 패키지가 바뀔 때만 다시 빌드한다).
@@ -176,7 +200,12 @@ make build IMAGE=isaaclab-dex
 make build IMAGE=train
 ```
 
-끝나면 `docker images`에 `tmg/isaaclab-soft`, `tmg/isaaclab-dex`, `tmg/train`이 보여야 한다.
+```bash
+make build IMAGE=isaaclab-autodata
+```
+
+끝나면 `docker images`에 `tmg/isaaclab-soft`, `tmg/isaaclab-dex`, `tmg/isaaclab-autodata`, `tmg/train`이 보여야 한다. 네 번째 이미지는
+Isaac Sim 6.1 기반이라 가장 크고(약 30 GB) 오래 걸린다.
 
 ### 3.7 동작 확인
 
@@ -194,6 +223,15 @@ make generate GENERATOR=softmimicgen IMAGE=isaaclab-soft TASK=rope SCENE=ours ME
 첫 실행은 Isaac Sim이 자산을 내려받고 셰이더를 컴파일하느라 10분 넘게 걸릴 수 있다. 로그는
 `/data/tmg_data/pools/softmimicgen/rope/ours/none/pilot20/logs/`에 있다. 여기까지 되면 4절의 전체 실행으로 넘어간다.
 
+다섯 과제의 전체 경로(원본, 생성, 장면 시드, 데이터셋, 학습, 검증, 선택, 시험, 결과 묶음)를 작은 규모로 끝까지 확인하려면 4절의
+명령에 `MINI=1`을 붙인다. 과제마다 성공 20개짜리 풀, 시연 10개 데이터셋, 200갱신 학습, 검증과 시험 각 6장면으로 같은 코드 경로를
+돌고, 결과 묶음은 `/data/tmg_data/reports/isaaclab_mini_<날짜>.tar.gz`로 나온다. 정책 단계는 시드 하나에 과제마다 18분에서 41분이
+걸렸다(8절). MINI 실행은 풀과 실행 폴더 이름에 `pilot20`이 들어가므로 뒤의 전체 실행(`pool_isaac`)과 파일이 겹치지 않는다.
+
+```bash
+CLUSTER=ada MINI=1 SEEDS="202601" nohup scripts/run_isaaclab_baseline.sh > /data/tmg_data/mini_driver.out 2>&1 &
+```
+
 ## 4. 실행
 
 전체 실험은 명령 하나다. 며칠 걸리므로 `nohup`으로 띄우고 터미널을 닫아도 되게 한다.
@@ -202,7 +240,7 @@ make generate GENERATOR=softmimicgen IMAGE=isaaclab-soft TASK=rope SCENE=ours ME
 CLUSTER=ada nohup scripts/run_isaaclab_baseline.sh > /dev/null 2>&1 &
 ```
 
-스크립트는 두 줄기를 동시에 돈다. 생성 줄기는 과제를 Rope, Towel, Jenga, Pick Place 순서로 하나씩 처리하고(원본, 풀, 고정 장면,
+스크립트는 두 줄기를 동시에 돈다. 생성 줄기는 과제를 Rope, Towel, Pick Place, Microwave, Bottle Door 순서로 하나씩 처리하고(원본, 풀, 고정 장면,
 데이터셋), 정책 줄기는 데이터셋이 생긴 과제부터 시드 3개를 차례로 학습하고 평가한다. 그래서 한 과제의 학습이 도는 동안 다음 과제의
 생성이 같은 GPU에서 함께 돈다.
 
@@ -249,7 +287,8 @@ GPU 메모리가 부족하면 `VAL_PARALLEL`(동시에 검증하는 체크포인
 
 ## 6. 난수와 재현성
 
-- 생성 시드. 청크 k의 시드는 `seed_offset + k`(30001, 30002, 30003, 30004)이고 공식 스크립트의 `--seed`로 들어간다.
+- 생성 시드. 청크 k의 시드는 `seed_offset + k`(30001, 30002, 30003, 30004)다. 공식 스크립트에는 `--seed`가 없어서, Isaac Lab 과제는
+  환경 설정의 `datagen_config.seed`에, AutoData 과제는 청크마다 복사한 과제 기술 파일의 `generation_policy.seed`에 써 넣는다.
 - 데이터셋 선택 시드. 풀의 성공 시도 가운데 1,000개를 고르는 시드는 0이다(`n1000_seed0.hdf5`).
 - 고정 평가 장면. 장면 번호 i의 시드는 `SeedSequence([202600, i])`로 정해지고 파일에 적힌다. 롤아웃은 `env.reset()` 직전에 그 값으로
   환경, 토치, 넘파이, `random`을 모두 초기화한다. 그래서 어느 실행, 어느 정책, 어느 조건에서도 장면 번호 i의 초기 배치는 같다.
@@ -261,7 +300,7 @@ GPU 메모리가 부족하면 `VAL_PARALLEL`(동시에 검증하는 체크포인
 ## 7. 단계별 수동 실행
 
 문제를 좁힐 때는 단계를 따로 돈다. 변수는 `GENERATOR`(softmimicgen 또는 dexmimicgen), `IMAGE`(isaaclab-soft 또는 isaaclab-dex),
-`TASK`(rope, towel, jenga, pick_place)다. 아래는 Rope 예다.
+`TASK`(rope, towel, pick_place, microwave, bottle_door, 그리고 계획 밖의 jenga)다. AutoData 두 과제는 `GENERATOR=autodata IMAGE=isaaclab-autodata`로 돈다. 아래는 Rope 예다.
 
 원본 시연을 내려받는다. 결과는 `<data_root>/sources/softmimicgen/rope/source.hdf5`와 매니페스트(원본 수, md5)다.
 
@@ -313,10 +352,18 @@ Ada 6000에서는 다를 수 있으므로, 첫 과제가 끝나면 `driver.log`�
 | 단계 | 측정값 | 전체 실험에 대한 뜻 |
 |---|---|---|
 | Rope 생성 (Isaac Sim 프로세스 1개) | 26회 시도에 834초. Isaac Sim 시작 약 2분 포함, 시도 하나 평균 23.8초, 성공률 20/26 | 성공 1,000개(약 1,300회 시도)는 프로세스 하나로 약 8.5시간, 기본 설정(2개 동시)으로 약 4.5시간 |
+| Towel 생성 (프로세스 1개) | 24회 시도에 1,270초, 성공률 20/24 | Rope와 비슷 |
+| Pick Place 생성 (프로세스 1개) | 50회 시도에 1,940초(시도당 39초), 성공률 20/50 | 성공 1,000개(약 2,500회 시도)는 프로세스 하나로 약 27시간, 기본 설정(2개 동시)으로 약 14시간 |
+| Microwave 생성 (AutoData, 프로세스 1개) | 20회 시도에 1,020초(시도당 약 50초), 성공률 20/20 | 성공 1,000개는 프로세스 하나로 약 14시간, 2개 동시로 약 7시간(성공률이 유지될 때) |
+| Bottle Placement and Door Closing 생성 (AutoData, 프로세스 1개) | 34회 시도에 3,401초(시도당 약 100초), 성공률 20/34 | 성공 1,000개(약 1,700회 시도)는 프로세스 하나로 약 47시간, 2개 동시로 약 24시간. 다섯 과제 중 가장 오래 걸린다 |
+| Bottle Placement and Door Closing 검증 25장면 (측정 당시 상한 500걸음, 지금 설정은 600) | 에피소드 하나 평균 158초(모두 실패해 500걸음을 다 돌았다), 25장면 66분 | 체크포인트 10개를 2개씩 검증하면 시드당 약 5.5시간 |
+| Microwave 검증 25장면 (측정 당시 상한 250걸음, 지금 설정은 600이라 실패 에피소드는 약 2.4배 오래 걸린다) | 에피소드 하나 평균 68초, 25장면 39분 | 체크포인트 10개를 2개씩 검증하면 시드당 약 3.3시간 |
 | 영상 데이터셋 쓰기 | 시연 10개(1,710걸음) 2초 | 1,000개는 수 분 |
 | Diffusion Policy 학습 | 200갱신(배치 64, 시연 10개)에 약 100초, 시작 시간 포함 | 10만 갱신은 약 4에서 6시간으로 추정한다(측정하지 않았다) |
-| 검증 25장면 (Isaac Sim 프로세스 1개, 상한 400걸음) | 에피소드 하나 평균 89초(모두 실패해 400걸음을 다 돌았다), 25장면 37분 + 시작 2분 | 성공하는 정책은 일찍 끝나 더 빠르다. 체크포인트 10개를 2개씩 동시에 검증하면 시드당 약 3.5시간 |
+| Rope 검증 25장면 (Isaac Sim 프로세스 1개, 상한 400걸음, 지금 설정과 같다) | 에피소드 하나 평균 89초(모두 실패해 400걸음을 다 돌았다), 25장면 37분 + 시작 2분 | 성공하는 정책은 일찍 끝나 더 빠르다. 체크포인트 10개를 2개씩 동시에 검증하면 시드당 약 3.5시간 |
+| Pick Place 검증 25장면 (상한 600걸음, 지금 설정과 같다) | 에피소드 하나 약 2.9분, 25장면 72분 | 체크포인트 10개를 2개씩 검증하면 시드당 약 6시간 |
 | 시험 300장면 | 측정하지 않았다 | 에피소드 89초 기준 3개 분할로 시드당 약 2.5시간 |
+| MINI 모드 시드 하나의 정책 단계 (200갱신 학습 + 검증 6장면 + 시험 6장면 2분할) | Rope 18분, Towel 21분, Pick Place 34분, Microwave 35분, Bottle Placement and Door Closing 41분 (드라이버 로그 시각) | 3.7절의 `MINI=1` 확인 실행이 걸리는 시간의 기준이다 |
 
 에피소드 시간의 상당 부분은 정책 서버의 확산 추론(8걸음마다 100단계 잡음 제거)이다. 시간을 줄여야 하면 `VAL_PARALLEL`과
 `TEST_SHARDS`를 GPU 메모리가 허락하는 만큼 늘린다(각각 Isaac Sim 프로세스 하나). GPU 메모리는 Isaac Sim 프로세스당 약 5에서 14 GB,
@@ -328,11 +375,23 @@ Dex Pick Place의 공식 문서 기준 생성 1,000개는 RTX 6000 Ada에서 약
 
 ## 9. 알려진 제한과 문제 해결
 
-- Nut Pour와 Exhaust Pipe. Isaac Lab에 환경은 있지만 주석 달린 원본 시연 파일이 공개되어 있지 않다(Isaac 자산 서버와 문서를 2026-10-28에
-  확인했다). 원본을 직접 녹화하고 주석을 달지 않으면 돌릴 수 없다.
-- Jenga는 공식 설정이 하위작업마다 원본을 따로 고른다(1절 표). 다른 세 과제와 다르지만 공식값이므로 그대로 둔다.
-- 평가 상한은 Rope, Towel, Jenga 400걸음, Pick Place 600걸음이다(과제 파일의 `horizon`). 공식 평가 스크립트의 기본값 800과 다르다.
-- 원본 시연 수는 Soft Towel과 Jenga는 내려받아야 안다. `<data_root>/sources/softmimicgen/<과제>/source.manifest.json`의 `demos`에 적힌다.
+- Microwave Opening과 Bottle Placement and Door Closing은 NVIDIA AutoData(Isaac Lab-Arena)의 DexMimicGen 과제라 `isaaclab-autodata`
+  이미지로 돈다. Arena 자산은 실행 때 Isaac 자산 서버와 Lightwheel 자산 서버(api.lightwheel.net)에서 내려받으므로 그 두 곳에 인터넷이
+  닿아야 한다. 혼합과 추종 방법은 이 두 과제에 아직 연결되지 않았다(기준선 `method=none`만 된다).
+- Microwave Opening의 공식 환경은 로봇, 전자레인지, 문의 시작 열림 정도를 모두 고정값으로 두고 무작위화 항목이 없다. 그래서 이 과제의
+  검증 25장면과 시험 300장면은 초기 상태가 같고, 에피소드마다 다른 정책 시드와 물리 시뮬레이션의 비결정성만 다르다. 장면 시드 파일은
+  만들어지지만 초기 상태를 바꾸지 않는다. Bottle Placement and Door Closing은 병 위치만 흔들며(측정한 폭 x 약 8 mm, y 약 4 mm) 냉장고와
+  로봇은 고정이다. 둘 다 공식 설정 그대로다.
+- Isaac Lab의 Nut Pour와 Exhaust Pipe는 환경은 있지만 주석 달린 원본 시연 파일이 공개되어 있지 않아 쓰지 않는다.
+- 평가 상한은 Rope 400, Towel 400, Pick Place 600, Microwave Opening 600, Bottle Placement and Door Closing 600걸음이다(과제 파일의 `horizon`,
+  2026-10-26 결정: SoftMimicGen 400, DexMimicGen 계열 600). 환경 자체의 에피소드 길이(Rope와 Towel 200, Pick Place 400, Microwave 250,
+  Bottle 500)가 상한보다 짧으므로 과제 파일의 `eval_episode_length_s`로 평가 때 에피소드 길이를 상한까지 늘린다. 2026-10-29 한때 공식
+  값(250, 220, 400, 250, 500)으로 바뀐 적이 있었고 같은 날 결정값으로 되돌렸다. 그 사이에 만들어진 검증 줄은 아래 규칙대로 지우고 다시 돈다.
+- 검증 결과는 실행 폴더의 `validation.jsonl`에 체크포인트마다 한 줄씩 쌓이고, 이미 줄이 있는 체크포인트는 다시 검증하지 않는다.
+  평가 상한이나 검증 장면 수를 바꾼 뒤 같은 실행 폴더에서 다시 돌리려면 `validation.jsonl`과 `eval/val_h*` 폴더를 지우고 시작한다.
+- 같은 풀 폴더(`pools/<생성기>/<과제>/<장면>/<방법>/<생성 설정>`)에 `make generate`를 두 개 동시에 돌리면 청크 파일을 서로 덮어써 한쪽이 실패한다.
+  7절의 수동 실행과 4절의 드라이버를 같은 데이터 폴더에서 동시에 쓰지 않는다.
+- 원본 시연 수는 Soft Towel은 내려받아야 안다. `<data_root>/sources/softmimicgen/<과제>/source.manifest.json`의 `demos`에 적힌다.
 - `docker: Error response from daemon: could not select device driver`는 NVIDIA Container Toolkit이 없다는 뜻이다. 설치 뒤 도커를 다시 시작한다.
 - Isaac Sim이 뜨지 않고 EULA를 묻는 로그가 나오면 이미지 환경 변수 `ACCEPT_EULA=Y`가 빠진 것이다. 이미지를 다시 빌드한다.
 - `policy server on port N did not come up`은 포트가 이미 쓰이고 있다는 뜻이다. `scripts/task_policy_pipeline.sh`의 두 번째 인자로 다른 시작 포트를 준다.

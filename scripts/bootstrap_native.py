@@ -173,7 +173,83 @@ def graphics(root):
     run(["python3", REPO / "scripts/probe_native_graphics.py"], env=dict(os.environ, **env))
 
 
+AUTODATA_COMMIT = "835f4aab0fff759a789586454d939f12a9a40997"
+AUTODATA_ARENA_COMMIT = "481f5ae5f19df7bc5d24a17240fc0d96ac81eaf7"
+AUTODATA_LAB_COMMIT = "28a386f063e41c04c07f50e63eefb83fd8408fbe"
+
+
+def install_autodata(root):
+    """Use main's Dockerfile package lock unchanged, in a separate user-owned venv."""
+    uv = tools(root)
+    src = root / "src/isaaclab-autodata"
+    src.mkdir(parents=True, exist_ok=True)
+    arena, auto = src / "IsaacLab-Arena", src / "AutoData"
+    checkout("https://github.com/isaac-sim/IsaacLab-Arena", arena, AUTODATA_ARENA_COMMIT)
+    run(["git", "-c", "url.https://github.com/.insteadOf=git@github.com:", "-C", arena,
+         "submodule", "update", "--init", "submodules/IsaacLab"])
+    lab = arena / "submodules/IsaacLab"
+    assert subprocess.check_output(["git", "-C", str(lab), "rev-parse", "HEAD"], text=True).strip() == AUTODATA_LAB_COMMIT
+    checkout("https://github.com/isaac-sim/AutoData", auto, AUTODATA_COMMIT)
+    venv = root / "envs/isaaclab-autodata"
+    python = venv / "bin/python"
+    env = dict(os.environ, UV_CACHE_DIR=str(root / "cache/uv"), UV_PYTHON_INSTALL_DIR=str(root / "python"),
+               UV_LINK_MODE="hardlink", UV_HTTP_TIMEOUT="180", UV_CONCURRENT_DOWNLOADS="4")
+    if not python.exists():
+        run([uv, "venv", "--python", "3.12", "--seed", venv], env=env)
+    run([uv, "export", "--frozen", "--no-dev", "--format", "pylock.toml", "--output-file", "pylock.toml", "--quiet"], cwd=arena, env=env)
+    run([uv, "export", "--frozen", "--no-dev", "--format", "requirements.txt", "--no-emit-local", "--no-hashes",
+         "--output-file", "constraints.txt", "--quiet"], cwd=arena, env=env)
+    run([uv, "pip", "install", "--no-config", "--python", python, "--requirements", arena / "pylock.toml"], cwd=arena, env=env)
+    run([uv, "pip", "install", "--no-config", "--python", python, "--constraint", arena / "constraints.txt", "--editable", auto], env=env)
+    run([uv, "pip", "install", "--no-config", "--python", python, "--no-deps", "-e", REPO], env=env)
+    run([uv, "pip", "install", "--no-config", "--python", python, "--constraint", arena / "constraints.txt",
+         "hydra-core>=1.3,<1.4", "omegaconf>=2.3,<2.4", "pyyaml", "scipy", "msgpack", "websockets", "h5py", "huggingface_hub", "pillow"], env=env)
+    verify_autodata(root)
+
+
+def verify_autodata(root):
+    """Record the installed source revisions, package lock and dependency check."""
+    uv, python = root / "bin/uv", root / "envs/isaaclab-autodata/bin/python"
+    evidence = root / "install-records"
+    evidence.mkdir(exist_ok=True)
+    src = root / "src/isaaclab-autodata"
+    expected = {"IsaacLab-Arena": AUTODATA_ARENA_COMMIT, "IsaacLab-Arena/submodules/IsaacLab": AUTODATA_LAB_COMMIT,
+                "AutoData": AUTODATA_COMMIT}
+    actual = {name: subprocess.check_output(["git", "-C", str(src / name), "rev-parse", "HEAD"], text=True).strip() for name in expected}
+    check = subprocess.run([str(uv), "pip", "check", "--python", str(python)], text=True, capture_output=True)
+    packages = json.loads(subprocess.check_output([str(python), "-c",
+        "import importlib.metadata as m,json,sys; print(json.dumps({'python':list(sys.version_info[:3]),'versions':{n:m.version(n) for n in ['isaacsim','torch','torchvision','isaaclab','isaaclab-arena','autodata']}}))"], text=True))
+    with (evidence / 'isaaclab-autodata.freeze.txt').open('w') as f:
+        run([uv, 'pip', 'freeze', '--python', python], stdout=f)
+    lock = src / 'IsaacLab-Arena/uv.lock'
+    lock_check_code = """
+import importlib.metadata as m, json, sys, tomllib
+from packaging.version import Version
+lock=tomllib.load(open(sys.argv[1],'rb')); mismatch=[]; checked={}
+for p in lock['packages']:
+ if 'version' not in p: continue
+ try: actual=m.version(p['name'])
+ except m.PackageNotFoundError: actual=None
+ checked[p['name']]={'expected':p['version'],'actual':actual}
+ if actual is None or Version(actual)!=Version(p['version']): mismatch.append(p['name'])
+print(json.dumps({'checked':checked,'mismatches':mismatch,'passed':not mismatch}))
+"""
+    package_lock = json.loads(subprocess.check_output([str(python), '-c', lock_check_code,
+                          str(src / 'IsaacLab-Arena/pylock.toml')], text=True))
+    record = {'source_commits': actual, 'expected_source_commits': expected, 'packages': packages,
+              'lock_sha256': hashlib.sha256(lock.read_bytes()).hexdigest(), 'package_lock_check': package_lock,
+              'dependency_check': check.stdout+check.stderr, 'dependency_metadata_check_passed': check.returncode == 0,
+              'metadata_note': 'The upstream uv lock explicitly overrides conflicting dependency metadata. Versions must match that lock.',
+              'passed': actual == expected and package_lock['passed'] and packages['python'][:2] == [3,12]}
+    (evidence / 'isaaclab-autodata.versions.json').write_text(json.dumps(record,indent=2))
+    if not record['passed']:
+        raise RuntimeError(f'AutoData runtime differs from main: {record}')
+    print('VERIFIED main AutoData lock and revisions', flush=True)
+
+
 def install(root, image):
+    if image == "isaaclab-autodata":
+        return install_autodata(root)
     uv = tools(root)
     venv = root / "envs" / image
     python = venv / "bin/python"
@@ -263,6 +339,8 @@ print(json.dumps(users))
 
 def verify_installation(root, image):
     """Check the installed pins and source revisions without reinstalling or importing Isaac Sim."""
+    if image == "isaaclab-autodata":
+        return verify_autodata(root)
     uv = root / "bin/uv"
     python = root / "envs" / image / "bin/python"
     evidence = root / "install-records"
@@ -310,8 +388,8 @@ def verify_installation(root, image):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("stage", choices=["tools", "graphics", "isaaclab-soft", "isaaclab-dex", "isaaclab-arena", "train", "verify"])
-    parser.add_argument("--image", choices=["isaaclab-soft", "isaaclab-dex", "isaaclab-arena", "train"])
+    parser.add_argument("stage", choices=["tools", "graphics", "isaaclab-soft", "isaaclab-dex", "isaaclab-arena", "isaaclab-autodata", "train", "verify"])
+    parser.add_argument("--image", choices=["isaaclab-soft", "isaaclab-dex", "isaaclab-arena", "isaaclab-autodata", "train"])
     args = parser.parse_args()
     root = Path(os.environ.get("TMG_NATIVE_ROOT") or "~/.local/share/tmg-native").expanduser().resolve()
     root.mkdir(parents=True, exist_ok=True)

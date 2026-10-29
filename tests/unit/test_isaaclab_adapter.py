@@ -105,8 +105,12 @@ def test_chunk_seed_goes_into_datagen_config_not_the_command_line(tmp_path, monk
     class Datagen:
         seed = 1
 
+    import types
+
     class EnvCfg:
         datagen_config = Datagen()
+        events = types.SimpleNamespace(reset_object_position=types.SimpleNamespace(
+            params={"pose_range": {"x": (0.0, 0.1)}, "partial_pose_range": {"x": (0.0, 0.1), "y": (0.0, 0.1)}}))
 
     calls = []
     ns = {"setup_env_config": lambda **kw: (EnvCfg(), "success_term")}
@@ -114,5 +118,6 @@ def test_chunk_seed_goes_into_datagen_config_not_the_command_line(tmp_path, monk
     spec_dict["extra"]["disable_graft"] = True
     entrypoint.install(ns, spec_dict)
     env_cfg, term = ns["setup_env_config"](env_name="x")
+    assert env_cfg.events.reset_object_position.params["pose_range"]["x"] == (-0.05, 0.15)      # the ours scene is applied
     calls.append(env_cfg.datagen_config.seed)
     assert calls == [9001] and term == "success_term"

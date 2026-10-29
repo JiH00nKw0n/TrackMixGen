@@ -1,0 +1,22 @@
+# Our scene for the AutoData (Arena) tasks. The official microwave environment (gr1_open_microwave_environment.py) has
+# no randomization at all: robot at x -0.4 m, microwave at (0.4, -0.00586, 0.22773) m, door reset to 0.2 of its range.
+# Decision 2026-10-29: add two reset events after Arena's own (they run last at every reset):
+#   the microwave's pose, uniform x +-0.05 m, y +-0.10 m, yaw +-15 deg around its official pose (reset_root_state_uniform);
+#   the door's start opening, uniform 0.1 to 0.3 of the joint range instead of the fixed 0.2 (set_joint_percentage_uniform).
+# The robot stays fixed. Bottle Placement and Door Closing is not listed and keeps its official distribution (the
+# bottle's RandomAroundSolution). Units: metres and radians.
+name: ours
+override_bounds: true
+bounds:
+  microwave:
+    tmg_microwave_pose:
+      add: true
+      func: "isaaclab.envs.mdp:reset_root_state_uniform"
+      asset: microwave
+      pose_range: {x: [-0.05, 0.05], y: [-0.1, 0.1], yaw: [-0.2617993877991494, 0.2617993877991494]}
+      params: {velocity_range: {}}
+    tmg_microwave_door:
+      add: true
+      func: "tmg.generation.simulators.isaaclab_events:set_joint_percentage_uniform"
+      asset: microwave
+      params: {joint_names: [microjoint], percentage_range: [0.1, 0.3]}
