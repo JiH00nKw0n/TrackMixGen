@@ -43,7 +43,7 @@ log() { echo "[driver $(date '+%F %T')] $*" | tee -a "$LOG/driver.log"; }
 fail() { log "$1 FAILED (see $2)"; echo "$1" >> "$LOG/FAILURES"; }
 M() { make -s -C "$REPO" "$@"; }
 dataset_of() { echo "$DATA_ROOT/datasets/$GENERATOR/$1/$SCENE/$SELECTION/$METHOD/$GEN_NAME/$OBSERVATION/n${SIZE}_seed0.hdf5"; }
-resets_of() { echo "$DATA_ROOT/resets/$GENERATOR/$1/$SCENE/val25_test300_seed202600.json"; }
+resets_of() { echo "$DATA_ROOT/resets/$GENERATOR/$1/$SCENE/val25_test300_seed202600.hdf5"; }   # robosuite resets store states (.hdf5); .json is the Isaac Lab seed list
 run_of() { echo "$DATA_ROOT/runs/$GENERATOR/$1/$SCENE/$SELECTION/$METHOD/$GEN_NAME/$OBSERVATION/$2/seed$3"; }
 pool_successes() { python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(d.get('successes', 0))" "$DATA_ROOT/pools/$GENERATOR/$1/$SCENE/$SELECTION/$METHOD/$GEN_NAME/DONE.json" 2>/dev/null || echo 0; }
 
