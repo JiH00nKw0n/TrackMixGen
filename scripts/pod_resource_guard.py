@@ -83,7 +83,8 @@ def main():
         ram=max(6*GIB,1.15*(selected['peak_memory_working']-base['memory_working'])/n)*count
         gpu=max(6144,1.15*(selected['peak_gpu_mib']-base['gpu_used_mib'])/n)*count
         # Unmeasured tasks may have larger scenes; reserve at least 8 GiB for each.
-        if args.task!='rope': ram=max(ram,8*GIB*count);gpu=max(gpu,8192*count)
+        budget=config.get('minimum_eval_gib',{}).get(args.task,8 if args.task!='rope' else 0)
+        ram=max(ram,budget*GIB*count);gpu=max(gpu,budget*1024*count)
     leases=root/'leases';leases.mkdir(exist_ok=True)
     pid=os.getpid();record=leases/f'{pid}.json'
     request=dict(pid=pid,start_ticks=process_identity(pid),kind=args.kind,task=args.task,
