@@ -60,6 +60,10 @@ Opening의 범위를 넓힌 것이다(2026-10-29 결정, `configs/experiment/gen
 로봇 관절의 시작 잡음(정규분포, 표준편차 0.02 rad)은 세 과제 모두 공식값이다. 공식 쪽 성공률은 성공 20개짜리 실행에서, ours는 성공
 50개짜리 실행에서 센 것이라 표본 크기가 다르다.
 
+저차원 관측으로도 돌릴 수 있다(`OBSERVATION=low_dim`, 2026-10-29). 다섯 과제의 과제 설정에 robosuite의 object 관측 수준의 항목이 정의되어 있고
+(Rope 54차원, Towel 111차원, Pick Place 13차원, Microwave 14차원, Bottle Placement and Door Closing 27차원; `docs/GENERATORS.md` 2.10절), 생성과
+평가가 그 항목을 환경의 관측에 넣는다. 영상 풀 하나에서 영상 데이터셋과 저차원 데이터셋을 모두 만들 수 있다. 2026-10-29 전에 만든 풀에는 이 항목이 없다.
+
 정책은 영상 Diffusion Policy 하나다(`configs/experiment/policy/diffusion_policy.yaml`, 10만 갱신, 배치 64, 체크포인트 1만 갱신마다).
 관측은 과제의 카메라 두 대(128×128)와 로봇 상태다. 세 과제 모두 영상을 자르지 않는다(SoftMimicGen 공식 Diffusion Policy 설정과
 같고, MimicGen 과제의 공식 76×76 자르기는 그쪽에만 남겨 둔다). 공식과 다른 점이 하나 있다. Towel의 공식 agentview 카메라는 300×300이고
