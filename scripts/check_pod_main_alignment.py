@@ -6,8 +6,10 @@ import datetime
 import hashlib
 import json
 import subprocess
+import sys
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 EXCEPTIONS = {
     'configs/experiment/table23_scope.json': 'Adds the five-task, two-policy, three-seed campaign inventory.',
     'configs/experiment/training/default.yaml': 'Adds optimizer-state retention and bounded HDF5 reading options; learning parameters unchanged.',
@@ -18,7 +20,7 @@ EXCEPTIONS = {
 }
 
 def git(*args):
-    return subprocess.check_output(['git', '-C', str(ROOT), *args])
+    return subprocess.check_output(['git', '-C', str(ROOT), *args], stderr=subprocess.DEVNULL)
 
 
 def check(ref):
