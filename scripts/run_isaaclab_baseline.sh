@@ -16,7 +16,8 @@
 #   TEST_SHARDS (3: parallel shards of the 300 test scenes), SEED_PARALLEL (1: training runs at a time),
 #   ONLY_GENERATION (1: stop after the datasets), BUNDLE_NAME (results folder name under <result root>/reports),
 #   TMG_RESULTS_ROOT (persistent summaries and driver logs; defaults to the data root),
-#   GENERATION (pool_isaac), TRAIN_OVERRIDES (extra `tmg train` overrides), EVAL_EXTRA (extra `tmg eval` overrides),
+#   GENERATION (pool_isaac), SELECTION (source selection rule in the folder names, official; the Isaac Lab generators always use their
+#   official rule), TRAIN_OVERRIDES (extra `tmg train` overrides), EVAL_EXTRA (extra `tmg eval` overrides),
 #   MINI (1: an end-to-end check at toy scale: 20-success pools, 10-demo datasets, 200 training updates, 6 evaluation
 #   scenes per split; same code path and files as the real run, finishes in about two hours per task).
 set -uo pipefail
@@ -33,6 +34,7 @@ if [ "${MINI:-0}" = 1 ]; then
   BUNDLE_NAME=${BUNDLE_NAME:-isaaclab_mini_$(date +%Y%m%d)}
 fi
 SCENE=ours; METHOD=none; OBSERVATION=${OBSERVATION:-image}   # low_dim: the tasks' object_state terms (task configs, 2026-10-29)
+SELECTION=${SELECTION:-official}
 GEN_NAME=${GENERATION##*/}       # pool folders are named after the config's `name`, without the `test/` folder
 DATA_ROOT=$(make -s -C "$REPO" print-data-root CLUSTER="$CLUSTER")
 RESULTS_ROOT=${TMG_RESULTS_ROOT:-$DATA_ROOT}
@@ -45,16 +47,16 @@ JOBS=""
 for t in $SOFT_TASKS; do JOBS="$JOBS softmimicgen:isaaclab-soft:$t"; done
 for t in $DEX_TASKS; do JOBS="$JOBS dexmimicgen:isaaclab-dex:$t"; done
 ALL_JOBS=$JOBS
-dataset_of() { echo "$DATA_ROOT/datasets/$1/$2/$SCENE/$METHOD/$GEN_NAME/$OBSERVATION/n${SIZE}_seed0.hdf5"; }
+dataset_of() { echo "$DATA_ROOT/datasets/$1/$2/$SCENE/$SELECTION/$METHOD/$GEN_NAME/$OBSERVATION/n${SIZE}_seed0.hdf5"; }
 resets_of() { echo "$DATA_ROOT/resets/$1/$2/$SCENE/val25_test300_seed202600.json"; }
-run_of() { echo "$DATA_ROOT/runs/$1/$2/$SCENE/$METHOD/$GEN_NAME/$OBSERVATION/$POLICY/seed$3"; }
+run_of() { echo "$DATA_ROOT/runs/$1/$2/$SCENE/$SELECTION/$METHOD/$GEN_NAME/$OBSERVATION/$POLICY/seed$3"; }
 M() { make -s -C "$REPO" "$@"; }
 
 collect_bundle() {
   local args=() job gen image task
   for job in $ALL_JOBS; do
     IFS=: read -r gen image task <<< "$job"
-    args+=(--job "$gen/$task/$SCENE/$METHOD/$GEN_NAME/$OBSERVATION")
+    args+=(--job "$gen/$task/$SCENE/$SELECTION/$METHOD/$GEN_NAME/$OBSERVATION")
   done
   python3 "$REPO/scripts/collect_results.py" --data-root "$DATA_ROOT" --out "$RESULTS_ROOT/reports/$BUNDLE_NAME" \
     --policy "$POLICY" --seeds $SEEDS "${args[@]}" --logs "$LOG" "$@" > "$LOG/collect.log" 2>&1 \
@@ -64,7 +66,7 @@ collect_bundle() {
 generation_lane() {
   for job in $JOBS; do
     IFS=: read -r gen image task <<< "$job"
-    local common="GENERATOR=$gen IMAGE=$image TASK=$task CLUSTER=$CLUSTER"
+    local common="GENERATOR=$gen IMAGE=$image TASK=$task CLUSTER=$CLUSTER SELECTION=$SELECTION"
     if [ -f "$(dataset_of $gen $task)" ] && [ -f "$(resets_of $gen $task)" ]; then log "[$gen/$task] dataset and resets exist, generation skipped"; continue; fi
     log "[$gen/$task] sources"
     M sources $common > "$LOG/sources_${gen}_$task.log" 2>&1 || { fail "sources $gen/$task" "$LOG/sources_${gen}_$task.log"; continue; }
@@ -88,7 +90,7 @@ policy_task() {   # all seeds of one task, SEED_PARALLEL at a time; each seed ha
     if compgen -G "$run/eval/test_h*/*/eval_summary.json" > /dev/null; then log "[$gen/$task seed $seed] test result exists, skipped"; continue; fi
     log "[$gen/$task seed $seed] train, validate, select, test (ports $port..$((port + 39)))"
     SKIP=0; [ -f "$run/train_result.json" ] && SKIP=1
-    CLUSTER=$CLUSTER GPU=$GPU GENERATOR=$gen IMAGE=$image SCENE=$SCENE METHOD=$METHOD GENERATION=$GENERATION OBSERVATION=$OBSERVATION \
+    CLUSTER=$CLUSTER GPU=$GPU GENERATOR=$gen IMAGE=$image SCENE=$SCENE SELECTION=$SELECTION METHOD=$METHOD GENERATION=$GENERATION OBSERVATION=$OBSERVATION \
       POLICY=$POLICY SEED=$seed SIZE=$SIZE VAL_PARALLEL=$VAL_PARALLEL TEST_SHARDS=$TEST_SHARDS SKIP_TRAIN=$SKIP \
       TRAIN_OVERRIDES="$TRAIN_OVERRIDES" EXTRA="$EVAL_EXTRA" \
       "$REPO/scripts/task_policy_pipeline.sh" $task $port > "$LOG/policy_${gen}_${task}_seed$seed.log" 2>&1 \

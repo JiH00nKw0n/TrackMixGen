@@ -11,6 +11,7 @@
 set -uo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 CLUSTER=${CLUSTER:-a100}; GPU=${GPU:-1}; POOL_LANES=${POOL_LANES:-4}; SCENE=ours; METHOD=none; GENERATION=pool_robosuite_lowdim
+SELECTION=${SELECTION:-ours}   # the 2026-10 exploration pools: a source chosen at random for every subtask
 DATA_ROOT=$(make -s -C "$REPO" print-data-root CLUSTER="$CLUSTER")
 LOG=$DATA_ROOT/logs/baseline_lowdim; mkdir -p "$LOG"
 TASKS="three_piece_assembly square stack_three mug_cleanup hammer_cleanup threading coffee"   # longest pools first
@@ -19,11 +20,11 @@ log() { echo "[driver $(date +%H:%M:%S)] $*" | tee -a "$LOG/driver.log"; }
 
 pool_lane() {   # one task: pool, resets, dataset
   local t=$1
-  make -s -C "$REPO" generate TASK=$t SCENE=$SCENE METHOD=$METHOD GENERATION=$GENERATION CLUSTER=$CLUSTER \
+  make -s -C "$REPO" generate TASK=$t SCENE=$SCENE SELECTION=$SELECTION METHOD=$METHOD GENERATION=$GENERATION CLUSTER=$CLUSTER \
     OVERRIDES="generation.attempts=${ATTEMPTS[$t]}" > "$LOG/pool_$t.log" 2>&1 || { log "pool $t FAILED"; echo "pool $t" >> "$LOG/FAILURES"; return 1; }
   log "pool $t done: $(grep -h 'pool complete' "$LOG/pool_$t.log" | tail -1 | cut -c1-80)"
   make -s -C "$REPO" resets TASK=$t SCENE=$SCENE CLUSTER=$CLUSTER > "$LOG/resets_$t.log" 2>&1 || { log "resets $t FAILED"; echo "resets $t" >> "$LOG/FAILURES"; }
-  make -s -C "$REPO" dataset TASK=$t SCENE=$SCENE METHOD=$METHOD GENERATION=$GENERATION OBSERVATION=low_dim CLUSTER=$CLUSTER \
+  make -s -C "$REPO" dataset TASK=$t SCENE=$SCENE SELECTION=$SELECTION METHOD=$METHOD GENERATION=$GENERATION OBSERVATION=low_dim CLUSTER=$CLUSTER \
     OVERRIDES="size=1000" > "$LOG/dataset_$t.log" 2>&1 || { log "dataset $t FAILED"; echo "dataset $t" >> "$LOG/FAILURES"; }
 }
 
@@ -45,8 +46,8 @@ until [ -f "$TRAIN_SIF" ]; do log "waiting for $TRAIN_SIF"; sleep 300; done
 log "stage B: policies of every task at once on GPU $GPU"
 port=8800
 for t in $TASKS; do
-  [ -f "$DATA_ROOT/datasets/mimicgen/$t/$SCENE/$METHOD/${GENERATION##*/}/low_dim/n1000_seed0.hdf5" ] || { log "no dataset for $t, skipped"; continue; }
-  CLUSTER=$CLUSTER GPU=$GPU "$REPO/scripts/task_policy_pipeline.sh" $t $port > "$LOG/policy_$t.log" 2>&1 &
+  [ -f "$DATA_ROOT/datasets/mimicgen/$t/$SCENE/$SELECTION/$METHOD/${GENERATION##*/}/low_dim/n1000_seed0.hdf5" ] || { log "no dataset for $t, skipped"; continue; }
+  CLUSTER=$CLUSTER GPU=$GPU SELECTION=$SELECTION "$REPO/scripts/task_policy_pipeline.sh" $t $port > "$LOG/policy_$t.log" 2>&1 &
   port=$((port + 40))
   sleep 60     # stagger the dataset loads and model builds
 done

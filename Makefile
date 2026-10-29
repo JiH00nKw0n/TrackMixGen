@@ -21,6 +21,7 @@ cluster_value = $(filter-out null,$(strip $(shell sed -n 's/^$(1):[[:space:]]*\(
 DATA_ROOT  ?= $(or $(TMG_DATA_ROOT),$(call cluster_value,data_root),$(HOME)/tmg_data)
 TASK       ?= square
 SCENE      ?= official_d1
+SELECTION  ?= official     # source-demonstration selection rule: official | ours (configs/experiment/selection)
 METHOD     ?= none
 GENERATION ?= test/pilot20
 POLICY     ?= bc_rnn
@@ -38,7 +39,7 @@ ARCHIVE    ?= $(DATA_ROOT)/images/tmg_$(IMAGE).tar
 # 64 MB (sessiondir max size) and MimicGen assembles each chunk's demo file through a temporary directory there
 CONTAINER_TMP ?= $(or $(call cluster_value,container_tmp),$(DATA_ROOT)/tmp/container_tmp)
 PREP        = mkdir -p $(DATA_ROOT) $(CONTAINER_TMP) $(PREP_EXTRA)
-GEN_ARGS    = generator=$(GENERATOR) task=$(TASK) scene=$(SCENE) method=$(METHOD) generation=$(GENERATION) cluster=$(CLUSTER) $(OVERRIDES)
+GEN_ARGS    = generator=$(GENERATOR) task=$(TASK) scene=$(SCENE) selection=$(SELECTION) method=$(METHOD) generation=$(GENERATION) cluster=$(CLUSTER) $(OVERRIDES)
 REVISION   := $(shell git -C $(REPO) rev-parse --short HEAD 2>/dev/null || echo unknown)
 # the Isaac Lab images (SoftMimicGen, DexMimicGen) run Isaac Sim: GPU for generation, resets and evaluation. Kit needs
 # Vulkan; the NVIDIA runtime with NVIDIA_DRIVER_CAPABILITIES=all mounts the driver's Vulkan ICD (/etc/vulkan/icd.d/
@@ -120,14 +121,14 @@ sif:  ## build the singularity image SIF from a docker archive ARCHIVE (made wit
 sources:  ## download and prepare the source demonstrations of TASK
 	$(PREP) && $(CONTAINER_RUN) sources generator=$(GENERATOR) task=$(TASK)
 
-generate:  ## generate one pool (TASK, SCENE, METHOD, GENERATION, OVERRIDES)
+generate:  ## generate one pool (TASK, SCENE, SELECTION=official|ours, METHOD, GENERATION, OVERRIDES)
 	$(PREP) && $(CONTAINER_RUN) generate $(GEN_ARGS)
 
 verify-baseline:  ## official generator vs adapter with method=none on one chunk; must be identical
-	$(PREP) && $(CONTAINER_RUN) verify_baseline generator=$(GENERATOR) task=$(TASK) scene=$(SCENE) generation=$(GENERATION) cluster=$(CLUSTER) $(OVERRIDES)
+	$(PREP) && $(CONTAINER_RUN) verify_baseline generator=$(GENERATOR) task=$(TASK) scene=$(SCENE) selection=$(SELECTION) generation=$(GENERATION) cluster=$(CLUSTER) $(OVERRIDES)
 
-rank-sources:  ## order TASK's source demonstrations from its baseline pool (GENERATION=rank_human_demos) and write the ranking next to the generator config
-	$(PREP) && $(CONTAINER_RUN) rank_sources generator=$(GENERATOR) task=$(TASK) scene=$(SCENE) generation=$(GENERATION) cluster=$(CLUSTER) $(OVERRIDES)
+rank-sources:  ## order TASK's source demonstrations from its baseline pool (GENERATION=rank_human_demos, SELECTION as generated) and write the ranking next to the generator config
+	$(PREP) && $(CONTAINER_RUN) rank_sources generator=$(GENERATOR) task=$(TASK) scene=$(SCENE) selection=$(SELECTION) generation=$(GENERATION) cluster=$(CLUSTER) $(OVERRIDES)
 
 dataset:  ## write a training dataset from the finished pool (TASK, SCENE, METHOD, GENERATION, OBSERVATION=image|low_dim; OVERRIDES: size=... seed=...)
 	$(PREP) && $(CONTAINER_RUN) dataset $(GEN_ARGS) observation=$(OBSERVATION)

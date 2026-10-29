@@ -77,10 +77,13 @@
   남기는 방식). 둘째, 그 값으로 기준 풀 일곱 개를 다시 생성해야 한다. 최종 평가 전까지 이 두 가지가 끝나지 않으면 평가를 시작하지
   않는다.
 
-2026-10-29에 첫째 작업을 했다. `config_builder`는 프로토콜의 `select_src_per_subtask`와 `selection_strategy`가 null이면 템플릿의 하위작업별
-값을 그대로 두고, `pool_robosuite_image`가 두 값을 null로 두어 공식 선택 규칙을 쓴다(실패 시연 파일도 쓰지 않는다). `pool_robosuite_lowdim`과
-`rank_human_demos`는 탐색용 값(하위작업별 무작위)을 명시해 이미 만든 풀이 유효하게 남는다. 둘째 작업(공식 값으로 기준 풀 생성)은 MimicGen 기준선
-실행(`scripts/run_mimicgen_baseline.sh`, `docs/MIMICGEN_BASELINE_RUNBOOK.md`)이 한다.
+2026-10-29에 첫째 작업을 했고, 선택 규칙을 풀 설정과 분리한 독립 축으로 만들었다(사용자 결정). 설정 묶음 `configs/experiment/selection/`의
+`official`은 생성기의 공식 규칙(MimicGen은 템플릿 값, `config_builder`가 null을 받으면 하위작업별 템플릿 값을 그대로 둔다. CP-Gen은 원본 0번만),
+`ours`는 우리 규칙(MimicGen은 하위작업별 무작위, CP-Gen은 원본 전부. CP-Gen 쪽은 시범별 제약 구간이 생기기 전까지 오류를 낸다)이다. 어느 풀
+설정(영상, 저차원, 순위, 시험용)과도 조합할 수 있고 기본값은 `official`이다. 풀·데이터셋·실행 폴더는 장면 다음에 선택 규칙 이름이 들어간다
+(`pools/<생성기>/<과제>/<장면>/<선택 규칙>/<방법>/<생성 설정>`). 2026-10에 만든 MimicGen 풀(순위 풀, 저차원 탐색 풀)은 모두 `ours` 규칙이고
+그 폴더로 옮겼으며, Isaac Lab과 CP-Gen 풀은 `official` 폴더로 옮겼다. 둘째 작업(공식 값으로 기준 풀 생성)은 MimicGen 기준선 실행
+(`scripts/run_mimicgen_baseline.sh`, 기본 `SELECTION=official`)이 한다.
 
 현재 값과 공식 값의 차이가 결과에 미치는 영향은 다음과 같이 측정하고 추정했다.
 

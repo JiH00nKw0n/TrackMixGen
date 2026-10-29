@@ -8,12 +8,13 @@ defaults:
   - /generator: mimicgen
   - /task: ???
   - /scene: ours
+  - /selection: official
   - /generation: rank_human_demos
   - _self_
 
 # The baseline pool to read (the output folder of `tmg generate` with method=none and the same choices).
-pool: ${paths.pools}/${generator.name}/${task.name}/${scene.name}/none/${generation.name}
-output: ${paths.reports}/rank_sources/${generator.name}/${task.name}/${scene.name}/${generation.name}
+pool: ${paths.pools}/${generator.name}/${task.name}/${scene.name}/${selection.name}/none/${generation.name}
+output: ${paths.reports}/rank_sources/${generator.name}/${task.name}/${scene.name}/${selection.name}/${generation.name}
 command: rank_sources
 overrides: []
 write_config: true                # also write configs/experiment/generator/<generator>/ranking/<task>.yaml (the committed ranking)

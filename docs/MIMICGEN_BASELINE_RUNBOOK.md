@@ -35,8 +35,10 @@
 | Three Piece Assembly (`three_piece_assembly`) | 조각 두 개를 바닥판 위에 차례로 끼운다 | 4 |
 
 생성 설정은 MimicGen 공식 설정 템플릿(`mimicgen/exps/templates/robosuite/<과제>.json`)의 값을 그대로 쓴다. 우리 코드는 템플릿에
-시도 수, 시드, 입출력 경로, 저장할 카메라만 써 넣는다. 아래 표의 값은 그 템플릿에서 읽은 것이고, 우리 생성 설정 파일
-`configs/experiment/generation/pool_robosuite_image.yaml`은 원본 선택 항목을 비워 두어(null) 템플릿 값이 남게 한다.
+시도 수, 시드, 입출력 경로, 저장할 카메라만 써 넣는다. 아래 표의 값은 그 템플릿에서 읽은 것이다. 원본 선택 규칙은 별도 설정 묶음
+`selection`으로 고르고(`configs/experiment/selection/official.yaml`, 드라이버 변수 `SELECTION`, 기본값 `official`), 이 값이면 선택 항목을
+비워 두어 템플릿 값이 남는다. `SELECTION=ours`를 주면 우리 규칙(하위작업마다 원본을 무작위로 고른다)으로 같은 영상 풀을 만들 수 있고,
+풀·데이터셋·실행 폴더가 `ours`로 갈려 기준선과 섞이지 않는다.
 
 | 항목 | 값 |
 |---|---|
@@ -263,6 +265,7 @@ cd ~/TrackMixGen && CLUSTER=lab GPU=0 nohup scripts/run_mimicgen_baseline.sh > /
 |---|---|---|
 | `CLUSTER` | `local` | 3.5절의 머신 설정 이름 |
 | `GPU` | `0` | 학습과 정책 서버가 쓰는 CUDA 장치 번호 |
+| `SELECTION` | `official` | 원본 선택 규칙. `official`은 공식 템플릿 값(기준선), `ours`는 하위작업별 무작위 선택. 폴더 이름에 들어간다 |
 | `TASKS` | 일곱 과제 | 돌릴 과제 목록(공백으로 구분). 긴 풀부터 적혀 있다 |
 | `POLICIES` | `diffusion_policy bc_rnn` | 돌릴 정책 |
 | `SEEDS` | `202601 202602 202603` | 학습 시드 |
@@ -290,7 +293,7 @@ tail -f /data/tmg_data/logs/mimicgen_baseline/driver.log
 
 ```
 summary.json, summary.md              과제별 생성 성공률, 시드별 검증·시험 성공률, 세 시드의 평균과 표준편차
-mimicgen/<과제>/ours/none/pool_robosuite_image/image/
+mimicgen/<과제>/ours/official/none/pool_robosuite_image/image/
   generation/DONE.json                풀 요약: 시도 수, 성공 수, 묶음별 결과
   generation/attempts.jsonl           모든 시도 한 줄씩: 성공 여부, 고른 원본 시연 번호, 하위작업 기록, 걸린 시간
   generation/chunk_logs/              묶음 프로세스 로그
@@ -321,8 +324,8 @@ driver_logs/                          드라이버 로그
 
 ## 7. 단계별 수동 실행
 
-드라이버가 하는 일을 한 단계씩 손으로 돌릴 때 쓴다. 공통 변수는 `GENERATOR=mimicgen IMAGE=robosuite CLUSTER=lab SCENE=ours METHOD=none
-GENERATION=pool_robosuite_image OBSERVATION=image`다.
+드라이버가 하는 일을 한 단계씩 손으로 돌릴 때 쓴다. 공통 변수는 `GENERATOR=mimicgen IMAGE=robosuite CLUSTER=lab SCENE=ours SELECTION=official
+METHOD=none GENERATION=pool_robosuite_image OBSERVATION=image`다(`SELECTION`은 기본값이 `official`이라 생략해도 같다).
 
 ```bash
 make sources GENERATOR=mimicgen TASK=coffee CLUSTER=lab
@@ -392,5 +395,6 @@ Diffusion Policy는 ResNet18 인코더 두 개와 U-Net을 처음부터 학습�
 - Hammer Cleanup은 서랍 자산을 robosuite_task_zoo에서 읽는다. 이미지에 들어 있으므로 따로 할 일은 없다.
 - Mug Cleanup은 MimicGen이 실행 때 머그잔 자산 폴더에 xml 파일을 쓴다. 이미지 빌드가 그 폴더에 쓰기 권한을 주므로 따로 할 일은 없다.
 - 영상 렌더링은 Mesa 소프트웨어 렌더링이라 GPU를 쓰지 않는다. 그래서 생성과 평가 속도는 CPU 코어 수가 정한다.
-- 저차원 관측(`OBSERVATION=low_dim`)으로 돌리려면 영상 없는 풀(`GENERATION=pool_robosuite_lowdim`)을 따로 만들어야 하며, 그 설정은
-  탐색용 원본 선택 규칙(하위작업별 무작위)을 쓰므로 이 문서의 기준선과 다르다. 기준선은 영상으로만 돌린다.
+- 저차원 관측(`OBSERVATION=low_dim`)으로 돌리려면 영상 없는 풀(`GENERATION=pool_robosuite_lowdim`)을 따로 만든다. 원본 선택 규칙은 풀의
+  저장 방식과 무관하게 `SELECTION`으로 고르므로, 저차원 풀도 기본값 `official`이면 이 문서의 기준선과 같은 규칙으로 생성된다. 2026-10에
+  만든 저차원 탐색 풀은 `ours` 규칙이고 `.../ours/ours/none/pool_robosuite_lowdim/` 폴더에 있다. 이 문서의 기준선은 영상으로 돌린다.

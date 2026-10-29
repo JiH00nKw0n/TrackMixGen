@@ -2,13 +2,9 @@ defaults:
   - pool_robosuite_image
   - _self_
 # Full robosuite pool without images (same chunking and seeds as `pool_robosuite_image`): for low-dim datasets only.
-# Generation is about 1.6x faster per step without rendering. The source selection is the 2026-10 exploration value
-# (a source chosen at random for every subtask), written here explicitly so that the pools made with it stay valid
-# after pool_robosuite_image moved to the official selection (2026-10-29); failed attempts are kept as before.
+# Generation is about 1.6x faster per step without rendering. The source selection rule is the `selection` group
+# (official | ours), as for every pool; the 2026-10 exploration pools of this size were made with selection=ours.
 name: pool_robosuite_lowdim
 protocol:
   camera_names: []
   keep_failed: true
-  select_src_per_subtask: true
-  selection_strategy: random
-  selection_strategy_kwargs: null

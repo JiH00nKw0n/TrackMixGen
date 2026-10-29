@@ -74,7 +74,7 @@ You select a file of a group on the command line with `group=name`. The generato
 so its groups keep short names:
 
 ```bash
-tmg generate generator=mimicgen task=square scene=ours method=trackmix generation=pool_robosuite_image cluster=isaac
+tmg generate generator=mimicgen task=square scene=ours selection=official method=trackmix generation=pool_robosuite_image cluster=isaac
 ```
 
 | Group | Files | Meaning |
@@ -94,9 +94,9 @@ tmg generate generator=mimicgen task=square scene=ours method=trackmix generatio
 Every command writes exactly one output folder. For `generate`, `dataset` and `train` they are:
 
 ```
-<paths.pools>/<generator>/<task>/<scene>/<method>/<generation>/
-<paths.datasets>/<generator>/<task>/<scene>/<method>/<generation>/<observation>/n<size>_seed<seed>.hdf5
-<paths.runs>/<generator>/<task>/<scene>/<method>/<generation>/<observation>/<policy>/seed<seed>/
+<paths.pools>/<generator>/<task>/<scene>/<selection>/<method>/<generation>/
+<paths.datasets>/<generator>/<task>/<scene>/<selection>/<method>/<generation>/<observation>/n<size>_seed<seed>.hdf5
+<paths.runs>/<generator>/<task>/<scene>/<selection>/<method>/<generation>/<observation>/<policy>/seed<seed>/
 ```
 
 A low-dim dataset can be written from an image pool or from a `pool_robosuite_lowdim` pool; an image dataset needs a pool

@@ -2,9 +2,9 @@
 """Gather every result file of a baseline experiment into one folder (and a .tar.gz) for analysis elsewhere.
 
     scripts/collect_results.py --data-root <root> --out <folder> --policy diffusion_policy --seeds 202601 202602 202603 \
-        --job softmimicgen/rope/ours/none/pool_isaac/image [--job ...] [--logs <driver log folder>]
+        --job softmimicgen/rope/ours/official/none/pool_isaac/image [--job ...] [--logs <driver log folder>]
 
-A job is ``<generator>/<task>/<scene>/<method>/<generation>/<observation>``. For each job the bundle holds, without
+A job is ``<generator>/<task>/<scene>/<selection>/<method>/<generation>/<observation>`` (the folder layout of pools, datasets and runs). For each job the bundle holds, without
 any model weights or image data:
 
     <job>/generation/DONE.json, plan.json, provenance.json, resolved_config.yaml   the pool summary and its config
@@ -109,7 +109,7 @@ def main() -> int:
     ap.add_argument("--out", required=True)
     ap.add_argument("--policy", default="diffusion_policy")
     ap.add_argument("--seeds", nargs="+", type=int, default=[202601, 202602, 202603])
-    ap.add_argument("--job", action="append", required=True, help="<generator>/<task>/<scene>/<method>/<generation>/<observation>")
+    ap.add_argument("--job", action="append", required=True, help="<generator>/<task>/<scene>/<selection>/<method>/<generation>/<observation>")
     ap.add_argument("--logs", default=None, help="driver log folder to include")
     ap.add_argument("--no-tar", action="store_true")
     a = ap.parse_args()
@@ -118,10 +118,10 @@ def main() -> int:
     summary = {"data_root": str(root), "policy": a.policy, "seeds": a.seeds, "jobs": {}}
     lines = ["# Results", "", "| generator/task | generation success | seed | validated checkpoints | best validation | selected | test success (95% CI) |", "|---|---|---|---|---|---|---|"]
     for job in a.job:
-        gen, task, scene, method, generation, observation = job.split("/")
+        gen, task, scene, selection, method, generation, observation = job.split("/")
         jo = out / gen / task
-        g = collect_generation(root / "pools" / gen / task / scene / method / generation, jo / "generation")
-        ds_dir = root / "datasets" / gen / task / scene / method / generation / observation
+        g = collect_generation(root / "pools" / gen / task / scene / selection / method / generation, jo / "generation")
+        ds_dir = root / "datasets" / gen / task / scene / selection / method / generation / observation
         for f in list(ds_dir.glob("*.json")) + list(ds_dir.glob("*.yaml")) if ds_dir.exists() else []:
             copy(f, jo / "dataset" / f.name)
         for f in (root / "resets" / gen / task / scene).glob("*") if (root / "resets" / gen / task / scene).exists() else []:
@@ -129,7 +129,7 @@ def main() -> int:
                 copy(f, jo / "resets" / f.name)
         seeds = {}
         for seed in a.seeds:
-            seeds[str(seed)] = collect_run(root / "runs" / gen / task / scene / method / generation / observation / a.policy / f"seed{seed}", jo / f"seed{seed}")
+            seeds[str(seed)] = collect_run(root / "runs" / gen / task / scene / selection / method / generation / observation / a.policy / f"seed{seed}", jo / f"seed{seed}")
         rates = [s["test"]["success_rate"] for s in seeds.values() if s["test"] and s["test"]["success_rate"] is not None]
         agg = {"mean": (statistics.mean(rates) if rates else None), "std": (statistics.stdev(rates) if len(rates) > 1 else None), "n_seeds": len(rates)}
         summary["jobs"][job] = {"generation": g, "seeds": seeds, "test_over_seeds": agg}

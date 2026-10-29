@@ -1,5 +1,6 @@
 # @package _global_
-# tmg generate: one pool of generation attempts for one (generator, task, scene, method, generation) choice.
+# tmg generate: one pool of generation attempts for one (generator, task, scene, selection, method, generation) choice.
+# selection (official | ours) is the source-demonstration selection rule, independent of the pool's size and recording.
 # Choose one file per group on the command line, e.g.
 #   tmg generate generator=mimicgen task=square scene=official_d1 method=none generation=test/pilot20
 defaults:
@@ -8,11 +9,12 @@ defaults:
   - /generator: mimicgen
   - /task: ???
   - /scene: official_d1
+  - /selection: official
   - /method: none
   - /generation: test/pilot20
   - _self_
 
 # Result folder of the pool. Every stage writes exactly one folder.
-output: ${paths.pools}/${generator.name}/${task.name}/${scene.name}/${method.name}/${generation.name}
+output: ${paths.pools}/${generator.name}/${task.name}/${scene.name}/${selection.name}/${method.name}/${generation.name}
 command: generate
 overrides: []

@@ -7,9 +7,10 @@ defaults:
   - /generator: mimicgen
   - /task: ???
   - /scene: official_d1
+  - /selection: official
   - /method: none
   - /generation: test/pilot20
   - _self_
-output: ${paths.pools}/_verify_baseline/${generator.name}/${task.name}/${scene.name}/${generation.name}
+output: ${paths.pools}/_verify_baseline/${generator.name}/${task.name}/${scene.name}/${selection.name}/${generation.name}
 command: verify_baseline
 overrides: []

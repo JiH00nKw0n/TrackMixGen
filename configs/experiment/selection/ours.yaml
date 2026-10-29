@@ -1,0 +1,9 @@
+# Source-demonstration selection rule: OURS. The 2026-10 exploration value for MimicGen (a source chosen at random for every
+# subtask, so every source is sampled in every subtask; the ranking pools of 2026-10 and the low-dim exploration pools were
+# made with it), and for CP-Gen the use of all source demonstrations (one chosen per attempt), which needs per-demonstration
+# constraint windows in the source file (pending, 2026-10-29). SoftMimicGen and DexMimicGen: same as official.
+name: ours
+select_src_per_subtask: true
+selection_strategy: random
+selection_strategy_kwargs: null
+all_sources: true

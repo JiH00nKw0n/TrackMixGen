@@ -8,13 +8,14 @@ defaults:
   - /generator: mimicgen
   - /task: ???
   - /scene: ours
+  - /selection: official
   - /method: none
   - /generation: pool_robosuite_image
   - /observation: image
   - _self_
 
-pool: ${paths.pools}/${generator.name}/${task.name}/${scene.name}/${method.name}/${generation.name}
-output: ${paths.datasets}/${generator.name}/${task.name}/${scene.name}/${method.name}/${generation.name}/${observation.name}/n${size}_seed${seed}.hdf5
+pool: ${paths.pools}/${generator.name}/${task.name}/${scene.name}/${selection.name}/${method.name}/${generation.name}
+output: ${paths.datasets}/${generator.name}/${task.name}/${scene.name}/${selection.name}/${method.name}/${generation.name}/${observation.name}/n${size}_seed${seed}.hdf5
 command: dataset
 overrides: []
 size: 1000                        # successful demonstrations to select, uniformly without replacement

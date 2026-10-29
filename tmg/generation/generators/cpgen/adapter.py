@@ -54,6 +54,12 @@ class CPGenGenerator(RobosuiteGenerator):
         """Fields of ``demo_aug.generate.Config`` for the chunk (serialized into the chunk spec)."""
         task = self.task
         start, end = (int(v) for v in task.get("source_indices", [0, 1]))
+        if (self.cfg.get("selection") or {}).get("all_sources"):
+            # selection=ours: every source demonstration, one chosen per attempt. The released annotation holds constraint
+            # windows for demonstration 0 only; the per-demonstration windows (constraint_data in the source file) and the
+            # per-attempt choice in the runtime are pending (2026-10-29).
+            raise NotImplementedError("selection=ours for CP-Gen needs per-demonstration constraint windows in the source file; "
+                                      "pending (2026-10-29). Use selection=official (source demonstration 0, the released annotation).")
         cfg = {"seed": int(chunk.seed), "demo_path": str(self.source_path()), "load_demos_start_idx": start,
                "load_demos_end_idx": end, "custom_constraints_path": str(task["annotation"]), "n_demos": int(chunk.attempts),
                "require_n_demos": False, "env_name": self.env_name(), "save_dir": str(folder / "generated"),

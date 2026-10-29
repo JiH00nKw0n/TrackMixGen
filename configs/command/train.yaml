@@ -8,6 +8,7 @@ defaults:
   - /generator: mimicgen
   - /task: ???
   - /scene: ours
+  - /selection: official
   - /method: none
   - /generation: pool_robosuite_image
   - /observation: image
@@ -18,9 +19,9 @@ defaults:
 dataset:
   size: 1000
   seed: 0
-  path: ${paths.datasets}/${generator.name}/${task.name}/${scene.name}/${method.name}/${generation.name}/${observation.name}/n${dataset.size}_seed${dataset.seed}.hdf5
+  path: ${paths.datasets}/${generator.name}/${task.name}/${scene.name}/${selection.name}/${method.name}/${generation.name}/${observation.name}/n${dataset.size}_seed${dataset.seed}.hdf5
 seed: 1                           # training seed (model init, batch order)
-output: ${paths.runs}/${generator.name}/${task.name}/${scene.name}/${method.name}/${generation.name}/${observation.name}/${policy.name}/seed${seed}
+output: ${paths.runs}/${generator.name}/${task.name}/${scene.name}/${selection.name}/${method.name}/${generation.name}/${observation.name}/${policy.name}/seed${seed}
 device: cuda
 command: train
 overrides: []

@@ -12,7 +12,8 @@ export SINGULARITYENV_CUDA_VISIBLE_DEVICES=$GPU CUDA_VISIBLE_DEVICES=$GPU
 DATA_ROOT=$(make -s -C "$REPO" print-data-root CLUSTER="$CLUSTER")
 LOG=$DATA_ROOT/logs/cpgen_coffee; mkdir -p "$LOG"
 log() { echo "[cpgen $(date +%H:%M:%S)] $*" | tee -a "$LOG/driver.log"; }
-G="GENERATOR=cpgen IMAGE=cpgen CLUSTER=$CLUSTER TASK=$TASK SCENE=$SCENE"
+SELECTION=${SELECTION:-official}
+G="GENERATOR=cpgen IMAGE=cpgen CLUSTER=$CLUSTER TASK=$TASK SCENE=$SCENE SELECTION=$SELECTION"
 
 log "sources"
 make -s -C "$REPO" sources $G > "$LOG/sources.log" 2>&1 || { log "sources FAILED"; exit 1; }
@@ -33,11 +34,11 @@ log "$(grep -h 'pool complete' "$LOG/pool.log" | tail -1 | cut -c1-100)"
 log "dataset ($SIZE demos, image)"
 make -s -C "$REPO" dataset $G METHOD=$METHOD GENERATION=$GENERATION OBSERVATION=$OBSERVATION OVERRIDES="size=$SIZE" > "$LOG/dataset.log" 2>&1 \
   || { log "dataset FAILED (see $LOG/dataset.log)"; exit 1; }
-DATASET_C=/data/datasets/cpgen/$TASK/$SCENE/$METHOD/${GENERATION##*/}/$OBSERVATION/n${SIZE}_seed0.hdf5
+DATASET_C=/data/datasets/cpgen/$TASK/$SCENE/$SELECTION/$METHOD/${GENERATION##*/}/$OBSERVATION/n${SIZE}_seed0.hdf5
 log "fixed scenes in the generation environment"
 make -s -C "$REPO" resets $G OVERRIDES="dataset=$DATASET_C" > "$LOG/resets.log" 2>&1 || { log "resets FAILED (see $LOG/resets.log)"; exit 1; }
 log "policy stage: $POLICY, image, GPU $GPU"
-CLUSTER=$CLUSTER GPU=$GPU GENERATOR=cpgen IMAGE=cpgen METHOD=$METHOD GENERATION=$GENERATION OBSERVATION=$OBSERVATION POLICY=$POLICY SIZE=$SIZE \
+CLUSTER=$CLUSTER GPU=$GPU GENERATOR=cpgen IMAGE=cpgen SELECTION=$SELECTION METHOD=$METHOD GENERATION=$GENERATION OBSERVATION=$OBSERVATION POLICY=$POLICY SIZE=$SIZE \
   "$REPO/scripts/task_policy_pipeline.sh" $TASK $PORT > "$LOG/policy.log" 2>&1
 grep -h "^RESULT" "$LOG/policy.log" | tee -a "$LOG/driver.log"
 log "done"; echo "CPGEN_COFFEE_DONE $(date)" > "$LOG/DONE"

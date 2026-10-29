@@ -60,6 +60,8 @@ Opening의 범위를 넓힌 것이다(2026-10-29 결정, `configs/experiment/gen
 로봇 관절의 시작 잡음(정규분포, 표준편차 0.02 rad)은 세 과제 모두 공식값이다. 공식 쪽 성공률은 성공 20개짜리 실행에서, ours는 성공
 50개짜리 실행에서 센 것이라 표본 크기가 다르다.
 
+폴더 이름에는 장면 다음에 원본 선택 규칙 이름이 들어간다(`official`, 2026-10-29부터. Isaac Lab 생성기는 공식 규칙만 쓰므로 늘 `official`이고 드라이버 변수 `SELECTION`의 기본값이다).
+
 저차원 관측으로도 돌릴 수 있다(`OBSERVATION=low_dim`, 2026-10-29). 다섯 과제의 과제 설정에 robosuite의 object 관측 수준의 항목이 정의되어 있고
 (Rope 54차원, Towel 111차원, Pick Place 13차원, Microwave 14차원, Bottle Placement and Door Closing 27차원; `docs/GENERATORS.md` 2.10절), 생성과
 평가가 그 항목을 환경의 관측에 넣는다. 영상 풀 하나에서 영상 데이터셋과 저차원 데이터셋을 모두 만들 수 있다. 2026-10-29 전에 만든 풀에는 이 항목이 없다.
@@ -215,7 +217,7 @@ Isaac Lab 3.0, Isaac Lab-Arena)이라 가장 크고(약 44 GB) 오래 걸린다.
 ### 3.7 동작 확인
 
 아래 두 명령은 Rope의 원본 3개를 내려받고, 20회 시도짜리 시범 생성을 한 번 돈다. 끝나면
-`/data/tmg_data/pools/softmimicgen/rope/ours/none/pilot20/DONE.json`이 생기고 그 안에 시도 수와 성공 수가 적힌다.
+`/data/tmg_data/pools/softmimicgen/rope/ours/official/none/pilot20/DONE.json`이 생기고 그 안에 시도 수와 성공 수가 적힌다.
 
 ```bash
 make sources GENERATOR=softmimicgen IMAGE=isaaclab-soft TASK=rope CLUSTER=ada
@@ -226,7 +228,7 @@ make generate GENERATOR=softmimicgen IMAGE=isaaclab-soft TASK=rope SCENE=ours ME
 ```
 
 첫 실행은 Isaac Sim이 자산을 내려받고 셰이더를 컴파일하느라 10분 넘게 걸릴 수 있다. 로그는
-`/data/tmg_data/pools/softmimicgen/rope/ours/none/pilot20/logs/`에 있다. 여기까지 되면 4절의 전체 실행으로 넘어간다.
+`/data/tmg_data/pools/softmimicgen/rope/ours/official/none/pilot20/logs/`에 있다. 여기까지 되면 4절의 전체 실행으로 넘어간다.
 
 다섯 과제의 전체 경로(원본, 생성, 장면 시드, 데이터셋, 학습, 검증, 선택, 시험, 결과 묶음)를 작은 규모로 끝까지 확인하려면 4절의
 명령에 `MINI=1`을 붙인다. 과제마다 50회 시도짜리 풀, 시연 10개 데이터셋, 200갱신 학습, 검증과 시험 각 6장면으로 같은 코드 경로를
@@ -315,7 +317,7 @@ GPU 메모리가 부족하면 `VAL_PARALLEL`(동시에 검증하는 체크포인
 make sources GENERATOR=softmimicgen IMAGE=isaaclab-soft TASK=rope CLUSTER=ada
 ```
 
-풀을 생성한다. 결과는 `<data_root>/pools/softmimicgen/rope/ours/none/pool_isaac/`이고 `DONE.json`이 생기면 끝이다.
+풀을 생성한다. 결과는 `<data_root>/pools/softmimicgen/rope/ours/official/none/pool_isaac/`이고 `DONE.json`이 생기면 끝이다.
 
 ```bash
 make generate GENERATOR=softmimicgen IMAGE=isaaclab-soft TASK=rope SCENE=ours METHOD=none GENERATION=pool_isaac CLUSTER=ada
@@ -327,7 +329,7 @@ make generate GENERATOR=softmimicgen IMAGE=isaaclab-soft TASK=rope SCENE=ours ME
 make resets GENERATOR=softmimicgen IMAGE=isaaclab-soft TASK=rope SCENE=ours CLUSTER=ada
 ```
 
-학습 데이터셋을 쓴다. 결과는 `<data_root>/datasets/softmimicgen/rope/ours/none/pool_isaac/image/n1000_seed0.hdf5`다.
+학습 데이터셋을 쓴다. 결과는 `<data_root>/datasets/softmimicgen/rope/ours/official/none/pool_isaac/image/n1000_seed0.hdf5`다.
 
 ```bash
 make dataset GENERATOR=softmimicgen IMAGE=isaaclab-soft TASK=rope SCENE=ours METHOD=none GENERATION=pool_isaac OBSERVATION=image CLUSTER=ada OVERRIDES="size=1000"
@@ -342,13 +344,13 @@ CLUSTER=ada GPU=0 GENERATOR=softmimicgen IMAGE=isaaclab-soft GENERATION=pool_isa
 체크포인트 하나만 검증하거나 시험하려면 `make validate`와 `make evaluate`를 쓴다. `RUN`은 학습 결과 폴더, `CKPT`는 그 아래 체크포인트 폴더다.
 
 ```bash
-make validate GENERATOR=softmimicgen IMAGE=isaaclab-soft TASK=rope SCENE=ours OBSERVATION=image CLUSTER=ada RUN=<data_root>/runs/softmimicgen/rope/ours/none/pool_isaac/image/diffusion_policy/seed202601 CKPT=<그 RUN>/checkpoints/0100000 PORT=8900
+make validate GENERATOR=softmimicgen IMAGE=isaaclab-soft TASK=rope SCENE=ours OBSERVATION=image CLUSTER=ada RUN=<data_root>/runs/softmimicgen/rope/ours/official/none/pool_isaac/image/diffusion_policy/seed202601 CKPT=<그 RUN>/checkpoints/0100000 PORT=8900
 ```
 
 결과 묶음만 다시 만들려면 호스트에서 다음을 실행한다.
 
 ```bash
-python3 scripts/collect_results.py --data-root <data_root> --out <data_root>/reports/isaaclab_baseline --job softmimicgen/rope/ours/none/pool_isaac/image --job dexmimicgen/pick_place/ours/none/pool_isaac/image --logs <data_root>/logs/isaaclab_baseline
+python3 scripts/collect_results.py --data-root <data_root> --out <data_root>/reports/isaaclab_baseline --job softmimicgen/rope/ours/official/none/pool_isaac/image --job dexmimicgen/pick_place/ours/none/pool_isaac/image --logs <data_root>/logs/isaaclab_baseline
 ```
 
 ## 8. 측정한 시간과 예상 시간
@@ -400,7 +402,7 @@ Dex Pick Place의 공식 문서 기준 생성 1,000개는 RTX 6000 Ada에서 약
   값(250, 220, 400, 250, 500)으로 바뀐 적이 있었고 같은 날 결정값으로 되돌렸다. 그 사이에 만들어진 검증 줄은 아래 규칙대로 지우고 다시 돈다.
 - 검증 결과는 실행 폴더의 `validation.jsonl`에 체크포인트마다 한 줄씩 쌓이고, 이미 줄이 있는 체크포인트는 다시 검증하지 않는다.
   평가 상한이나 검증 장면 수를 바꾼 뒤 같은 실행 폴더에서 다시 돌리려면 `validation.jsonl`과 `eval/val_h*` 폴더를 지우고 시작한다.
-- 같은 풀 폴더(`pools/<생성기>/<과제>/<장면>/<방법>/<생성 설정>`)에 `make generate`를 두 개 동시에 돌리면 청크 파일을 서로 덮어써 한쪽이 실패한다.
+- 같은 풀 폴더(`pools/<생성기>/<과제>/<장면>/<선택 규칙>/<방법>/<생성 설정>`)에 `make generate`를 두 개 동시에 돌리면 청크 파일을 서로 덮어써 한쪽이 실패한다.
   7절의 수동 실행과 4절의 드라이버를 같은 데이터 폴더에서 동시에 쓰지 않는다.
 - 원본 시연 수는 Soft Towel은 내려받아야 안다. `<data_root>/sources/softmimicgen/<과제>/source.manifest.json`의 `demos`에 적힌다.
 - `docker: Error response from daemon: could not select device driver`는 NVIDIA Container Toolkit이 없다는 뜻이다. 설치 뒤 도커를 다시 시작한다.

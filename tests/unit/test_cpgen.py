@@ -47,6 +47,9 @@ def test_cpgen_chunk_spec_and_method_overrides(tmp_path, monkeypatch):
     assert none.method["labels"] == "pre_noise" and none.scene_chain()["env_suffix"] == "D0" and none.env_name() == "Threading_D0"
     for t in TASKS:
         compose("generate", ["generator=cpgen", f"task={t}", "scene=ours", "method=none", "generation=test/pilot20"])
+    ours = make_generator(resolved(compose("generate", ["generator=cpgen", "task=coffee", "scene=ours", "selection=ours", "method=none", "generation=test/pilot20"])))
+    with pytest.raises(NotImplementedError):          # all sources need per-demonstration constraint windows (pending)
+        ours.prepare_chunk(plan_chunks(20, 20, 9000)[0], tmp_path / "ours")
 
 
 def test_cpgen_ours_scene_equals_mimicgen_ours_for_its_tasks():

@@ -5,32 +5,32 @@
 #   scripts/task_policy_pipeline.sh <task> <first port>      (the task uses ports <first port> .. <first port>+39:
 #   validation ports <first port>+<checkpoint index>, test shards from <first port>+20)
 # Variables: CLUSTER (a100), GPU (CUDA device for the train image, 1), GENERATOR (mimicgen), IMAGE (simulator image of the
-# rollouts, robosuite), METHOD (none), GENERATION (pool_robosuite_lowdim), OBSERVATION (low_dim), POLICY (bc_rnn), SEED (1), SCENE (ours),
+# rollouts, robosuite), SELECTION (source selection rule, official), METHOD (none), GENERATION (pool_robosuite_lowdim), OBSERVATION (low_dim), POLICY (bc_rnn), SEED (1), SCENE (ours),
 # SIZE (dataset demos, 1000), VAL_PARALLEL (5), TEST_SHARDS (6), SKIP_TRAIN (1: the run is already trained),
 # TRAIN_OVERRIDES (extra `tmg train` overrides), EXTRA (extra `tmg eval` overrides, e.g. max_scenes=6).
 set -uo pipefail
 TASK=$1; PORT0=$2
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 CLUSTER=${CLUSTER:-a100}; GPU=${GPU:-1}; METHOD=${METHOD:-none}; GENERATION=${GENERATION:-pool_robosuite_lowdim}
-OBSERVATION=${OBSERVATION:-low_dim}; POLICY=${POLICY:-bc_rnn}; SEED=${SEED:-1}; SCENE=${SCENE:-ours}
+OBSERVATION=${OBSERVATION:-low_dim}; POLICY=${POLICY:-bc_rnn}; SEED=${SEED:-1}; SCENE=${SCENE:-ours}; SELECTION=${SELECTION:-official}
 VAL_PARALLEL=${VAL_PARALLEL:-5}; TEST_SHARDS=${TEST_SHARDS:-6}; GENERATOR=${GENERATOR:-mimicgen}; IMAGE=${IMAGE:-robosuite}; SIZE=${SIZE:-1000}
 export SINGULARITYENV_CUDA_VISIBLE_DEVICES=$GPU CUDA_VISIBLE_DEVICES=$GPU
 DATA_ROOT=$(make -s -C "$REPO" print-data-root CLUSTER="$CLUSTER")
 RUNTIME_DATA_ROOT=$(make -s -C "$REPO" print-runtime-data-root CLUSTER="$CLUSTER")
-RUN=$DATA_ROOT/runs/$GENERATOR/$TASK/$SCENE/$METHOD/${GENERATION##*/}/$OBSERVATION/$POLICY/seed$SEED
-DATASET_C=$RUNTIME_DATA_ROOT/datasets/$GENERATOR/$TASK/$SCENE/$METHOD/${GENERATION##*/}/$OBSERVATION/n${SIZE}_seed0.hdf5
+RUN=$DATA_ROOT/runs/$GENERATOR/$TASK/$SCENE/$SELECTION/$METHOD/${GENERATION##*/}/$OBSERVATION/$POLICY/seed$SEED
+DATASET_C=$RUNTIME_DATA_ROOT/datasets/$GENERATOR/$TASK/$SCENE/$SELECTION/$METHOD/${GENERATION##*/}/$OBSERVATION/n${SIZE}_seed0.hdf5
 export GENERATOR IMAGE
 # CP-Gen evaluates in the generation environment rebuilt from its dataset's env_args (robosuite 1.5); the Isaac Lab
 # generators build their environment from the task id and need nothing from the dataset
 [ "$GENERATOR" = cpgen ] && export EXTRA="dataset=$DATASET_C ${EXTRA:-}"
-C="GENERATOR=$GENERATOR TASK=$TASK SCENE=$SCENE METHOD=$METHOD GENERATION=$GENERATION OBSERVATION=$OBSERVATION POLICY=$POLICY SEED=$SEED CLUSTER=$CLUSTER OVERRIDES=dataset.size=$SIZE"
+C="GENERATOR=$GENERATOR TASK=$TASK SCENE=$SCENE SELECTION=$SELECTION METHOD=$METHOD GENERATION=$GENERATION OBSERVATION=$OBSERVATION POLICY=$POLICY SEED=$SEED CLUSTER=$CLUSTER OVERRIDES=dataset.size=$SIZE"
 log() { echo "[$TASK $(date +%H:%M:%S)] $*"; }
 validated() { [ -f "$RUN/validation.jsonl" ] && grep -q "/$1\"" "$RUN/validation.jsonl"; }
 port_busy() { python3 -c "import socket,sys; s=socket.socket(); s.settimeout(1); sys.exit(0 if s.connect_ex(('127.0.0.1', int(sys.argv[1])))==0 else 1)" "$1"; }
 
 log "train -> $RUN"
 if [ "${SKIP_TRAIN:-0}" = 1 ]; then log "train skipped (SKIP_TRAIN=1)"; else
-make -s -C "$REPO" train GENERATOR=$GENERATOR TASK=$TASK SCENE=$SCENE METHOD=$METHOD GENERATION=$GENERATION OBSERVATION=$OBSERVATION POLICY=$POLICY SEED=$SEED CLUSTER=$CLUSTER \
+make -s -C "$REPO" train GENERATOR=$GENERATOR TASK=$TASK SCENE=$SCENE SELECTION=$SELECTION METHOD=$METHOD GENERATION=$GENERATION OBSERVATION=$OBSERVATION POLICY=$POLICY SEED=$SEED CLUSTER=$CLUSTER \
   OVERRIDES="dataset.size=$SIZE ${TRAIN_OVERRIDES:-}" || { log "TRAIN FAILED"; exit 1; }
 fi
 log "validate checkpoints ($VAL_PARALLEL at a time)"
@@ -67,7 +67,7 @@ folders = sorted(list((run / "eval").glob("test_h*/" + sel.name + "/eval_summary
                  + list((run / "eval").glob("test/" + sel.name + "/eval_summary.json")), key=lambda p: p.stat().st_mtime)
 summary = json.load(open(folders[-1]))
 b = summary["by_split"].get("test") or summary["all"]
-print(f"RESULT {run.parts[-7]} {sel.name} horizon {summary.get('horizon')}: test success {b['n_success']}/{b['n']} = {b['success_rate']:.3f} "
+print(f"RESULT {run.parts[-8]} {sel.name} horizon {summary.get('horizon')}: test success {b['n_success']}/{b['n']} = {b['success_rate']:.3f} "
       f"(95% CI {b['ci_low']:.3f}-{b['ci_high']:.3f})")
 PY
 log "done"

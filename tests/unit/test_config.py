@@ -11,7 +11,8 @@ def test_generate_composes_and_resolves(monkeypatch, tmp_path):
     assert plain["generator"]["name"] == "mimicgen"
     assert plain["task"]["name"] == "square"
     assert plain["method"]["name"] == "none"
-    assert plain["output"] == f"{tmp_path}/pools/mimicgen/square/official_d1/none/pilot20"
+    assert plain["output"] == f"{tmp_path}/pools/mimicgen/square/official_d1/official/none/pilot20"
+    assert plain["selection"]["name"] == "official"
     assert plain["task"]["source"].startswith(str(tmp_path))
 
 
@@ -80,3 +81,19 @@ def test_every_generation_config_composes_and_is_named_after_its_file(tmp_path, 
         g = plain["generation"]
         assert g["name"] == f.stem and {"attempts", "chunk", "seed_offset", "protocol"} <= set(g), option
         assert plain["output"].endswith(f"/none/{f.stem}"), option
+
+
+def test_selection_rule_is_independent_of_the_pool_config(monkeypatch, tmp_path):
+    """selection=official|ours sets the source selection of any robosuite pool and names a folder after the scene."""
+    monkeypatch.setenv("TMG_DATA_ROOT", str(tmp_path))
+    for generation in ("pool_robosuite_image", "pool_robosuite_lowdim", "rank_human_demos", "test/pilot20"):
+        official = resolved(compose("generate", ["generator=mimicgen", "task=square", "scene=ours", f"generation={generation}"]))
+        ours = resolved(compose("generate", ["generator=mimicgen", "task=square", "scene=ours", "selection=ours", f"generation={generation}"]))
+        assert official["generation"]["protocol"]["select_src_per_subtask"] is None and official["generation"]["protocol"]["selection_strategy"] is None
+        assert ours["generation"]["protocol"]["select_src_per_subtask"] is True and ours["generation"]["protocol"]["selection_strategy"] == "random"
+        name = generation.split("/")[-1]
+        assert official["output"].endswith(f"/square/ours/official/none/{name}") and ours["output"].endswith(f"/square/ours/ours/none/{name}")
+    ds = resolved(compose("dataset", ["generator=mimicgen", "task=square", "scene=ours", "selection=ours", "generation=pool_robosuite_lowdim", "observation=low_dim"]))
+    assert "/square/ours/ours/none/pool_robosuite_lowdim" in ds["pool"] and "/square/ours/ours/none/pool_robosuite_lowdim/low_dim/" in ds["output"]
+    rank = resolved(compose("rank_sources", ["generator=mimicgen", "task=square", "scene=ours", "selection=ours"]))
+    assert rank["pool"].endswith("/square/ours/ours/none/rank_human_demos")
