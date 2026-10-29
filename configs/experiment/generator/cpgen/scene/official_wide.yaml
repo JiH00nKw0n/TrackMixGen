@@ -1,0 +1,12 @@
+# CP-Gen's official evaluation setting (decision 2026-10-29: CP-Gen runs in its own "Wide" environments, MimicGen in its own):
+# CP-Gen's <env_prefix>Wide class, which is MimicGen's D1 placement distribution plus random object scaling (each object's
+# size factor drawn per reset, e.g. Coffee pod and machine 0.6 to 1.1 with equal horizontal and equal vertical factors;
+# the per-task ranges are in cpgen_envs/environments/manipulation/*.py). Nothing is overridden. The fixed evaluation scenes
+# store each reset's model xml, so the drawn sizes are restored at evaluation.
+name: official_wide
+generator: cpgen
+env_class: "{env_prefix}Wide"
+env_suffix: Wide
+base_env_class: "{env_prefix}Wide"
+override_bounds: false
+reach_constraint: {enabled: false}

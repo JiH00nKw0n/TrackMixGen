@@ -1,11 +1,13 @@
-# Our scene for the CP-Gen experiments: the same ranges and reach constraint as the MimicGen experiments
-# (configs/experiment/generator/mimicgen/scene/ours.yaml) for the five tasks CP-Gen runs, so the two generators
-# are compared on one placement distribution. tests/unit/test_cpgen.py checks the two files agree.
-# Registered environment class is <env_prefix>_OURS, derived from MimicGen's <env_prefix>_D0 class.
+# Our scene for the CP-Gen experiments (decision 2026-10-29: CP-Gen runs in its own "Wide" environments): the placement
+# ranges and reach constraint of the MimicGen experiments (configs/experiment/generator/mimicgen/scene/ours.yaml; tests check
+# the two files agree) on top of CP-Gen's <env_prefix>Wide class, so every reset also draws the objects' size factors as
+# in CP-Gen's official evaluation (per-task ranges in cpgen_envs/environments/manipulation/*.py). MimicGen's own
+# experiments keep their environment without object scaling; the two generators are not run in one environment.
+# Registered environment class is <env_prefix>_OURS, derived from <env_prefix>Wide.
 name: ours
 generator: cpgen
 env_suffix: OURS
-base_env_suffix: D0
+base_env_class: "{env_prefix}Wide"
 override_bounds: true
 table_clip_m: 0.35
 reach_constraint: {base_xy: [-0.56, 0.0], enabled: true, max_rejects: 500, radius_m: 0.85}

@@ -152,8 +152,21 @@ def reach_constraint(node: Mapping) -> dict | None:
 
 
 def env_class_name(task: Mapping, scene: Mapping) -> str:
-    """``<task.env_prefix>_<scene.env_suffix>``."""
+    """``<task.env_prefix>_<scene.env_suffix>``, or the scene's ``env_class`` pattern formatted with the prefix.
+
+    ``env_class`` names classes whose name has no underscore, such as CP-Gen's ``CoffeeWide`` (``"{env_prefix}Wide"``).
+    """
+    if scene.get("env_class"):
+        return str(scene["env_class"]).format(env_prefix=task["env_prefix"])
     return f"{task['env_prefix']}_{scene['env_suffix']}"
+
+
+def base_env_class_name(task: Mapping, root: Mapping) -> str:
+    """The registered class the scene chain's root derives from: ``base_env_class`` pattern (``"{env_prefix}Wide"``) or
+    ``<env_prefix>_<base_env_suffix>`` (default suffix D1)."""
+    if root.get("base_env_class"):
+        return str(root["base_env_class"]).format(env_prefix=task["env_prefix"])
+    return f"{task['env_prefix']}_{root.get('base_env_suffix', BASE_SUFFIX)}"
 
 
 # class factories ----------------------------------------------------------------------------------
@@ -242,15 +255,15 @@ def register_env_class(task: Mapping, scene: Mapping, *, interface_name: str | N
     if name in _BUILT:
         return name
     chain = scene_chain(scene)
-    base_name = f"{task['env_prefix']}_{chain[0].get('base_env_suffix', BASE_SUFFIX)}"
+    base_name = base_env_class_name(task, chain[0])
     if base_name not in REGISTERED_ENVS:
-        raise KeyError(f"MimicGen does not register '{base_name}'")
+        raise KeyError(f"no registered robosuite environment '{base_name}' (MimicGen's or CP-Gen's environment packages)")
     interface = interface_name or task.get("datagen_interface") or f"MG_{task['env_prefix']}"
     object_xy = make_object_xy(str(interface))
     parent, parent_name = REGISTERED_ENVS[base_name], base_name
     task_name = str(task["name"])
     for node in chain:
-        cls_name = f"{task['env_prefix']}_{node['env_suffix']}"
+        cls_name = env_class_name(task, node)
         attrs: dict = {}
         if node.get("override_bounds", False):
             entries = effective_bounds(node, task_name)

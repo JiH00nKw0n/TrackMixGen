@@ -544,6 +544,16 @@ AutoData 어댑터는 `generation.protocol.camera_names`를 따른다(2026-10-29
 
 ## 3. CP-Gen (kevin-thankyou-lin/cpgen@1e7c1fc4)
 
+### 3.0 장면: CP-Gen은 자기 Wide 환경에서 돈다 (2026-10-29 결정)
+
+CP-Gen 논문의 주 실험은 물체 크기가 리셋마다 바뀌는 "Wide" 환경(CP-Gen이 다시 구현한 MimicGen 환경의 D1 배치 범위 + 물체별 크기 배율,
+예를 들어 Coffee는 포드와 머신 0.6에서 1.1배, Threading은 바늘 0.8에서 1.2배에 삼각대는 바늘보다 1.1배 크게)이다. 결정은 "CP-Gen은 CP-Gen 환경에서,
+MimicGen은 MimicGen 환경에서 따로"다. CP-Gen의 공식 장면 `official_wide`는 `<과제>Wide` 클래스 그대로이고, 우리 장면 `ours`는 그 클래스를 부모로
+우리 배치 범위(MimicGen의 `ours`와 같은 값)를 얹으므로 크기 변화가 함께 들어간다. MimicGen 쪽 환경(robosuite 1.4.1)에는 크기 조절 기능이 없고 두
+생성기를 한 환경에 맞추지 않는다. 장면 파일은 `env_class`와 `base_env_class`에 `"{env_prefix}Wide"`처럼 밑줄 없는 클래스 이름 패턴을 적을 수 있다.
+평가의 고정 장면(`tmg resets`)은 리셋마다 모델 xml을 저장하므로 뽑힌 크기도 그대로 복원된다. 2026-10-27의 Coffee 재현(3.y절)은 크기 변화가 없는
+`<과제>_D0` 기반 장면에서 한 것이라 이 결정 이후의 수치와 직접 비교되지 않는다.
+
 CP-Gen은 원본 구간을 다시 재생하지 않는다. 시도마다 주석된 키포인트 제약을 새 물체 자세에 맞춰 다시 풀고(제약 걸음),
 그 시작점까지 cuRobo로 운동 계획을 세운다(계획 걸음). `CPPolicy.get_action`은 대기열이 비면 다음 제약을 풀어 계획 걸음과
 제약 걸음을 `action_queue`에 채우고, 한 걸음에 하나씩 꺼낸다. `DemoGenerator.generate_demo`는 꺼낸 행동에 공식 균등

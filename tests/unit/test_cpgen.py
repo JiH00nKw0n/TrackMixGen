@@ -40,11 +40,13 @@ def test_cpgen_chunk_spec_and_method_overrides(tmp_path, monkeypatch):
     assert c["load_demos_start_idx"] == 0 and c["load_demos_end_idx"] == 1 and c["use_wandb"] is False
     assert c["custom_constraints_path"].endswith("cpgen/coffee/constraints.json")
     assert spec.method["mixing"]["enabled"] is False and spec.method["tracking"]["enabled"] is True and spec.method["labels"] == "pre_noise"
-    assert spec.scene["base_env_suffix"] == "D0" and spec.scene["override_bounds"] is True
+    assert spec.scene["base_env_class"] == "{env_prefix}Wide" and spec.scene["override_bounds"] is True   # CP-Gen runs in its Wide environments
     assert gen.demo_layout()["demo_glob"] == "generated_obs.hdf5" and gen.demo_layout()["labels_from_records"] is False
     assert (tmp_path / "chunk" / "cpgen_config.json").exists()
     none = make_generator(resolved(compose("generate", ["generator=cpgen", "task=threading", "scene=official_d0", "method=none", "generation=test/pilot20"])))
     assert none.method["labels"] == "pre_noise" and none.scene_chain()["env_suffix"] == "D0" and none.env_name() == "Threading_D0"
+    wide = make_generator(resolved(compose("generate", ["generator=cpgen", "task=threading", "scene=official_wide", "method=none", "generation=test/pilot20"])))
+    assert wide.env_name() == "ThreadingWide" and wide.scene_chain()["override_bounds"] is False      # the official Wide class itself
     for t in TASKS:
         compose("generate", ["generator=cpgen", f"task={t}", "scene=ours", "method=none", "generation=test/pilot20"])
     ours = make_generator(resolved(compose("generate", ["generator=cpgen", "task=coffee", "scene=ours", "selection=ours", "method=none", "generation=test/pilot20"])))
