@@ -22,8 +22,10 @@
 
 논문 계획의 다섯 과제는 SoftMimicGen의 Rope(밧줄을 U자로 만들기), Towel(수건 접기)와 DexMimicGen의 GR1 Pick Place(사람형 로봇이
 물체를 집어 상자에 넣기), Microwave Opening(전자레인지 문 열기), Bottle Placement and Door Closing(병을 냉장고에 넣고 문 닫기)이다.
-실행 스크립트는 다섯 과제를 모두 돈다. 뒤의 두 과제는 NVIDIA AutoData(Isaac Lab-Arena 위의 DexMimicGen)로 돌며 네 번째 이미지
-`isaaclab-autodata`가 필요하다(3.6절). Jenga 과제 설정도 있지만 계획에 없으므로 기본 목록에서 뺐다(`SOFT_TASKS`로 넣을 수 있다).
+실행 스크립트는 다섯 과제를 모두 돈다. DexMimicGen 세 과제는 모두 NVIDIA AutoData(DexMimicGen을 다시 구현한 NVIDIA의 생성 도구,
+Isaac Lab 3.0과 Isaac Lab-Arena 위에서 돈다)로 생성하며 이미지 `isaaclab-dex` 하나를 쓴다(3.6절). Pick Place는 Isaac Lab Mimic의
+환경을 그 환경 안에서 그대로 쓰고, 나머지 두 과제는 Arena의 환경이다(2026-10-29 결정. 그 전에는 Pick Place가 Isaac Lab 2.x 이미지로,
+두 Arena 과제가 `autodata`라는 별도 생성기로 돌았다). Jenga 과제 설정도 있지만 계획에 없으므로 기본 목록에서 뺐다(`SOFT_TASKS`로 넣을 수 있다).
 
 생성기 설정은 공식 환경 설정 파일의 값을 그대로 쓴다. 우리 코드는 공식 생성 스크립트에 시도 수, 시드, 입출력 파일만 넘기고 나머지는
 건드리지 않는다. 아래 표의 값은 공식 소스에서 읽은 것이다.
@@ -185,7 +187,7 @@ sudo mkdir -p /data/tmg_data && sudo chown -R $USER:$USER /data/tmg_data
 make print-data-root CLUSTER=ada
 ```
 
-### 3.6 이미지 네 개 빌드
+### 3.6 이미지 세 개 빌드
 
 저장소 최상위에서 실행하며, 각각 1에서 2시간 걸리고 인터넷이 필요하다. 코드와 설정은 실행 때 컨테이너에 마운트되므로 저장소를
 갱신해도 다시 빌드하지 않는다(의존 패키지가 바뀔 때만 다시 빌드한다).
@@ -202,12 +204,9 @@ make build IMAGE=isaaclab-dex
 make build IMAGE=train
 ```
 
-```bash
-make build IMAGE=isaaclab-autodata
-```
-
-끝나면 `docker images`에 `tmg/isaaclab-soft`, `tmg/isaaclab-dex`, `tmg/isaaclab-autodata`, `tmg/train`이 보여야 한다. 네 번째 이미지는
-Isaac Sim 6.1 기반이라 가장 크고(약 30 GB) 오래 걸린다.
+끝나면 `docker images`에 `tmg/isaaclab-soft`, `tmg/isaaclab-dex`, `tmg/train`이 보여야 한다. `isaaclab-dex`는 AutoData 스택(Isaac Sim 6.1,
+Isaac Lab 3.0, Isaac Lab-Arena)이라 가장 크고(약 44 GB) 오래 걸린다. 2026-10-29 전에 같은 이름으로 만든 Isaac Lab 2.x 이미지가 있다면
+`docker tag`로 다른 이름을 붙여 두고 새로 빌드한다.
 
 ### 3.7 동작 확인
 
@@ -291,7 +290,8 @@ GPU 메모리가 부족하면 `VAL_PARALLEL`(동시에 검증하는 체크포인
 ## 6. 난수와 재현성
 
 - 생성 시드. 청크 k의 시드는 `seed_offset + k`(30001, 30002, 30003, 30004)다. 공식 스크립트에는 `--seed`가 없어서, Isaac Lab 과제는
-  환경 설정의 `datagen_config.seed`에, AutoData 과제는 청크마다 복사한 과제 기술 파일의 `generation_policy.seed`에 써 넣는다.
+  환경 설정의 `datagen_config.seed`에(SoftMimicGen), DexMimicGen 세 과제는 청크마다 복사한 AutoData 과제 기술 파일의 `generation_policy.seed`에
+  써 넣는다.
 - 데이터셋 선택 시드. 풀의 성공 시도 가운데 1,000개를 고르는 시드는 0이다(`n1000_seed0.hdf5`).
 - 고정 평가 장면. 장면 번호 i의 시드는 `SeedSequence([202600, i])`로 정해지고 파일에 적힌다. 롤아웃은 `env.reset()` 직전에 그 값으로
   환경, 토치, 넘파이, `random`을 모두 초기화한다. 그래서 어느 실행, 어느 정책, 어느 조건에서도 장면 번호 i의 초기 배치는 같다.
@@ -303,7 +303,7 @@ GPU 메모리가 부족하면 `VAL_PARALLEL`(동시에 검증하는 체크포인
 ## 7. 단계별 수동 실행
 
 문제를 좁힐 때는 단계를 따로 돈다. 변수는 `GENERATOR`(softmimicgen 또는 dexmimicgen), `IMAGE`(isaaclab-soft 또는 isaaclab-dex),
-`TASK`(rope, towel, pick_place, microwave, bottle_door, 그리고 계획 밖의 jenga)다. AutoData 두 과제는 `GENERATOR=autodata IMAGE=isaaclab-autodata`로 돈다. 아래는 Rope 예다.
+`TASK`(rope, towel, pick_place, microwave, bottle_door, 그리고 계획 밖의 jenga)다. DexMimicGen 세 과제는 모두 `GENERATOR=dexmimicgen IMAGE=isaaclab-dex`로 돈다. 아래는 Rope 예다.
 
 원본 시연을 내려받는다. 결과는 `<data_root>/sources/softmimicgen/rope/source.hdf5`와 매니페스트(원본 수, md5)다.
 
@@ -378,9 +378,13 @@ Dex Pick Place의 공식 문서 기준 생성 1,000개는 RTX 6000 Ada에서 약
 
 ## 9. 알려진 제한과 문제 해결
 
-- Microwave Opening과 Bottle Placement and Door Closing은 NVIDIA AutoData(Isaac Lab-Arena)의 DexMimicGen 과제라 `isaaclab-autodata`
-  이미지로 돈다. Arena 자산은 실행 때 Isaac 자산 서버와 Lightwheel 자산 서버(api.lightwheel.net)에서 내려받으므로 그 두 곳에 인터넷이
-  닿아야 한다. 혼합과 추종 방법은 이 두 과제에 아직 연결되지 않았다(기준선 `method=none`만 된다).
+- DexMimicGen 세 과제는 NVIDIA AutoData로 `isaaclab-dex` 이미지에서 돈다. Microwave Opening과 Bottle Placement and Door Closing의 Arena
+  자산은 실행 때 Isaac 자산 서버와 Lightwheel 자산 서버(api.lightwheel.net)에서 내려받으므로 그 두 곳에 인터넷이 닿아야 한다. 혼합 방법은
+  세 과제 모두에 연결되어 있고, 추종 방법은 한 시도의 모든 하위작업이 같은 원본을 쓰는 과제에서만 돈다. Pick Place는 그렇고(공식 설정
+  `select_src_per_subtask: false`), Microwave와 Bottle은 공식 설정이 하위작업마다 원본을 고르므로 추종을 켜면 시작하자마자 멈춘다
+  (`NotImplementedError`). 이 두 과제에서 추종을 쓰려면 과제 기술 파일의 원본 선택 방식을 바꾸는 결정이 필요하다.
+- 파드용 네이티브 실행(`scripts/native_runtime.py`)의 `isaaclab-dex`는 옛 Isaac Lab 2.x 환경을 뜻하므로 2026-10-29부터 거부한다.
+  `scripts/bootstrap_native.py`에 AutoData 스택 단계가 생기기 전까지 Dex 세 과제는 도커 이미지로만 돈다.
 - Microwave Opening의 공식 환경은 로봇, 전자레인지, 문의 시작 열림 정도를 모두 고정값으로 두고 무작위화 항목이 없다. 그래서 이 과제의
   검증 25장면과 시험 300장면은 초기 상태가 같고, 에피소드마다 다른 정책 시드와 물리 시뮬레이션의 비결정성만 다르다. 장면 시드 파일은
   만들어지지만 초기 상태를 바꾸지 않는다. Bottle Placement and Door Closing은 병 위치만 흔들며(측정한 폭 x 약 8 mm, y 약 4 mm) 냉장고와
