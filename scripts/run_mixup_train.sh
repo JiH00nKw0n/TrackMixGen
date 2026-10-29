@@ -108,5 +108,5 @@ while :; do
   sleep 300
 done
 wait
-log "all runs started have ended; failures: $(tr '\n' ';' < "$LOG/FAILURES" 2>/dev/null)"
+log "all runs started have ended; failures: $(cat "$LOG/FAILURES" 2>/dev/null | tr '\n' ';')"
 log "done"
