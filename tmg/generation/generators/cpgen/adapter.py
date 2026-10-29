@@ -45,23 +45,33 @@ class CPGenGenerator(RobosuiteGenerator):
 
         return fetch(self.task, self.generator_cfg)
 
+    def all_sources(self) -> bool:
+        """selection.all_sources: generate from every source demonstration (one chosen per attempt) instead of demo 0 only."""
+        return bool((self.cfg.get("selection") or {}).get("all_sources"))
+
     def check_sources(self) -> list[str]:
-        """Both the source file and its annotation must exist."""
+        """Both the source file and its annotation must exist; with every source in use, the per-demonstration windows too."""
         missing = [str(p) for p in (Path(self.task["source"]), Path(self.task["annotation"])) if not p.exists()]
+        if not missing and self.all_sources():
+            from tmg.generation.generators.cpgen.windows import has_constraint_data
+
+            if not has_constraint_data(str(self.task["source"])):
+                missing.append(f"{self.task['source']}: no per-demonstration constraint_data (run `tmg sources` for this task)")
         return missing
 
     def cpgen_config(self, chunk: Chunk, folder: Path) -> dict:
         """Fields of ``demo_aug.generate.Config`` for the chunk (serialized into the chunk spec)."""
         task = self.task
         start, end = (int(v) for v in task.get("source_indices", [0, 1]))
-        if (self.cfg.get("selection") or {}).get("all_sources"):
-            # selection=ours: every source demonstration, one chosen per attempt. The released annotation holds constraint
-            # windows for demonstration 0 only; the per-demonstration windows (constraint_data in the source file) and the
-            # per-attempt choice in the runtime are pending (2026-10-29).
-            raise NotImplementedError("selection=ours for CP-Gen needs per-demonstration constraint windows in the source file; "
-                                      "pending (2026-10-29). Use selection=official (source demonstration 0, the released annotation).")
+        constraints_path = str(task["annotation"])
+        if self.all_sources():
+            # selection=ours: every source demonstration is loaded and the runtime picks one per attempt. The demonstrations'
+            # own constraint windows (constraint_data groups written by `tmg sources`, windows.py) are read by CP-Gen's
+            # load_demos, so the released file (demo 0's windows) is not passed.
+            start, end = 0, int(task.get("num_sources") or 0) or None
+            constraints_path = None
         cfg = {"seed": int(chunk.seed), "demo_path": str(self.source_path()), "load_demos_start_idx": start,
-               "load_demos_end_idx": end, "custom_constraints_path": str(task["annotation"]), "n_demos": int(chunk.attempts),
+               "load_demos_end_idx": end, "custom_constraints_path": constraints_path, "n_demos": int(chunk.attempts),
                "require_n_demos": False, "env_name": self.env_name(), "save_dir": str(folder / "generated"),
                "merge_demo_save_path": str(folder / GENERATED), "use_wandb": False}
         cfg.update(dict(task.get("cpgen_config") or {}))
@@ -83,7 +93,7 @@ class CPGenGenerator(RobosuiteGenerator):
             folder=str(folder), records_dir=str(folder / RECORDS_DIR),
             expected_outputs=[str(folder / RECORDS_DIR / ATTEMPTS_JSONL)],
             extra={"cpgen_config": config, "source_root": str(self.generator_cfg["source_root"]),
-                   "graft_hashes": dict(self.generator_cfg.get("graft_hashes") or {})})
+                   "graft_hashes": dict(self.generator_cfg.get("graft_hashes") or {}), "all_sources": self.all_sources()})
 
     def chunk_command(self, spec: ChunkSpec, spec_path: Path) -> list[str]:
         return [sys.executable, "-m", ENTRYPOINT, "--spec", str(spec_path)]

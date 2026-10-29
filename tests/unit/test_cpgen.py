@@ -50,8 +50,9 @@ def test_cpgen_chunk_spec_and_method_overrides(tmp_path, monkeypatch):
     for t in TASKS:
         compose("generate", ["generator=cpgen", f"task={t}", "scene=ours", "method=none", "generation=test/pilot20"])
     ours = make_generator(resolved(compose("generate", ["generator=cpgen", "task=coffee", "scene=ours", "selection=ours", "method=none", "generation=test/pilot20"])))
-    with pytest.raises(NotImplementedError):          # all sources need per-demonstration constraint windows (pending)
-        ours.prepare_chunk(plan_chunks(20, 20, 9000)[0], tmp_path / "ours")
+    spec = ours.prepare_chunk(plan_chunks(20, 20, 9000)[0], tmp_path / "ours")       # selection=ours: every source, no released file
+    c = spec.extra["cpgen_config"]
+    assert c["load_demos_start_idx"] == 0 and c["load_demos_end_idx"] == 10 and c["custom_constraints_path"] is None and spec.extra["all_sources"] is True
 
 
 def test_cpgen_ours_scene_equals_mimicgen_ours_for_its_tasks():

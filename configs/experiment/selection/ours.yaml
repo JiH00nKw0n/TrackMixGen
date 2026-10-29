@@ -1,7 +1,8 @@
-# Source-demonstration selection rule: OURS. The 2026-10 exploration value for MimicGen (a source chosen at random for every
-# subtask, so every source is sampled in every subtask; the ranking pools of 2026-10 and the low-dim exploration pools were
-# made with it), and for CP-Gen the use of all source demonstrations (one chosen per attempt), which needs per-demonstration
-# constraint windows in the source file (pending, 2026-10-29). SoftMimicGen and DexMimicGen: same as official.
+# Source-demonstration selection rule: OURS. MimicGen: the 2026-10 exploration value, a source chosen at random for every
+# subtask (so every source is sampled in every subtask; the ranking pools of 2026-10 and the low-dim exploration pools were
+# made with it). CP-Gen: every source demonstration, one chosen at random per attempt, using the per-demonstration constraint
+# windows that `tmg sources` writes into the source file (windows.py: CP-Gen's segmentation calibrated on demonstration 0).
+# SoftMimicGen and DexMimicGen: same as official.
 name: ours
 select_src_per_subtask: true
 selection_strategy: random

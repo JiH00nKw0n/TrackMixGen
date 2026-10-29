@@ -77,9 +77,13 @@ def pose_from_obs(obs: dict) -> np.ndarray:
 class CPGenRuntime:
     """The ``_tmg`` object the grafted ``generate_demo`` calls (anchors in the module docstring)."""
 
-    def __init__(self, method: Method, chunk_seed: int, records_dir: Path | None):
+    def __init__(self, method: Method, chunk_seed: int, records_dir: Path | None, all_sources: bool = False):
         self.method = method
         self.chunk_seed = int(chunk_seed)
+        # selection=ours: CP-Gen picks the constraint sequence (source demonstration) only in its reset-near-constraint
+        # mode and otherwise always uses sequence 0, so the runtime draws one per attempt from a private stream
+        self.all_sources = bool(all_sources)
+        self._source_rng = np.random.default_rng(np.random.SeedSequence([int(chunk_seed), 515151]))
         self.rec = AttemptRecorder()
         self.rec.configure(records_dir)
         self.records_dir = records_dir
@@ -105,6 +109,10 @@ class CPGenRuntime:
         self._attempt_t0 = time.time()
         self._reset_attempt_state()
         self.rec.begin_attempt()
+        sequences = getattr(generator.policy, "constraint_sequences", None)
+        if self.all_sources and sequences is not None and len(sequences) > 1:
+            generator.policy.current_constraint_sequence_idx = int(self._source_rng.integers(len(sequences)))
+            generator.policy.current_constraint_idx = 0
         robosuite_env = getattr(getattr(generator.env, "env", None), "env", None)
         self.rec.set_scene_meta(getattr(robosuite_env, SCENE_META_ATTR, None))
 
@@ -209,19 +217,20 @@ class CPGenRuntime:
                 self._gripper_states[EEF] = bool(g[0] > 0)
 
 
-def apply(method: Method, *, chunk_seed: int, records_dir: Path | None, graft_hashes: dict) -> dict:
+def apply(method: Method, *, chunk_seed: int, records_dir: Path | None, graft_hashes: dict, all_sources: bool = False) -> dict:
     """Install the grafted ``generate_demo``; returns a description for the chunk log."""
     from demo_aug.generate import DemoGenerator
 
     if _STATE["applied"]:
         raise RuntimeError("CP-Gen runtime already applied in this process")
-    runtime = CPGenRuntime(method, chunk_seed, records_dir)
+    runtime = CPGenRuntime(method, chunk_seed, records_dir, all_sources=all_sources)
     graft = build_graft(DemoGenerator.generate_demo, graft_hashes.get("generate_demo"))
     _STATE["original"] = DemoGenerator.generate_demo
     DemoGenerator.generate_demo = graft.compile({"_tmg": runtime})
     _STATE["applied"], _STATE["runtime"] = True, runtime
     return {"generate_demo": DemoGenerator.generate_demo.__tmg_graft__, "method": method.name, "labels": "pre_noise",
-            "tracking": method.follower_factory is not None, "records_dir": None if records_dir is None else str(records_dir)}
+            "tracking": method.follower_factory is not None, "records_dir": None if records_dir is None else str(records_dir),
+            "all_sources": bool(all_sources)}
 
 
 def build_graft(generate_demo, expected_hash: str | None) -> Graft:

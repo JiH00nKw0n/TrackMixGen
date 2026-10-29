@@ -55,7 +55,7 @@ def main(argv=None):
         print("[tmg] grafts DISABLED: running the official generator without records (identity check)", flush=True)
     else:
         method = build_method(spec["method"], chunk_seed=int(spec["chunk"]["seed"]))
-        info = runtime.apply(method, chunk_seed=int(spec["chunk"]["seed"]), records_dir=Path(spec["records_dir"]),
+        info = runtime.apply(method, chunk_seed=int(spec["chunk"]["seed"]), records_dir=Path(spec["records_dir"]), all_sources=bool(extra.get("all_sources")),
                              graft_hashes=dict(extra.get("graft_hashes") or {}))
         print(f"[tmg] grafts installed: {json.dumps(info, indent=1)}", flush=True)
     import demo_aug.generate as official
