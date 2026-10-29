@@ -70,12 +70,13 @@ def align_arena_starlette(path):
     target.write_text(aligned)
 
 
-def checkout(url, path, revision, *, soft_pillow_patch=False, arena_starlette_patch=False):
+def checkout(url, path, revision, *, soft_pillow_patch=False, arena_starlette_patch=False, generated_untracked=()):
     if not path.exists():
         run(["git", "clone", "--filter=blob:none", url, path])
     dirty = subprocess.check_output(["git", "-C", str(path), "status", "--porcelain"], text=True)
     if dirty:
-        allowed = False
+        allowed = bool(generated_untracked) and all(
+            line.startswith('?? ') and line[3:] in generated_untracked for line in dirty.splitlines())
         if soft_pillow_patch and revision == SOFT_LAB_COMMIT and dirty == f" M {SOFT_PILLOW_FILE}\n":
             _, aligned = soft_pillow_contents(path)
             allowed = (path / SOFT_PILLOW_FILE).read_text() == aligned
@@ -184,7 +185,8 @@ def install_autodata(root):
     src = root / "src/isaaclab-autodata"
     src.mkdir(parents=True, exist_ok=True)
     arena, auto = src / "IsaacLab-Arena", src / "AutoData"
-    checkout("https://github.com/isaac-sim/IsaacLab-Arena", arena, AUTODATA_ARENA_COMMIT)
+    checkout("https://github.com/isaac-sim/IsaacLab-Arena", arena, AUTODATA_ARENA_COMMIT,
+             generated_untracked=("constraints.txt", "pylock.toml"))
     run(["git", "-c", "url.https://github.com/.insteadOf=git@github.com:", "-C", arena,
          "submodule", "update", "--init", "submodules/IsaacLab"])
     lab = arena / "submodules/IsaacLab"
