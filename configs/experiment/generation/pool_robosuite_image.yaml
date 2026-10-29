@@ -9,13 +9,16 @@ attempts: 10000
 chunk: 250
 seed_offset: 30000                # chunk seeds are seed_offset + 1, + 2, ...
 protocol:
-  keep_failed: true
+  keep_failed: false              # failed attempts are not written to MimicGen's demo_failed.hdf5 (with images, a failed attempt is
+                                  # about 13 MB; our records keep every attempt's steps and outcome anyway). The low-dim and ranking
+                                  # pools keep them (their own files say so).
   max_num_failures: null
   guarantee: false                # fixed attempt count (successes are selected at the dataset stage)
-  select_src_per_subtask: true    # current exploration value. The final evaluation must use MimicGen's template values: false
-  selection_strategy: random      # (one source demo per attempt) and nearest_neighbor_object for Square subtask 2 and Stack Three
-                                  # (needs per-subtask values in config_builder and regenerated pools); see docs/GENERATORS.md 1.4
-  selection_strategy_kwargs: null
+  select_src_per_subtask: null    # null = MimicGen's template values, the official source selection (decision 2026-10-27, docs/GENERATORS.md
+  selection_strategy: null        # 1.4): one source demonstration per attempt, chosen at random, except nearest_neighbor_object (the source
+  selection_strategy_kwargs: null # whose object pose is nearest, nn_k 3) for Square's second subtask and all Stack Three subtasks. The
+                                  # exploration pools of 2026-10 used per-subtask random selection; pool_robosuite_lowdim and
+                                  # rank_human_demos keep that value explicitly so their finished pools stay valid.
   action_noise: 0.05
   interpolation_steps: 5
   num_fixed_steps: 0

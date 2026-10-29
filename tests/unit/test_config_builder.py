@@ -23,3 +23,15 @@ def test_build_generation_config():
         assert sub["action_noise"] == 0.05 and sub["num_interpolation_steps"] == 5
     # the template itself is untouched
     assert TEMPLATE["task"]["task_spec"]["subtask_1"]["selection_strategy"] == "nearest_neighbor_object"
+
+
+def test_null_selection_keeps_the_official_per_subtask_values():
+    """generation.protocol.select_src_per_subtask / selection_strategy = null: the template's source selection stays."""
+    protocol = dict(PROTOCOL, select_src_per_subtask=None, selection_strategy=None, selection_strategy_kwargs=None)
+    cfg = build_generation_config(TEMPLATE, protocol, env_name="Square_OURS", source_dataset="/data/s.hdf5",
+                                  output_folder="/out", attempts=250, seed=30001)
+    assert cfg["experiment"]["generation"]["select_src_per_subtask"] is False       # the template's value (one source per attempt)
+    spec = cfg["task"]["task_spec"]
+    assert spec["subtask_1"]["selection_strategy"] == "nearest_neighbor_object" and spec["subtask_1"]["selection_strategy_kwargs"] == {"nn_k": 3}
+    assert spec["subtask_2"]["selection_strategy"] == "random" and spec["subtask_2"]["selection_strategy_kwargs"] is None
+    assert spec["subtask_1"]["action_noise"] == 0.05 and spec["subtask_1"]["num_interpolation_steps"] == 5   # the protocol's other values still apply

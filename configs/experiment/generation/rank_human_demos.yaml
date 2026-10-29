@@ -8,6 +8,10 @@ defaults:
 name: rank_human_demos
 protocol:
   camera_names: []                  # ranking needs no images
+  keep_failed: true                 # the 2026-10 values of the ranking pools, kept explicitly (pool_robosuite_image moved to the
+  select_src_per_subtask: true      # official selection on 2026-10-29): a source chosen at random for every subtask, so a 3,000-
+  selection_strategy: random        # attempt pool samples every source in every subtask about equally (the ranking is per subtask)
+  selection_strategy_kwargs: null
 attempts: 3000
 chunk: 250
 seed_offset: 20000

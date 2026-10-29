@@ -9,6 +9,8 @@ call per anchor into their syntax trees.
 
 Generators: MimicGen (robosuite), SoftMimicGen (Isaac Lab fork), DexMimicGen (NVIDIA AutoData on Isaac Lab 3.0 with Arena; GR1 Pick Place, Microwave Opening, Bottle Placement and Door Closing), CP-Gen (robosuite with cuRobo). The Isaac Lab
 baseline runs end to end on one GPU machine with `scripts/run_isaaclab_baseline.sh`; `docs/ISAACLAB_BASELINE_RUNBOOK.md` is the hand-off guide.
+The MimicGen baseline (seven tasks, Diffusion Policy and BC-RNN on images) runs with `scripts/run_mimicgen_baseline.sh`;
+`docs/MIMICGEN_BASELINE_RUNBOOK.md` is its hand-off guide (Korean).
 Pipeline: source demonstrations, generation pools, source rankings, datasets, policies (BC-RNN, Diffusion
 Policy, π0 through LeRobot 0.6.1), fixed-scene evaluation through a policy server. Every command composes one
 config and writes one output folder with the resolved config and a provenance record.

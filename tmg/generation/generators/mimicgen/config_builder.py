@@ -44,7 +44,9 @@ def build_generation_config(template: Mapping, protocol: Mapping, *, env_name: s
     Args:
         template: the official template json (``exps/templates/robosuite/<task>.json``), left unmodified.
         protocol: the ``generation.protocol`` mapping (attempt count policy, source selection, noise, stitch
-            steps, observations, rendering).
+            steps, observations, rendering). ``select_src_per_subtask`` and ``selection_strategy`` set to null keep
+            the template's values (the official source selection of the task: one source per attempt, and
+            nearest_neighbor_object for the subtasks whose template says so).
         env_name: registered environment class to generate in.
         source_dataset: path of the prepared source hdf5.
         output_folder: folder MimicGen writes its experiment folder into.
@@ -73,7 +75,8 @@ def build_generation_config(template: Mapping, protocol: Mapping, *, env_name: s
     generation["num_trials"] = int(attempts)
     generation["guarantee"] = bool(protocol["guarantee"])
     generation["keep_failed"] = bool(protocol["keep_failed"])
-    generation["select_src_per_subtask"] = bool(protocol["select_src_per_subtask"])
+    if protocol["select_src_per_subtask"] is not None:          # null keeps the template's value (official: false)
+        generation["select_src_per_subtask"] = bool(protocol["select_src_per_subtask"])
     experiment["task"]["name"] = env_name
     config["obs"]["collect_obs"] = bool(protocol["collect_obs"])
     config["obs"]["camera_names"] = list(protocol["camera_names"] or [])
@@ -85,8 +88,9 @@ def build_generation_config(template: Mapping, protocol: Mapping, *, env_name: s
     for key, subtask in config["task"]["task_spec"].items():
         if not key.startswith(SUBTASK_PREFIX):
             continue
-        subtask["selection_strategy"] = str(protocol["selection_strategy"])
-        subtask["selection_strategy_kwargs"] = None if kwargs is None else dict(kwargs)
+        if protocol["selection_strategy"] is not None:            # null keeps each subtask's template value (official:
+            subtask["selection_strategy"] = str(protocol["selection_strategy"])   # nearest_neighbor_object where the task
+            subtask["selection_strategy_kwargs"] = None if kwargs is None else dict(kwargs)   # template says so, random elsewhere)
         if protocol["action_noise"] is not None:
             subtask["action_noise"] = float(protocol["action_noise"])
         if protocol["interpolation_steps"] is not None:

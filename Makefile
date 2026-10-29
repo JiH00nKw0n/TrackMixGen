@@ -78,7 +78,9 @@ SINGULARITY_RUN = singularity exec $(SING_NV) $(SING_ENV_EXTRA) --cleanenv --no-
               --env TMG_DATA_ROOT=/data,HOME=/tmp,HF_HOME=/data/.cache/huggingface,MUJOCO_GL=egl,PYOPENGL_PLATFORM=egl $(SIF) tmg
 # the train image (python 3.12, torch, lerobot) runs with the GPU; the data root and repo are mounted the same way
 TRAIN_SIF   ?= $(or $(call cluster_value,train_sif),$(DATA_ROOT)/images/tmg_$(TRAIN_IMAGE).sif)
-DOCKER_TRAIN = docker run --rm -i $(if $(shell tty -s && echo t),-t,) --gpus all --shm-size 16g \
+# CUDA_VISIBLE_DEVICES in the caller's environment (the drivers' GPU variable) selects the GPU inside the train containers
+DOCKER_GPU_PICK = $(if $(CUDA_VISIBLE_DEVICES),-e CUDA_VISIBLE_DEVICES=$(CUDA_VISIBLE_DEVICES),)
+DOCKER_TRAIN = docker run --rm -i $(if $(shell tty -s && echo t),-t,) --gpus all --shm-size 16g $(DOCKER_GPU_PICK) \
               -v $(DATA_ROOT):/data -v $(REPO):/opt/tmg \
               -e TMG_DATA_ROOT=/data -e HOME=/tmp -e HF_HOME=/data/.cache/huggingface \
               --user $(shell id -u):$(shell id -g) tmg/$(TRAIN_IMAGE):$(TAG)
@@ -154,7 +156,7 @@ ifeq ($(RUNTIME),singularity)
 else ifeq ($(RUNTIME),native)
 	$(NATIVE) serve-start --data-root "$(DATA_ROOT)" --name "$(SERVER_NAME)" --port $(PORT) --checkpoint "$(CKPT)"
 else
-	docker run -d --rm --name $(SERVER_NAME) --gpus all --shm-size 16g --network host -v $(DATA_ROOT):/data -v $(REPO):/opt/tmg \
+	docker run -d --rm --name $(SERVER_NAME) --gpus all --shm-size 16g --network host $(DOCKER_GPU_PICK) -v $(DATA_ROOT):/data -v $(REPO):/opt/tmg \
 	  -e TMG_DATA_ROOT=/data -e HOME=/tmp --user $(shell id -u):$(shell id -g) tmg/$(TRAIN_IMAGE):$(TAG) serve checkpoint=$(CKPT) server.port=$(PORT) >/dev/null
 endif
 
