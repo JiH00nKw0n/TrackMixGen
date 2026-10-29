@@ -15,7 +15,7 @@ from tmg.generation.method.geometric_mix import (
     pose_distance,
 )
 from tmg.generation.method.interfaces import Method, MixContext, _mixer_types, build_method
-from tmg.generation.method.ranking import RankedSources, SourceRanking
+from tmg.generation.method.ranking import RankedSources, SourceRanking, load_ranking
 from tmg.generation.method.source_select import TopKSources
 
 
@@ -158,7 +158,8 @@ def test_top_k_draws_only_among_the_best_sources_from_its_private_stream():
 def test_build_method_registers_the_variants_and_the_source_rule():
     assert set(_mixer_types()) == {"guided", "transform", "junction"}
     m = build_method({"name": "mx_top3", "sources": {"top_k": 3, "ranking": "mimicgen/coffee"}}, chunk_seed=1)
-    assert isinstance(m.sources, TopKSources) and m.sources.allowed(0) == [9, 2, 8] and not m.is_identity
+    first_three = list(load_ranking("mimicgen/coffee").for_subtask(0).order[:3])       # the committed ranking file's order
+    assert isinstance(m.sources, TopKSources) and m.sources.allowed(0) == first_three and not m.is_identity
     assert build_method({"name": "none"}, chunk_seed=1).sources is None
 
 
@@ -196,7 +197,13 @@ def test_cpgen_source_rule_overrides_the_attempt_pick_and_keeps_the_stream_align
         cpgen_rt.SourcePicker(False, 11, rule=SimpleNamespace(pick=lambda s: 0))
 
 
-def test_cpgen_refuses_mixing_until_it_is_implemented():
-    method = Method(name="mx_transform", mixer=object(), follower_factory=None)
-    with pytest.raises(NotImplementedError, match="not implemented for CP-Gen"):
-        cpgen_rt.CPGenRuntime(method, chunk_seed=1, records_dir=None, all_sources=True)
+def test_decide_matches_mix_without_blending():
+    # same inputs, fresh mixers: decide picks the donor and weight mix uses, with the same draws and record keys
+    ctx = context(0, [pose(x=0.3), pose(x=0.1), pose(x=0.2)], [0.0, 0.0, 0.0], {"current_object_pose": pose()})
+    mixed = make(TransformMixer).mix(ctx)
+    record, donor, weight = make(TransformMixer).decide(ctx)
+    assert donor == mixed.record["source_b"] == 1 and weight == pytest.approx(mixed.record["transform"]["weight_a"], abs=1e-4)
+    assert set(mixed.record) - set(record) == {"alignment", "mixed"} or set(mixed.record) - set(record) == {"alignment"}
+    assert record["mixed"] is False                     # the caller sets it once its blend is done
+    kept = make(TransformMixer).decide(context(1, [pose(x=0.3), pose(x=0.1), pose(x=0.2)], [0.0] * 3, {"current_object_pose": pose()}))
+    assert kept[1] is None and kept[2] is None and "identity_reason" in kept[0]

@@ -11,20 +11,21 @@ from tmg.generation.method.ranking import (
 TASKS = ("square", "coffee", "threading", "stack_three")
 
 
-def test_committed_mimicgen_rankings_load_and_agree_with_the_2026_10_groups():
-    expected_good = {"square": {0: {1, 2, 4, 5, 9}, 1: {1, 2, 5, 6, 9}},
-                     "coffee": {0: {2, 5, 6, 8, 9}, 1: {0, 2, 3, 4, 6}},
-                     "threading": {0: {2, 3, 4, 6, 7}, 1: {0, 2, 5, 7, 8}},
-                     "stack_three": {0: {2, 5, 6, 8, 9}, 1: {1, 5, 7, 8, 9}, 2: {1, 4, 5, 7, 9}, 3: {0, 1, 4, 7, 8}}}
+def test_committed_mimicgen_rankings_load_and_are_consistent():
+    # the 3,000-attempt rankings (2026-10-29): every subtask orders all 10 sources by rate = successes / attempts,
+    # the attempts of a subtask add up to the pool's 3,000, and the top half is the good group
     for task in TASKS:
         ranking = load_ranking(f"mimicgen/{task}")
         assert ranking.generator == "mimicgen" and ranking.task == task and ranking.default is None
-        for subtask, good in expected_good[task].items():
-            ranked = ranking.for_subtask(subtask)
-            assert len(ranked.order) == 10
-            assert ranked.split(good_fraction=0.5)[0] == good
+        assert "3000 attempts" in ranking.basis and ranking.subtasks
+        for subtask, ranked in ranking.subtasks.items():
+            assert sorted(ranked.order) == list(range(10)), (task, subtask)
+            assert sum(ranked.attempts.values()) == 3000, (task, subtask)
+            for s in ranked.order:
+                assert ranked.rate[s] == pytest.approx(ranked.successes[s] / ranked.attempts[s], abs=1e-4)
             rates = [ranked.rate[s] for s in ranked.order]
             assert rates == sorted(rates, reverse=True)
+            assert ranked.split(good_fraction=0.5)[0] == set(ranked.order[:5])
 
 
 def test_soft_and_dex_rankings_use_a_default_order():

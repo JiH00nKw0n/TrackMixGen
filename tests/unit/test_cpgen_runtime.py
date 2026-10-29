@@ -50,7 +50,8 @@ def test_chunk_spec_and_command(tmp_path, monkeypatch):
     assert spec.expected_outputs == [str(folder / RECORDS_DIR / ATTEMPTS_JSONL)]
     assert list(spec.extra) == ["cpgen_config", "source_root", "graft_hashes", "all_sources"]
     assert spec.extra["all_sources"] is False and spec.extra["graft_hashes"] == {
-        "generate_demo": "a497e9da6ef4f84624c9646fd49ee55fae1dedaa93e428c90f8fa312972b40e2"}
+        "generate_demo": "a497e9da6ef4f84624c9646fd49ee55fae1dedaa93e428c90f8fa312972b40e2",
+        "solve_constraint": "efb3f236ae9e51ae2e38f98819ff2f0f5d40b5bdeda75c43df7bb6d984582711"}
     assert spec.extra["source_root"] == str(tmp_path / "cpgen_src")
     assert spec.extra["cpgen_config"] == json.loads((folder / "cpgen_config.json").read_text())
     assert gen.chunk_command(spec, folder / "chunk_spec.json") == [

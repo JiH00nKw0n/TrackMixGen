@@ -6,7 +6,7 @@ afterwards.
 """
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import NamedTuple
 
@@ -172,6 +172,48 @@ class GuidedMixer:
             gripper = gripper.reshape(-1)
         return gripper
 
+    def _decide(self, context: MixContext):
+        """The decision steps of one subtask without the blend: ``(record, donor, weight_a, primary)``.
+
+        ``donor`` is the chosen ``_Donor`` or None (then ``record["identity_reason"]`` says why the segment stays
+        unchanged); ``weight_a`` is one number or a callable ``n -> (n,) weights``; ``primary`` is
+        ``(object pose, inverse object pose, object-frame targets, raw gripper commands, event series)`` of the primary,
+        or None when no donor was chosen."""
+        call = self.calls
+        self.calls += 1
+        a = int(context.primary)
+        good, bad = self.groups(int(context.subtask_ind))
+        record = {"call": call, "subtask": int(context.subtask_ind), "source_a": a, "weight_a": self.weight_a,
+                  "mixed": False, "good": sorted(good)}
+        reason = self._identity_reason(context, a, good, bad)
+        if reason is not None:
+            record["identity_reason"] = reason
+            return record, None, None, None
+        obj_a = np.asarray(context.src_object_poses[a], dtype=float)
+        inv_a = invert(obj_a)
+        pa = transform_all(inv_a, context.primary_targets)
+        ga = np.asarray(context.primary_gripper, dtype=float)
+        sa = self._event_series(ga)
+        candidates = self._candidates(context, self._donor_pool(context, a, good), pa, sa)
+        record["eligible_donors"] = [c.index for c in candidates]
+        if not candidates:
+            record["identity_reason"] = "no compatible donor"
+            return record, None, None, None
+        donor, weight = self._choose(context, a, candidates, call, record)
+        if donor is None:
+            return record, None, None, None                   # _choose wrote the identity reason
+        return record, donor, weight, (obj_a, inv_a, pa, ga, sa)
+
+    def decide(self, context: MixContext) -> tuple[dict, int | None, float | Callable[[int], np.ndarray] | None]:
+        """Decide one subtask without blending, for a generator that blends the chosen pair itself (CP-Gen solves both
+        sources' constraints for the current scene first): ``(record, donor index or None, weight_a)``. The record has
+        the same keys ``mix`` writes, except the alignment of the blend. Takes the same private draws as ``mix``."""
+        record, donor, weight, _primary = self._decide(context)
+        if donor is None:
+            return record, None, None
+        record.update(source_b=int(donor.index), anchor_rotation_degrees=donor.angles)
+        return record, int(donor.index), weight
+
     def mix(self, context: MixContext) -> MixedSegment:
         """Mix one subtask segment (see the class docstring).
 
@@ -183,30 +225,11 @@ class GuidedMixer:
             ``MixedSegment`` with the (possibly) blended first eef pose, targets and gripper commands, expressed in
             the primary source's world frame, and a record of what happened.
         """
-        call = self.calls
-        self.calls += 1
-        a = int(context.primary)
-        good, bad = self.groups(int(context.subtask_ind))
-        record = {"call": call, "subtask": int(context.subtask_ind), "source_a": a, "weight_a": self.weight_a,
-                  "mixed": False, "good": sorted(good)}
+        record, donor, weight, primary = self._decide(context)
         identity = MixedSegment(context.primary_eef_start, context.primary_targets, context.primary_gripper, record)
-        reason = self._identity_reason(context, a, good, bad)
-        if reason is not None:
-            record["identity_reason"] = reason
-            return identity
-        obj_a = np.asarray(context.src_object_poses[a], dtype=float)
-        inv_a = invert(obj_a)
-        pa = transform_all(inv_a, context.primary_targets)
-        ga = np.asarray(context.primary_gripper, dtype=float)
-        sa = self._event_series(ga)
-        candidates = self._candidates(context, self._donor_pool(context, a, good), pa, sa)
-        record["eligible_donors"] = [c.index for c in candidates]
-        if not candidates:
-            record["identity_reason"] = "no compatible donor"
-            return identity
-        donor, weight = self._choose(context, a, candidates, call, record)
         if donor is None:
-            return identity                                   # _choose wrote the identity reason
+            return identity
+        obj_a, inv_a, pa, ga, sa = primary
         eef_a_obj = inv_a @ np.asarray(context.primary_eef_start, dtype=float)
         if not callable(weight):
             mixed_obj, grip, meta = mix_segments(pa, sa, donor.poses, donor.series, weight)

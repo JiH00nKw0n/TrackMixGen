@@ -27,9 +27,22 @@ position and axis-angle, gripper from its last element) and the error-adaptive f
 target from the measured end-effector pose of the observation; the policy's queue is kept in step with the
 follower's base index so the official noise rule (``in_constraint_segment``) still reads the right segment,
 and when the path is finished the queue is emptied and ``check_constraint`` set, exactly the state the
-official pop leaves behind. Source mixing has no counterpart in CP-Gen (it replays no source segment, it
-re-solves constraints), so the generator config disables mixing. ``method.labels`` is likewise fixed to
-``pre_noise`` because the official output already is; the executed (noisy) actions are kept in our records.
+official pop leaves behind. ``method.labels`` is fixed to ``pre_noise`` because the official output already is; the
+executed (noisy) actions are kept in our records.
+
+Source mixing (a method with a mixer, the mixup exploration's ``mx_*`` conditions): CP-Gen re-solves constraints
+instead of replaying segments, so the mixed quantity is the desired end-effector pose of every solved step, after
+both sources are solved for the current scene (``tmg.generation.generators.cpgen.mixing``). It needs a second graft,
+of ``CPPolicy.solve_constraint``, installed only for a method with a mixer:
+
+| anchor                                                          | grafted code                                      |
+|-----------------------------------------------------------------|---------------------------------------------------|
+| after ``X_obj0_transf, X_obj1_transf, X_eef_transf = find_best_transform(...)`` | ``_tmg.prepare_mix(self, constraint, obs, X_obj0_transf, X_obj1_transf, X_eef_transf)`` |
+| ``X_W_eef_des = compute_X_W_eef_des(...)`` in the step loop     | becomes ``X_W_eef_des = _tmg.mixed_eef_des(t_idx, compute_X_W_eef_des(...))`` |
+
+``prepare_mix`` decides the donor and solves its constraint; ``mixed_eef_des`` blends each step's official pose with
+the donor's. The official inverse kinematics, gripper commands and cuRobo plan then run on the blended poses. The
+generator config keeps mixing off for the original TrackMix methods (``mixup_only``, ``trackmix``).
 
 Source selection (``selection.all_sources``, ``extra["all_sources"]`` of the chunk spec): CP-Gen picks the constraint
 sequence (source demonstration) only in its reset-near-constraint mode and otherwise always uses sequence 0, so with
@@ -46,6 +59,7 @@ from scipy.spatial.transform import Rotation
 from tmg.core.records import SEG_BRIDGE, SEG_SKILL, AttemptRecorder
 from tmg.generation.execution import SegmentTable
 from tmg.generation.generators._shared import record_error_guard
+from tmg.generation.generators.cpgen import mixing
 from tmg.generation.graft import Graft, Installed, install_grafts
 from tmg.generation.method.interfaces import Method
 from tmg.generation.method.tracking import EndEffectorPath
@@ -113,10 +127,12 @@ class CPGenRuntime:
     """The ``_tmg`` object the grafted ``generate_demo`` calls (anchors in the module docstring)."""
 
     def __init__(self, method: Method, chunk_seed: int, records_dir: Path | None, all_sources: bool = False):
-        if method.mixer is not None:
-            # CP-Gen solves constraints instead of replaying segments; its transform-then-mix variant is not wired yet
-            raise NotImplementedError(f"method {method.name!r}: source mixing is not implemented for CP-Gen yet")
+        if method.mixer is not None and not all_sources:
+            raise ValueError(f"method {method.name!r}: source mixing needs every source loaded: use selection=ours")
         self.method = method
+        self._mix_plan: mixing.MixPlan | None = None      # donor poses of the constraint being solved (mixing only)
+        self._last_mix: dict | None = None                # mix record of that constraint, written with its subtask
+        self.official = None                              # demo_aug.generate (tests put a stand-in here)
         self.picker = SourcePicker(all_sources, chunk_seed, rule=method.sources)
         self.rec = AttemptRecorder()
         self.rec.configure(records_dir)
@@ -191,10 +207,12 @@ class CPGenRuntime:
         if n_bridge + n_skill != len(path):
             raise RuntimeError(f"CP-Gen queue has {len(path)} actions, the policy reports {n_bridge} + {n_skill}")
         constraint = policy.current_constraint
+        mix = {"mix": self._last_mix} if self._last_mix is not None else {}
+        self._last_mix, self._mix_plan = None, None
         self.rec.add_subtask(subtask_ind=int(policy.current_constraint_idx),
                              src_demo_ind=int(policy.current_constraint_sequence_idx),
                              constraint_name=getattr(constraint, "name", None), obj_names=list(getattr(constraint, "obj_names", []) or []),
-                             num_motion_plan_steps=n_bridge, num_constraint_steps=n_skill)
+                             num_motion_plan_steps=n_bridge, num_constraint_steps=n_skill, **mix)
         self._subtasks += 1
         self._segments = SegmentTable()
         self._segments.add(n_bridge, self.rec.begin_segment(SEG_BRIDGE), SEG_BRIDGE)   # bridge opened first, as before
@@ -220,6 +238,45 @@ class CPGenRuntime:
             policy.action_queue = []
             policy.check_constraint = True
         return {"action": pose_to_action(self._target, grippers[EEF]), "failure_type": None}
+
+    # source mixing (grafted into CPPolicy.solve_constraint) ----------------------------------------------------------
+    def prepare_mix(self, policy, constraint, obs: dict, X_obj0_transf, X_obj1_transf, X_eef_transf) -> None:
+        """Grafted after CP-Gen chose the primary's symmetry transforms: decide the donor of this constraint and, when
+        there is one, solve its constraint for the current scene (``mixing`` module docstring, steps 1 to 3). The donor
+        is solved by ``self.official.compute_X_W_eef_des`` (``demo_aug.generate``, imported on first use)."""
+        self._mix_plan, self._last_mix = None, None
+        if self.method.mixer is None:
+            return
+        idx, primary = int(policy.current_constraint_idx), int(policy.current_constraint_sequence_idx)
+        if constraint is not policy.constraint_sequences[primary][idx]:
+            self._last_mix = {"subtask": idx, "source_a": primary, "mixed": False,
+                              "identity_reason": "solve_constraint called for a constraint other than the current one"}
+            return
+        if self.official is None:
+            import demo_aug.generate
+
+            self.official = demo_aug.generate
+        official = self.official
+        context = mixing.source_context(policy.constraint_sequences, idx, primary, obs, official.quat2mat)
+        record, donor, weight = self.method.mixer.decide(context)
+        self._last_mix = record
+        if donor is None:
+            return
+        donor_constraint = policy.constraint_sequences[donor][idx]
+        donor_poses = np.stack([
+            official.compute_X_W_eef_des(donor_constraint, obs, policy.robot_configuration, policy.eef_configuration,
+                                         X_obj0_transf=X_obj0_transf, X_obj1_transf=X_obj1_transf, X_eef_transf=X_eef_transf,
+                                         src_t_idx=u, ignore_scaling=policy.ignore_scaling)
+            for u in range(mixing.window_length(donor_constraint))])
+        self._mix_plan = mixing.MixPlan(mixing.gripper_series(constraint), donor_poses, mixing.gripper_series(donor_constraint), weight)
+        record.update(mixed=True, alignment=self._mix_plan.meta)
+
+    def mixed_eef_des(self, t_idx: int, primary_pose):
+        """Grafted around the step loop's ``compute_X_W_eef_des``: the official pose of step ``t_idx``, blended with the
+        donor's when this constraint is mixed."""
+        if self._mix_plan is None:
+            return primary_pose
+        return self._mix_plan.pose(int(t_idx), primary_pose)
 
     def _seg_id_at(self, pos: int) -> int:
         return self._segments.seg_id_of(pos)
@@ -248,16 +305,18 @@ class CPGenRuntime:
 def apply(method: Method, *, chunk_seed: int, records_dir: Path | None, graft_hashes: dict, all_sources: bool = False) -> dict:
     """Install the grafted ``generate_demo``; returns a description for the chunk log."""
     global _INSTALLED
-    from demo_aug.generate import DemoGenerator
+    from demo_aug.generate import CPPolicy, DemoGenerator
 
     if _INSTALLED is not None:
         raise RuntimeError("CP-Gen runtime already applied in this process")
     runtime = CPGenRuntime(method, chunk_seed, records_dir, all_sources=all_sources)
-    graft = build_graft(DemoGenerator.generate_demo, graft_hashes.get("generate_demo"))
-    _INSTALLED = install_grafts([(DemoGenerator, "generate_demo", graft)], {"_tmg": runtime})
+    edits = [(DemoGenerator, "generate_demo", build_graft(DemoGenerator.generate_demo, graft_hashes.get("generate_demo")))]
+    if method.mixer is not None:
+        edits.append((CPPolicy, "solve_constraint", build_mix_graft(CPPolicy.solve_constraint, graft_hashes.get("solve_constraint"))))
+    _INSTALLED = install_grafts(edits, {"_tmg": runtime})
     return {**_INSTALLED.info, "method": method.name, "labels": "pre_noise",
             "tracking": method.follower_factory is not None, "records_dir": None if records_dir is None else str(records_dir),
-            "all_sources": runtime.all_sources}
+            "all_sources": runtime.all_sources, "mixing": method.mixer is not None}
 
 
 def build_graft(generate_demo, expected_hash: str | None) -> Graft:
@@ -268,6 +327,15 @@ def build_graft(generate_demo, expected_hash: str | None) -> Graft:
     g.insert_after_assign("state", "_tmg.record_step(action, action_to_take, reward, in_constraint_segment, system_noise_cfg)",
                           occurrence=1)
     g.insert_before_final_return("_tmg.end_attempt(self, episode_data)")
+    return g
+
+
+def build_mix_graft(solve_constraint, expected_hash: str | None) -> Graft:
+    """The two edits of ``CPPolicy.solve_constraint`` for source mixing (module docstring)."""
+    g = Graft(solve_constraint, expected_hash=expected_hash, label="CPPolicy.solve_constraint")
+    g.insert_after_assign("X_obj0_transf", "_tmg.prepare_mix(self, constraint, obs, X_obj0_transf, X_obj1_transf, X_eef_transf)",
+                          occurrence=1)
+    g.wrap_assign_value("X_W_eef_des", "_tmg.mixed_eef_des", extra_args=("t_idx",))
     return g
 
 
