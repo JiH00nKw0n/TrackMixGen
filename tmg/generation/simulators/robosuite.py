@@ -9,7 +9,8 @@ named ``<env_prefix>_<scene.env_suffix>``; robosuite registers classes by name o
 in every process that builds the environment. The ``official_d1`` scene registers nothing.
 
 Scene configs may name a ``parent`` scene; ranges are inherited leaf-first. The parent chain is resolved
-from the generator's ``scene`` folder by ``load_scene_chain``.
+from the generator's ``scene`` folder by ``load_scene_chain`` (the file reading is shared with the Isaac Lab
+layer in ``tmg.generation.simulators.scenes``; this module adds the robosuite validation).
 """
 from __future__ import annotations
 
@@ -18,72 +19,35 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 
 import numpy as np
-import yaml
 
-from tmg import CONFIGS_ROOT
+from tmg.generation.simulators import scenes
+from tmg.generation.simulators.scenes import (  # noqa: F401  re-exported: the scene file layout is shared by every generator
+    load_scene_file,
+    scene_chain,
+    scene_details_path,
+)
 
 TABLE_OFFSET = "table_offset"
 BASE_SUFFIX = "D1"
 SCENE_META_ATTR = "_tmg_scene_meta"
 INTERFACE_TYPE = "robosuite"
+INTERFACE_PREFIX = "MG_"                   # MimicGen names its environment interfaces MG_<env_prefix>
 _BUILT: dict[str, tuple[type, str]] = {}
 
 
 # scene data ---------------------------------------------------------------------------------------
-def scene_details_path(name: str, generator: str, root: Path | None = None) -> Path:
-    """``configs/experiment/generator/<generator>/scene/<name>.yaml``: the generator's scene ``name``."""
-    return Path(root or CONFIGS_ROOT) / "experiment" / "generator" / generator / "scene" / f"{name}.yaml"
-
-
-def load_scene_file(name: str, generator: str, root: Path | None = None) -> dict:
-    """The scene ``name`` of ``generator`` as a dict (``configs/experiment/generator/<generator>/scene/<name>.yaml``)."""
-    details = scene_details_path(name, generator, root)
-    if not details.exists():
-        raise FileNotFoundError(f"scene {name!r} of generator {generator!r} not found: {details}")
-    data = dict(yaml.safe_load(details.read_text()) or {})
-    data.setdefault("name", name)
-    data["generator"] = generator
-    return data
-
-
 def load_scene_chain(scene: Mapping, generator: str | None = None, root: Path | None = None) -> dict:
-    """The scene as a plain dict with the generator's details and ``parent`` inlined (recursively).
-
-    Args:
-        scene: the composed ``scene`` config (selector only, or details inline as the tests pass them).
-        generator: generator name; required when ``scene`` carries no ``env_suffix`` (selector only) and
-            taken from ``scene['generator']`` otherwise.
-    """
-    data = dict(scene)
-    generator = generator or data.get("generator")
-    if "env_suffix" not in data:
-        if generator is None:
-            raise KeyError(f"scene {data.get('name')!r}: generator name needed to load its details")
-        data = {**data, **load_scene_file(str(data["name"]), str(generator), root)}
-    parent = data.get("parent")
-    depth = 0
-    node = data
-    while parent is not None:
-        depth += 1
-        if depth > 8:
-            raise RecursionError("scene parent chain nests too deeply")
-        parent_data = load_scene_file(parent, str(generator), root) if isinstance(parent, str) else dict(parent)
-        node["parent"] = parent_data
-        node = parent_data
-        parent = node.get("parent")
-    validate_scene(data)
-    return data
+    """The scene as a plain dict with the generator's details and ``parent`` inlined (recursively), validated as a
+    robosuite scene (``validate_scene``). See ``tmg.generation.simulators.scenes.load_scene_chain`` for the arguments."""
+    return scenes.load_scene_chain(scene, generator, root, validate=validate_scene)
 
 
-def scene_chain(scene: Mapping) -> list[dict]:
-    """Root-first list of a scene and its ancestors (``parent`` already inlined)."""
-    chain = []
-    node = scene
-    while node is not None:
-        chain.append(dict(node))
-        node = node.get("parent")
-    chain.reverse()
-    return chain
+def interface_name(task: Mapping) -> str:
+    """The MimicGen environment interface of a task: ``task.datagen_interface`` or ``MG_<task.env_prefix>``."""
+    return str(task.get("datagen_interface") or f"{INTERFACE_PREFIX}{task['env_prefix']}")
+
+
+_default_interface_name = interface_name    # ``register_env_class`` has a parameter of the same name
 
 
 def normalize_bounds(entry: Mapping, where: str) -> dict:
@@ -149,6 +113,11 @@ def reach_constraint(node: Mapping) -> dict | None:
         return None
     return {"radius_m": float(rc["radius_m"]), "base_xy": tuple(float(v) for v in rc.get("base_xy", (-0.56, 0.0))),
             "max_rejects": int(rc.get("max_rejects", 500))}
+
+
+def effective_reach_constraint(scene: Mapping) -> dict | None:
+    """The reach constraint of the nearest scene in the chain that enables one, or None (as ``effective_bounds``)."""
+    return next((reach_constraint(n) for n in reversed(scene_chain(scene)) if reach_constraint(n)), None)
 
 
 def env_class_name(task: Mapping, scene: Mapping) -> str:
@@ -238,8 +207,8 @@ def make_reach_reset(parent: type, constraint: Mapping, object_xy: Callable, lab
     return reset
 
 
-def register_env_class(task: Mapping, scene: Mapping, *, interface_name: str | None = None) -> str:
-    """Register the environment class of (task, scene) and return its name. Idempotent."""
+def _ensure_base_envs_registered() -> dict:
+    """Import the packages whose environment classes the scene classes derive from; returns robosuite's registry."""
     import mimicgen  # noqa: F401  registers the public environments and interfaces
 
     # CP-Gen's image runs robosuite 1.5, where MimicGen's own environment modules fail to import (no
@@ -250,17 +219,23 @@ def register_env_class(task: Mapping, scene: Mapping, *, interface_name: str | N
         pass
     from robosuite.environments.base import REGISTERED_ENVS
 
+    return REGISTERED_ENVS
+
+
+def register_env_class(task: Mapping, scene: Mapping, *, interface_name: str | None = None) -> str:
+    """Register the environment class of (task, scene) and return its name. Idempotent."""
+    registered = _ensure_base_envs_registered()
     scene = load_scene_chain(scene)
     name = env_class_name(task, scene)
     if name in _BUILT:
         return name
     chain = scene_chain(scene)
     base_name = base_env_class_name(task, chain[0])
-    if base_name not in REGISTERED_ENVS:
+    if base_name not in registered:
         raise KeyError(f"no registered robosuite environment '{base_name}' (MimicGen's or CP-Gen's environment packages)")
-    interface = interface_name or task.get("datagen_interface") or f"MG_{task['env_prefix']}"
+    interface = interface_name or _default_interface_name(task)
     object_xy = make_object_xy(str(interface))
-    parent, parent_name = REGISTERED_ENVS[base_name], base_name
+    parent, parent_name = registered[base_name], base_name
     task_name = str(task["name"])
     for node in chain:
         cls_name = env_class_name(task, node)
@@ -290,6 +265,6 @@ def register_env_class(task: Mapping, scene: Mapping, *, interface_name: str | N
         cls = type(cls_name, (parent,), attrs)
         _BUILT[cls_name] = (cls, fingerprint)
         parent, parent_name = cls, cls_name
-    if name not in REGISTERED_ENVS and name != base_name:
+    if name not in registered and name != base_name:
         raise RuntimeError(f"environment class {name} was not registered with robosuite")
     return name

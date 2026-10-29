@@ -17,7 +17,7 @@ max_scenes: null                  # play only the first n scenes of the split (c
 shard: null                       # [k, n]: play the scenes with index % n == k (parallel shards; see rollout.py)
 training_seed: 0                  # enters the per-episode policy seed
 append_validation: null           # run folder whose validation.jsonl gets the val-split row
-output: null                      # null = <run folder>/eval/<split>/<checkpoint name> (derived from the checkpoint path)
+output: null                      # null = <run folder>/eval/<split>_h<horizon>/<checkpoint name> (derived from the checkpoint path)
 command: eval
 overrides: []
 robot: Panda

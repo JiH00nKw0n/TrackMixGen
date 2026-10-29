@@ -16,29 +16,33 @@ registers that class and installs the grafts before calling ``main``. Outputs of
 The k-th demonstration of ``generated_obs.hdf5`` is the k-th successful attempt (CP-Gen merges the success
 files in attempt order). CP-Gen's own hdf5 actions are the noise-free labels; the executed actions are in the
 records.
+
+File-name constants: ``GENERATED`` here is CP-Gen's merged success file ``generated.hdf5`` (states and actions, not
+what the dataset reads), while the Isaac Lab adapters' ``GENERATED`` of the same value is their recorder's episode file
+that the dataset does read; ``GENERATED_OBS`` is the rendered file this adapter's ``demo_layout`` points at.
 """
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 
-import h5py
-
 from tmg.core.chunks import Chunk
-from tmg.core.records import ATTEMPTS_JSONL, RECORDS_DIR, read_attempts, validate_records
+from tmg.core.records import ATTEMPTS_JSONL, RECORDS_DIR
 from tmg.generation.base import ChunkSpec
-from tmg.generation.generators.mimicgen.adapter import RobosuiteGenerator
+from tmg.generation.generators._shared import count_hdf5_demos, records_summary
+from tmg.generation.generators.robosuite_base import RobosuiteGenerator
 
 ENTRYPOINT = "tmg.generation.generators.cpgen.entrypoint"
 GENERATED_OBS = "generated_obs.hdf5"
 GENERATED = "generated.hdf5"
+CPGEN_CONFIG = "cpgen_config.json"
 
 
 class CPGenGenerator(RobosuiteGenerator):
     """The ``SyntheticDataGenerator`` for CP-Gen (see the module docstring)."""
 
     name = "cpgen"
+    entrypoint_module = ENTRYPOINT
 
     def fetch_sources(self) -> dict:
         from tmg.generation.generators.cpgen.sources import fetch
@@ -51,12 +55,13 @@ class CPGenGenerator(RobosuiteGenerator):
 
     def check_sources(self) -> list[str]:
         """Both the source file and its annotation must exist; with every source in use, the per-demonstration windows too."""
-        missing = [str(p) for p in (Path(self.task["source"]), Path(self.task["annotation"])) if not p.exists()]
+        source, annotation = self.source_path(), Path(str(self.task["annotation"])).expanduser()
+        missing = [str(p) for p in (source, annotation) if not p.exists()]
         if not missing and self.all_sources():
             from tmg.generation.generators.cpgen.windows import has_constraint_data
 
-            if not has_constraint_data(str(self.task["source"])):
-                missing.append(f"{self.task['source']}: no per-demonstration constraint_data (run `tmg sources` for this task)")
+            if not has_constraint_data(str(source)):
+                missing.append(f"{source}: no per-demonstration constraint_data (run `tmg sources` for this task)")
         return missing
 
     def cpgen_config(self, chunk: Chunk, folder: Path) -> dict:
@@ -86,35 +91,25 @@ class CPGenGenerator(RobosuiteGenerator):
             raise ValueError("CP-Gen renders its own observations (both task cameras, 84x84) after generation; "
                              "generation.protocol.camera_names must be [] or the task's cameras")
         config = self.cpgen_config(chunk, folder)
-        (folder / "cpgen_config.json").write_text(json.dumps(config, indent=1))
-        return ChunkSpec(
-            chunk={"index": chunk.index, "seed": chunk.seed, "attempts": chunk.attempts}, generator=self.generator_cfg["name"],
-            task=self.task, scene=self.scene_chain(), method=self.method, protocol=self.protocol, generator_config="",
-            folder=str(folder), records_dir=str(folder / RECORDS_DIR),
+        (folder / CPGEN_CONFIG).write_text(json.dumps(config, indent=1))
+        return self._spec(
+            chunk, folder, scene=self.scene_chain(), generator_config="",
             expected_outputs=[str(folder / RECORDS_DIR / ATTEMPTS_JSONL)],
             extra={"cpgen_config": config, "source_root": str(self.generator_cfg["source_root"]),
-                   "graft_hashes": dict(self.generator_cfg.get("graft_hashes") or {}), "all_sources": self.all_sources()})
-
-    def chunk_command(self, spec: ChunkSpec, spec_path: Path) -> list[str]:
-        return [sys.executable, "-m", ENTRYPOINT, "--spec", str(spec_path)]
+                   "graft_hashes": self.graft_hashes(), "all_sources": self.all_sources()})
 
     def chunk_result(self, spec: ChunkSpec) -> dict | None:
         """Validate the records and count the rendered successes; None when the chunk did not finish."""
         folder = Path(spec.folder)
-        records = read_attempts(folder / RECORDS_DIR)
-        attempts = int(spec.chunk["attempts"])
-        if len(records) < attempts:
+        summary = records_summary(folder / RECORDS_DIR, int(spec.chunk["attempts"]), check_ok=False)
+        if summary is None:
             return None
-        validate_records(folder / RECORDS_DIR, attempts)
-        successes = sum(1 for r in records if r.get("success"))
+        successes = summary["successes"]
         rendered = folder / GENERATED_OBS
-        exported = 0
-        if rendered.exists():
-            with h5py.File(rendered, "r") as f:
-                exported = len(f["data"].keys()) if "data" in f else 0
+        exported = count_hdf5_demos(rendered) if rendered.exists() else 0
         if successes and exported != successes:
             return None                      # the post-generation rendering has not finished (or failed)
-        return {"attempts": len(records), "successes": successes, "exported_episodes": exported,
+        return {"attempts": len(summary["lines"]), "successes": successes, "exported_episodes": exported,
                 "generated_hdf5": str(rendered) if rendered.exists() else None}
 
     def demo_layout(self) -> dict:

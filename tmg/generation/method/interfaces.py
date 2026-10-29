@@ -8,11 +8,13 @@ mixer, the follower factory and the action-label choice; ``build_method`` makes 
 """
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 import numpy as np
+
+from tmg.generation.method.tracking import ErrorAdaptiveFollower
 
 
 @dataclass
@@ -29,7 +31,7 @@ class MixContext:
     src_segments: list                             # per source: (eef_start (4,4), targets (T_i,4,4), gripper (T_i,G))
     num_sources: int
     has_reference_object: bool
-    rng: np.random.Generator
+    rng: np.random.Generator = field(default_factory=lambda: np.random.default_rng(0))   # unused by GuidedMixer, see README
     extra: dict = field(default_factory=dict)
 
 
@@ -89,25 +91,44 @@ class Method:
         return self.mixer is None and self.follower_factory is None and self.labels == "executed"
 
 
-def _mixer_types() -> dict:
-    """Mixer implementations by ``method.mixing.type``; each has ``from_config(cfg, chunk_seed=...)``."""
-    from tmg.generation.method.guided_mix import GuidedMixer
+class MixerType(Protocol):
+    """A mixer implementation as ``build_method`` sees it: a class with ``from_config``."""
+    def from_config(self, cfg: Mapping, *, chunk_seed: int) -> SegmentMixer:
+        """Build the mixer from the ``method.mixing`` block; ``chunk_seed`` seeds its private random choices."""
+        ...
 
-    return {"guided": GuidedMixer}
+
+class FollowerType(Protocol):
+    """A follower implementation as ``build_method`` sees it: a class with ``factory``."""
+    def factory(self, cfg: Mapping) -> Callable[[], PathFollower]:
+        """Return the zero-argument constructor of the ``method.tracking`` block (one follower per trajectory)."""
+        ...
 
 
-def _follower_types() -> dict:
-    """Follower implementations by ``method.tracking.type``; each has ``factory(cfg)`` returning a constructor."""
-    from tmg.generation.method.tracking import ErrorAdaptiveFollower
+_MIXERS: dict[str, MixerType] = {}                                              # mixing.type -> class; filled lazily
+_FOLLOWERS: dict[str, FollowerType] = {"error_adaptive": ErrorAdaptiveFollower}  # tracking.type -> class
 
-    return {"error_adaptive": ErrorAdaptiveFollower}
+
+def _mixer_types() -> dict[str, MixerType]:
+    """Mixer implementations by ``method.mixing.type``."""
+    if not _MIXERS:
+        # imported here, not at the top: guided_mix imports MixContext and MixedSegment from this module
+        from tmg.generation.method.guided_mix import GuidedMixer
+
+        _MIXERS["guided"] = GuidedMixer
+    return _MIXERS
+
+
+def _follower_types() -> dict[str, FollowerType]:
+    """Follower implementations by ``method.tracking.type``."""
+    return _FOLLOWERS
 
 
 def build_method(cfg: Mapping, *, chunk_seed: int) -> Method:
     """Build the method of a ``method`` config block (plain mapping).
 
     ``mixing.type`` (default ``guided``) and ``tracking.type`` (default ``error_adaptive``) pick the implementation;
-    a new variant is a class added to ``_mixer_types`` or ``_follower_types`` plus a method config file naming it.
+    a new variant is a class added to ``_mixer_types`` or ``_FOLLOWERS`` plus a method config file naming it.
     """
     name = str(cfg.get("name", "none"))
     mixing = dict(cfg.get("mixing") or {})

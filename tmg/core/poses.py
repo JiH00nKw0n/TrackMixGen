@@ -35,6 +35,11 @@ def list_to_pose(values) -> np.ndarray:
     return out
 
 
+def transform_all(transform, poses) -> np.ndarray:
+    """``transform @ poses[t]`` for every pose of a ``(T, 4, 4)`` array (one 4x4 applied on the left of each)."""
+    return np.einsum("ij,tjk->tik", np.asarray(transform, dtype=float), poses)
+
+
 def invert(pose) -> np.ndarray:
     """Inverse of a rigid 4x4 pose (transpose of the rotation, negated rotated translation)."""
     pose = np.asarray(pose, dtype=float)

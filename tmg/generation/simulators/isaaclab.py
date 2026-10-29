@@ -21,7 +21,9 @@ argument and only use attributes of Isaac Lab's ``ManagerBasedRLMimicEnv``.
 """
 from __future__ import annotations
 
+import importlib
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 
 import numpy as np
 
@@ -99,6 +101,11 @@ def ranges_of(entry: Mapping) -> dict:
     return {"pose_range": pose_range_of(entry)}
 
 
+def has_ranges(entry: Mapping) -> bool:
+    """Whether a scene event entry lists any range, nested (``pose_range: {...}``) or flat (``x: [lo, hi]``)."""
+    return any(k in entry for k in RANGE_PARAMS) or any(k in entry for k in AXES)
+
+
 def validate_isaaclab_scene(scene: Mapping) -> None:
     """Check ``bounds: {task: {event name: entry}}`` of an Isaac Lab scene file.
 
@@ -111,17 +118,47 @@ def validate_isaaclab_scene(scene: Mapping) -> None:
             if entry.get("add"):
                 if ":" not in str(entry.get("func", "")) or not entry.get("asset"):
                     raise ValueError(f"added event {task}/{name} needs func 'module:attribute' and asset")
-                if any(k in entry for k in RANGE_PARAMS) or any(k in entry for k in AXES):
+                if has_ranges(entry):
                     ranges_of(entry)
             else:
                 ranges_of(entry)
 
 
-def _import_attr(path: str):
-    import importlib
-
+def import_attr(path: str):
+    """The object named by a ``module:attribute`` path (the form scene and task files use for functions)."""
     module, attr = str(path).split(":", 1)
     return getattr(importlib.import_module(module), attr)
+
+
+_import_attr = import_attr      # older name, still imported by the adapters
+
+
+def _add_event(env_cfg, event: str, entry: Mapping) -> dict:
+    """Append the reset event ``event`` described by an ``add: true`` entry to ``env_cfg.events``; returns what was added."""
+    if getattr(env_cfg.events, event, None) is not None:
+        raise KeyError(f"environment config already has a reset event {event!r}; drop 'add' to widen it")
+    from isaaclab.managers import EventTermCfg, SceneEntityCfg
+
+    params = {"asset_cfg": SceneEntityCfg(str(entry["asset"]))}
+    params.update(dict(entry.get("params") or {}))
+    if has_ranges(entry):
+        params.update(ranges_of(entry))
+    setattr(env_cfg.events, event, EventTermCfg(func=import_attr(entry["func"]), mode="reset", params=params))
+    return {"added": entry["func"], **{k: v for k, v in params.items() if k != "asset_cfg"}}
+
+
+def _widen_event(term, entry: Mapping) -> dict:
+    """Overwrite the listed axes of the existing event term's range parameters; returns the parameters as they now are
+    (the bare ``pose_range`` mapping when that is the only parameter)."""
+    applied = {}
+    for param, ranges in ranges_of(entry).items():
+        current = dict(term.params.get(param) or {})
+        current.update(ranges)
+        term.params[param] = current
+        applied[param] = current
+    if list(applied) == ["pose_range"]:
+        return applied["pose_range"]
+    return applied
 
 
 def apply_scene(env_cfg, scene: Mapping, task_name: str) -> dict:
@@ -145,29 +182,18 @@ def apply_scene(env_cfg, scene: Mapping, task_name: str) -> dict:
     applied = {}
     for event, entry in bounds.items():
         if entry.get("add"):
-            if getattr(env_cfg.events, event, None) is not None:
-                raise KeyError(f"environment config already has a reset event {event!r}; drop 'add' to widen it")
-            from isaaclab.managers import EventTermCfg, SceneEntityCfg
-
-            params = {"asset_cfg": SceneEntityCfg(str(entry["asset"]))}
-            params.update(dict(entry.get("params") or {}))
-            if any(k in entry for k in RANGE_PARAMS) or any(k in entry for k in AXES):
-                params.update(ranges_of(entry))
-            setattr(env_cfg.events, event, EventTermCfg(func=_import_attr(entry["func"]), mode="reset", params=params))
-            applied[event] = {"added": entry["func"], **{k: v for k, v in params.items() if k != "asset_cfg"}}
+            applied[event] = _add_event(env_cfg, event, entry)
             continue
         term = getattr(env_cfg.events, event, None)
         if term is None:
             raise KeyError(f"environment config has no reset event {event!r} (scene {scene.get('name')!r})")
-        applied[event] = {}
-        for param, ranges in ranges_of(entry).items():
-            current = dict(term.params.get(param) or {})
-            current.update(ranges)
-            term.params[param] = current
-            applied[event][param] = current
-        if list(applied[event]) == ["pose_range"]:
-            applied[event] = applied[event]["pose_range"]
+        applied[event] = _widen_event(term, entry)
     return applied
+
+
+def to_numpy(x) -> np.ndarray:
+    """A numpy array of a torch tensor (detached, on the CPU); a numpy array or sequence passes through ``np.asarray``."""
+    return x.detach().cpu().numpy() if hasattr(x, "detach") else np.asarray(x)
 
 
 def pose_from_pos_quat(pos, quat_wxyz) -> np.ndarray:
@@ -192,21 +218,21 @@ def measured_eef_poses(env, env_id: int, link_names: Mapping[str, str]) -> dict[
     """
     robot = env.scene["robot"]
     body_names = list(robot.data.body_names)
-    origin = np.asarray(env.scene.env_origins[env_id].detach().cpu().numpy(), dtype=float)
+    origin = np.asarray(to_numpy(env.scene.env_origins[env_id]), dtype=float)
     out = {}
     for eef, body in link_names.items():
         if body not in body_names:
             raise KeyError(f"robot has no body {body!r} for end effector {eef!r}; bodies: {body_names[:8]}...")
         b = body_names.index(body)
-        pos = robot.data.body_pos_w[env_id, b].detach().cpu().numpy() - origin
-        quat = robot.data.body_quat_w[env_id, b].detach().cpu().numpy()
+        pos = to_numpy(robot.data.body_pos_w[env_id, b]) - origin
+        quat = to_numpy(robot.data.body_quat_w[env_id, b])
         out[eef] = pose_from_pos_quat(pos, quat)
     return out
 
 
 def observed_eef_poses(env, env_id: int, eef_names: Sequence[str]) -> dict[str, np.ndarray]:
     """The environment's own ``get_robot_eef_pose`` for each end effector (the observation link)."""
-    return {eef: np.asarray(env.get_robot_eef_pose(eef_name=eef, env_ids=[env_id])[0].detach().cpu().numpy(), dtype=float)
+    return {eef: np.asarray(to_numpy(env.get_robot_eef_pose(eef_name=eef, env_ids=[env_id])[0]), dtype=float)
             for eef in eef_names}
 
 
@@ -219,8 +245,6 @@ def isolate_controller_scratch(env_cfg, folder) -> dict:
     2026-10-29, Pick Place ranking pool with 3 workers). Returns ``{action name: new folder}``; actions without such a
     controller are left alone.
     """
-    from pathlib import Path
-
     actions = getattr(env_cfg, "actions", None)
     moved = {}
     for name, action_cfg in list(vars(actions).items()) if actions is not None else []:

@@ -21,23 +21,13 @@ SELECTION_OF = {"mimicgen": "ours", "softmimicgen": "official", "dexmimicgen": "
 SELECTIONS = set(SELECTION_OF.values())
 
 
-def plan(root: Path) -> list[tuple[Path, Path]]:
+def _moves(base: Path) -> list[tuple[Path, Path]]:
+    """The moves under one ``<base>/<generator>/<task>/<scene>/<child>`` tree: every child folder of a scene that is not
+    already a selection name goes to ``<scene>/<selection of the generator>/<child>``."""
     moves = []
-    for kind in ("pools", "datasets", "runs"):
-        for gen_dir in sorted((root / kind).glob("*")) if (root / kind).exists() else []:
-            selection = SELECTION_OF.get(gen_dir.name)
-            if selection is None or not gen_dir.is_dir():
-                continue
-            for task_dir in sorted(p for p in gen_dir.iterdir() if p.is_dir()):
-                for scene_dir in sorted(p for p in task_dir.iterdir() if p.is_dir()):
-                    for child in sorted(p for p in scene_dir.iterdir() if p.is_dir()):
-                        if child.name in SELECTIONS:
-                            continue
-                        moves.append((child, scene_dir / selection / child.name))
-    rank = root / "reports" / "rank_sources"
-    for gen_dir in sorted(rank.glob("*")) if rank.exists() else []:
+    for gen_dir in sorted(base.glob("*")) if base.exists() else []:
         selection = SELECTION_OF.get(gen_dir.name)
-        if selection is None:
+        if selection is None or not gen_dir.is_dir():
             continue
         for task_dir in sorted(p for p in gen_dir.iterdir() if p.is_dir()):
             for scene_dir in sorted(p for p in task_dir.iterdir() if p.is_dir()):
@@ -45,6 +35,15 @@ def plan(root: Path) -> list[tuple[Path, Path]]:
                     if child.name in SELECTIONS:
                         continue
                     moves.append((child, scene_dir / selection / child.name))
+    return moves
+
+
+def plan(root: Path) -> list[tuple[Path, Path]]:
+    """Every move of the data root: the three result kinds, then the ranking reports."""
+    moves = []
+    for kind in ("pools", "datasets", "runs"):
+        moves += _moves(root / kind)
+    moves += _moves(root / "reports" / "rank_sources")
     return moves
 
 

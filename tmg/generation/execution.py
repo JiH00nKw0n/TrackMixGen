@@ -47,6 +47,66 @@ class StepTarget:
     record: dict | None             # follower record for the step (None when the follower is off)
 
 
+@dataclass(frozen=True)
+class Segment:
+    """One record segment of a trajectory: the waypoint indices ``[start, end)`` it covers, its recorder id and kind."""
+    start: int
+    end: int
+    seg_id: int
+    kind: int                       # SEG_BRIDGE or SEG_SKILL
+
+
+class SegmentTable:
+    """The record segments of one trajectory in path order (one per waypoint sequence).
+
+    Maps a waypoint index of the flattened path to the recorder segment it belongs to, which is what every
+    adapter needs when a follower walks the whole trajectory as one path.
+    """
+    def __init__(self):
+        self.rows: list[Segment] = []
+
+    def __len__(self) -> int:
+        return len(self.rows)
+
+    def __getitem__(self, index: int) -> Segment:
+        return self.rows[index]
+
+    def add(self, length: int, seg_id: int, kind: int) -> Segment:
+        """Append a segment of ``length`` waypoints after the last one."""
+        start = self.total
+        row = Segment(start, start + int(length), int(seg_id), int(kind))
+        self.rows.append(row)
+        return row
+
+    @property
+    def total(self) -> int:
+        """Number of waypoints covered so far."""
+        return self.rows[-1].end if self.rows else 0
+
+    def kinds_per_waypoint(self) -> list[int]:
+        """The kind of every waypoint of the path, in order."""
+        return [row.kind for row in self.rows for _ in range(row.end - row.start)]
+
+    def seg_id_of(self, k: int) -> int:
+        """Record-segment id of waypoint index ``k`` (last segment when out of range, -1 when empty)."""
+        for row in self.rows:
+            if row.start <= k < row.end:
+                return row.seg_id
+        return self.rows[-1].seg_id if self.rows else -1
+
+
+def slot_sources(record: dict) -> tuple[bool, str]:
+    """Whether a follower step commands an original waypoint for the first time, and the name of the noise stream
+    it draws from.
+
+    A step whose commanded waypoint ``k`` is among the waypoints it newly covers (``new_slots``) is a slot: it takes
+    the official generator's draw for that waypoint (``global``). Every other step is an extra step and draws from
+    the private stream (``private``).
+    """
+    slot = record["k"] in record["new_slots"]
+    return slot, "global" if slot else "private"
+
+
 class TrajectoryExecution:
     """Step-by-step bookkeeping for one attempt's trajectories (see the module docstring).
 
@@ -80,7 +140,7 @@ class TrajectoryExecution:
     def _reset_trajectory(self):
         """Forget the follower, the segment table and the pending step."""
         self.follower = None
-        self.segments: list[tuple[int, int, int, int]] = []   # (start_k, end_k, seg_id, kind)
+        self.segments = SegmentTable()
         self.seg_id = -1
         self._current: StepTarget | None = None
         self._pending: dict | None = None
@@ -90,16 +150,13 @@ class TrajectoryExecution:
     def begin_trajectory(self, sequences: Sequence[Sequence[WaypointView]]):
         """Called once per trajectory, before its first sequence runs."""
         self._reset_trajectory()
-        start = 0
         n = len(sequences)
         for i, seq in enumerate(sequences):
             kind = SEG_SKILL if i == n - 1 else SEG_BRIDGE
-            seg_id = self.rec.begin_segment(kind)
-            self.segments.append((start, start + len(seq), seg_id, kind))
-            start += len(seq)
-        if self.method.follower_factory is not None and start > 0:
+            self.segments.add(len(seq), self.rec.begin_segment(kind), kind)
+        if self.method.follower_factory is not None and self.segments.total > 0:
             flat = [w for seq in sequences for w in seq]
-            kinds = [kind for (a, b, _, kind) in self.segments for _ in range(b - a)]
+            kinds = self.segments.kinds_per_waypoint()
             names = list(flat[0].poses)
             eefs = [EndEffectorPath(name, np.stack([w.poses[name] for w in flat]),
                                     np.stack([np.asarray(w.grippers[name], dtype=float).reshape(-1) for w in flat]))
@@ -109,7 +166,7 @@ class TrajectoryExecution:
 
     def enter_sequence(self, index: int):
         """Make sequence ``index`` of the current trajectory the one whose steps are recorded next."""
-        self.seg_id = self.segments[index][2]
+        self.seg_id = self.segments[index].seg_id
 
     def steps_of_sequence(self, index: int, length: int):
         """Iteration the official executor should perform for sequence ``index``."""
@@ -131,12 +188,20 @@ class TrajectoryExecution:
                 self.gripper_states.update(self.follower.final_gripper_states())
                 return
 
-    def _seg_id_of(self, k: int) -> int:
-        """Record-segment id of waypoint index ``k`` (last segment when out of range)."""
-        for start, end, seg_id, _ in self.segments:
-            if start <= k < end:
-                return seg_id
-        return self.segments[-1][2] if self.segments else -1
+    def _step_noise(self, record: dict) -> np.ndarray:
+        """The noise vector of a follower step, and the draw accounting behind it.
+
+        One global draw is taken for every waypoint the step newly covers, in waypoint order, so the official
+        stream advances exactly once per original waypoint whatever the step count. The step uses the draw of the
+        waypoint it commands when that is one of them, else a private draw. ``record`` gets ``noise_source`` and
+        ``slot`` (see :func:`slot_sources`).
+        """
+        draws = {k: self.global_draw(self.action_dim) for k in record["new_slots"]}
+        slot, source = slot_sources(record)
+        vector = draws[record["k"]] if slot else self.private_draw(self.action_dim)
+        record["noise_source"] = source
+        record["slot"] = slot
+        return vector
 
     # step -----------------------------------------------------------------------------------------
     def target(self, original: WaypointView | None, measured: dict | None) -> StepTarget:
@@ -146,14 +211,8 @@ class TrajectoryExecution:
             return self._current
         poses, grippers, noise, record = self.follower.next_target(
             {k: np.asarray(v, dtype=float) for k, v in measured.items()})
-        draws = {k: self.global_draw(self.action_dim) for k in record["new_slots"]}
-        if record["k"] in draws:
-            vector, source = draws[record["k"]], "global"
-        else:
-            vector, source = self.private_draw(self.action_dim), "private"
-        record["noise_source"] = source
-        record["slot"] = record["k"] in draws
-        self.seg_id = self._seg_id_of(record["k"])
+        vector = self._step_noise(record)
+        self.seg_id = self.segments.seg_id_of(record["k"])
         self._current = StepTarget(poses, grippers, 0.0 if noise is None else float(noise), vector, record)
         return self._current
 

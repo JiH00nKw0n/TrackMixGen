@@ -73,6 +73,40 @@ def test_candidates_select_and_write(tmp_path):
         assert "object_state" not in d["obs"] and json.loads(f["data"].attrs["object_state_keys"]) == []
         assert json.loads(f["data"].attrs["cameras"]) == ["agentview"] and f["data"].attrs["label"] == "pre_noise"
         assert len(f["mask"]["train"]) == 3
+        # the complete layout of the file (keys, dtypes, attributes), as the committed writer produced it
+        assert sorted(f) == ["data", "mask"] and sorted(f["mask"]) == ["train"]
+        assert f["mask"]["train"][()].tolist() == [b"demo_0", b"demo_1", b"demo_2"]
+        assert sorted(f["data"]) == ["demo_0", "demo_1", "demo_2"]
+        assert sorted(f["data"].attrs) == ["cameras", "env_args", "label", "object_state_keys", "robot_state_keys", "task", "total"]
+        assert json.loads(f["data"].attrs["env_args"]) == {"env_name": "Square_X", "env_kwargs": {}}
+        assert json.loads(f["data"].attrs["robot_state_keys"]) == ["robot0_eef_pos", "robot0_gripper_qpos"]
+        assert f["data"].attrs["total"] == sum(f["data"][k].attrs["num_samples"] for k in f["data"]) == sum(c["n_steps"] for c in chosen)
+        assert sorted(d) == ["actions", "actions_executed", "actions_pre_noise", "obs", "src_demo_inds", "states", "subtask_of_step"]
+        assert sorted(d["obs"]) == ["agentview_image", "robot0_eef_pos", "robot0_gripper_qpos", "robot_state"]
+        assert sorted(d.attrs) == ["attempt", "chunk", "num_samples", "pool"]
+        assert d.attrs["chunk"] == chosen[0]["chunk"] and d.attrs["attempt"] == chosen[0]["attempt"] and d.attrs["pool"] == str(pool)
+        dtypes = {k: str(d[k].dtype) for k in ("actions", "actions_executed", "actions_pre_noise", "states", "subtask_of_step", "src_demo_inds")}
+        assert dtypes == {"actions": "float32", "actions_executed": "float32", "actions_pre_noise": "float32", "states": "float64",
+                          "subtask_of_step": "int16", "src_demo_inds": "int64"}
+        assert str(d["obs"]["agentview_image"].dtype) == "uint8" and d["obs"]["agentview_image"].compression == "gzip"
+        assert d["obs"]["agentview_image"].chunks == (1, 8, 8, 3) and str(d["obs"]["robot_state"].dtype) == "float32"
+        # the three action arrays come from the right sources: the demo file's actions, the record's a_exec and a_label
+        z = np.load(pool / CHUNKS_DIR / chosen[0]["chunk"] / RECORDS_DIR / f"attempt_{chosen[0]['attempt']:06d}.npz")
+        with h5py.File(chosen[0]["demo_file"], "r") as src:
+            assert np.array_equal(d["actions"][()], np.asarray(src["data"][chosen[0]["demo_key"]]["actions"], np.float32))
+            assert np.array_equal(d["states"][()], src["data"][chosen[0]["demo_key"]]["states"][()])
+        assert np.array_equal(d["actions_executed"][()], z["a_exec"]) and np.array_equal(d["actions_pre_noise"][()], z["a_label"])
+        assert d["src_demo_inds"][()].tolist() == chosen[0]["src_demo_inds"]
+        assert d["subtask_of_step"][()].tolist() == [0] * (n // 2) + [1] * (n - n // 2)
+
+
+def test_candidates_follow_the_numeric_demo_order(tmp_path):
+    """Twelve successes in one chunk: demo_10 and demo_11 come after demo_9 (an alphabetical sort would pair demo_10
+    with the third success and fail the step-count check)."""
+    pool = make_pool(tmp_path, chunks=1, attempts=24)
+    cands = candidates(pool)
+    assert [c["demo_key"] for c in cands] == [f"demo_{k}" for k in range(12)]
+    assert [c["attempt"] for c in cands] == list(range(0, 24, 2)) and [c["n_steps"] for c in cands] == [5 + a for a in range(0, 24, 2)]
 
 
 def test_step_count_mismatch_is_an_error(tmp_path):
@@ -156,3 +190,66 @@ def test_egl_device_appended_to_cuda_visible_devices():
     assert egl.apply({"MUJOCO_EGL_DEVICE_ID": "8", "CUDA_VISIBLE_DEVICES": "7,8"})["CUDA_VISIBLE_DEVICES"] == "7,8"
     assert "CUDA_VISIBLE_DEVICES" not in egl.apply({"MUJOCO_EGL_DEVICE_ID": "8"})
     assert egl.apply({"CUDA_VISIBLE_DEVICES": "7"})["CUDA_VISIBLE_DEVICES"] == "7"
+
+
+def test_demo_layout_warns_on_unknown_keys(capsys):
+    from tmg.data.dataset import DemoLayout
+
+    layout = DemoLayout.from_mapping({"demo_glob": "generated.hdf5", "image_key": "{cam}", "states_key": None,
+                                      "labels_from_record": True})      # misspelt: the default stays and the user is told
+    assert layout.labels_from_records is False and layout.states_key is None and layout.demo_glob == "generated.hdf5"
+    assert "unknown keys ['labels_from_record']" in capsys.readouterr().out
+    DemoLayout.from_mapping({"demo_glob": "*/demo.hdf5", "image_key": "{cam}_image"})
+    assert capsys.readouterr().out == ""
+
+
+def test_camera_obs_key_keeps_the_two_lookup_rules():
+    from tmg.data.images import camera_obs_key, to_uint8_frame
+
+    mimicgen = {"agentview_image": 1, "robot_state": 2}
+    isaaclab = {"agentview_image": 1}
+    arena = {"camera_obs/robot_pov_cam_rgb": 1}
+    # a generator's file: the layout's pattern, else Arena's camera_obs group, else None
+    assert camera_obs_key(mimicgen, "agentview", "{cam}_image") == "agentview_image"
+    assert camera_obs_key(isaaclab, "agentview_image", "{cam}") == "agentview_image"
+    assert camera_obs_key(arena, "robot_pov_cam_rgb", "{cam}") == "camera_obs/robot_pov_cam_rgb"
+    assert camera_obs_key(mimicgen, "sideview", "{cam}_image") is None
+    # the common hdf5: the camera's own name when present, else <cam>_image without checking
+    assert camera_obs_key(isaaclab, "agentview_image") == "agentview_image"
+    assert camera_obs_key(mimicgen, "agentview") == "agentview_image" and camera_obs_key({}, "x") == "x_image"
+    u8 = np.array([[[0, 128, 255]]], np.uint8)
+    assert to_uint8_frame(u8) is u8
+    assert to_uint8_frame(u8.astype(np.float32) / 255.0).tolist() == [[[0, 128, 255]]]      # [0, 1] floats are scaled
+    assert to_uint8_frame(u8.astype(np.float32)).tolist() == [[[0, 128, 255]]]              # already on the 0..255 scale
+
+
+def test_write_dataset_reads_images_and_labels_from_the_records(tmp_path):
+    """The Isaac Lab layouts: labels in labels_%06d.npz (pre-noise label when the pool says so), frames in images_%06d.npz."""
+    from tmg.core.records import IMAGES_FORMAT, LABELS_FORMAT, record_file
+    from tmg.data.dataset import DemoLayout
+
+    pool = make_pool(tmp_path)
+    layout = DemoLayout(demo_glob="*/demo.hdf5", image_key="{cam}", states_key=None, labels_from_records=True,
+                        images_from_records=True)
+    cands = candidates(pool, layout)
+    chosen, without_records = cands[:2], cands[2:3]
+    for c in chosen:
+        records = pool / CHUNKS_DIR / c["chunk"] / RECORDS_DIR
+        n = c["n_steps"]
+        np.savez(record_file(records, LABELS_FORMAT, c["attempt"]), actions_executed=np.zeros((n, 7), np.float32),
+                 actions_pre_noise=np.ones((n, 7), np.float32))
+        np.savez(record_file(records, IMAGES_FORMAT, c["attempt"]), agentview=np.full((n, 8, 8, 3), 7, np.uint8))
+    out = tmp_path / "ds_records.hdf5"
+    write_dataset(out, chosen, pool=pool, observation=IMAGE, meta={"label": "pre_noise"}, layout=layout)
+    with h5py.File(out, "r") as f:
+        d = f["data"]["demo_0"]
+        assert np.all(d["actions"][()] == 1.0) and np.all(d["actions_executed"][()] == 0.0) and "states" not in d
+        assert d["obs"]["agentview"].shape[1:] == (8, 8, 3) and int(d["obs"]["agentview"][0, 0, 0, 0]) == 7
+    with pytest.raises(DatasetError, match="no recorded images"):
+        write_dataset(tmp_path / "bad.hdf5", without_records, pool=pool, observation=IMAGE, meta={}, layout=layout)
+    # label "executed": ``actions`` stays the demonstration file's actions, the two record arrays are still stored
+    write_dataset(tmp_path / "ds_exec.hdf5", chosen, pool=pool, observation=IMAGE, meta={"label": "executed"}, layout=layout)
+    with h5py.File(tmp_path / "ds_exec.hdf5", "r") as f, h5py.File(chosen[0]["demo_file"], "r") as src:
+        d = f["data"]["demo_0"]
+        assert np.array_equal(d["actions"][()], np.asarray(src["data"][chosen[0]["demo_key"]]["actions"], np.float32))
+        assert np.all(d["actions_executed"][()] == 0.0) and np.all(d["actions_pre_noise"][()] == 1.0)

@@ -14,7 +14,7 @@
 
 | 앵커(대입되는 이름) | 끼우는 문장 | 하는 일 |
 |---|---|---|
-| `new_initial_state = env.get_state()` 다음 | `_tmg.begin_attempt(env, env_interface, new_initial_state)` | 시도 기록을 시작하고 장면 메타(도달 제약의 거부 횟수 등)를 읽는다 |
+| `new_initial_state = env.get_state()` 다음 | `_tmg.begin_attempt(env)` | 시도 기록을 시작하고 장면 메타(도달 제약의 거부 횟수 등)를 읽는다 |
 | `src_subtask_object_pose = ...` 다음 | `src_subtask_eef_poses, src_subtask_target_poses, src_subtask_gripper_actions = _tmg.mix_segment(self, locals())` | 원본 혼합. 방법이 꺼져 있으면 입력을 그대로 돌려준다 |
 | `transformed_seq = WaypointSequence.from_poses(...)` 다음 | `_tmg.record_subtask(locals())` | 하위작업 기록(원본 번호, 구간, 기준 물체 자세, 이음 시작과 목표 자세, 혼합 기록) |
 | 마지막 `return results` 앞 | `_tmg.end_attempt(results)` | 시도 기록을 쓴다. 라벨이 `pre_noise`이면 `results["actions"]`를 잡음 전 라벨로 바꾼다 |
@@ -30,7 +30,7 @@
 |---|---|---|
 | `for seq in self.waypoint_sequences:` 몸통 첫 줄 | `_tmg.begin_segment(seq, self)` | 구간 기록 시작. 경로 추종이 켜져 있으면 이 구간의 추종기를 만든다 |
 | `for j in range(len(seq)):` | `for j in _tmg.step_indices(seq):` | 끄면 `range(len(seq))` 그대로. 켜면 추종기가 끝날 때까지 j를 낸다 |
-| `waypoint = seq[j]` | `waypoint = _tmg.waypoint(seq, j, env, env_interface)` | 끄면 `seq[j]`. 켜면 측정한 말단 자세로 다음 목표를 정한다 |
+| `waypoint = seq[j]` | `waypoint = _tmg.waypoint(seq, j, env_interface)` | 끄면 `seq[j]`. 켜면 측정한 말단 자세로 다음 목표를 정한다 |
 | `action_pose = env_interface.target_pose_to_action(...)` 다음 | `_tmg.pre_noise(action_pose)` | 잡음 전 명령을 보관한다. 추가 스텝이면 비공개 난수로 같은 잡음을 더한다 |
 | `datagen_info = env_interface.get_datagen_info(...)` 다음 | `_tmg.record_step(waypoint, datagen_info, play_action)` | 스텝 기록(목표 자세, 실제 자세, 잡음 전 명령, 실행 명령, 종료 신호) |
 | `cur_success_metrics = env.is_success()` 다음 | `_tmg.record_success(cur_success_metrics, env_interface)` | 스텝 뒤 상태의 성공 판정과 하위작업 종료 신호를 기록한다 |
@@ -150,11 +150,11 @@ robosuite 1.4.1, CPU torch 2.6)의 학습과 평가를 돌렸다. 설정은 공�
 `setup_env_config`를 감싸 장면 범위를 환경 설정에 써넣고, (3) 접목을 설치한다. 공식 파일은 디스크에서 바뀌지 않는다. 2026-10-29부터
 이 스크립트 방식은 SoftMimicGen에 쓰이고, DexMimicGen은 같은 진입점으로 AutoData의 스크립트를 돈다(2.5절, 2.9절).
 
-패키지는 Soft가 `softmimicgen.datagen`, Dex가 `isaaclab_mimic.datagen`이다. 끼우는 자리는 다음과 같다.
+패키지는 Soft의 `softmimicgen.datagen`이다. DexMimicGen의 AutoData 런타임(2.9절)은 같은 런타임 기반(`IsaacLabRuntime`)을 상속해 자기 훅만 채운다. 표의 Dex 열(`generate_eef_subtask_trajectory`)은 Isaac Lab Mimic 경로로, 코드에는 남아 있지만 지금은 어떤 생성기 설정도 고르지 않는다. 끼우는 자리는 다음과 같다.
 
 | 함수 | 앵커(대입되는 이름) | 끼우는 문장 | 하는 일 |
 |------|---------------------|-------------|---------|
-| `DataGenerator.generate` | `new_initial_state = ...` 뒤 | `_tmg.begin_attempt(self, env_id, new_initial_state)` | 시도 기록을 열고, 잡음 전 라벨을 받기 위해 `env.target_eef_pose_to_action`을 감싼다 |
+| `DataGenerator.generate` | `new_initial_state = ...` 뒤 | `_tmg.begin_attempt(self, env_id)` | 시도 기록을 열고, 잡음 전 라벨을 받기 위해 `env.target_eef_pose_to_action`을 감싼다 |
 | `DataGenerator.generate` | 마지막 `return results` 앞 | `_tmg.end_attempt(self, env_id, results)` | 감싼 함수를 되돌리고 기록을 쓴다(`labels_%06d.npz`에 잡음 전·실행 행동) |
 | `generate_eef_subtask_trajectory`(Dex) / `generate_trajectory`(Soft) | `src_subtask_object_pose = ...`(Dex) 또는 `src_subtask_nodal_positions = ...`(Soft) 뒤 | `src_subtask_eef_poses, src_subtask_target_poses, src_subtask_gripper_actions = _tmg.mix_segment(self, locals())` | 안내 혼합(없으면 입력을 그대로 돌려준다) |
 | 같은 함수 | `transformed_seq = WaypointSequence.from_poses(...)` 뒤 | `_tmg.record_subtask(locals())` | 하위작업의 원본 번호와 자세를 기록한다 |
@@ -167,12 +167,12 @@ robosuite 1.4.1, CPU torch 2.6)의 학습과 평가를 돌렸다. 설정은 공�
 `actions_pre_noise`를 거기서 읽는다(`demo_layout()`의 `labels_from_records`).
 
 추종(`method.tracking.enabled`)이 켜지면 공식 반복문을 그대로 쓸 수 없다. 공식 반복문은 말단마다 한 걸음에 경유점 하나씩
-따로 전진시키는데, 추종기는 두 손을 경로 변수 하나로 움직여야 하기 때문이다. 그래서 `runtime.make_tracking_generate`가
-시도 동안 `DataGenerator.generate`를 바꿔 끼운다. 바뀐 함수도 공식 궤적 생성기(`generate_*trajectory`,
+따로 전진시키는데, 추종기는 두 손을 경로 변수 하나로 움직여야 하기 때문이다. 그래서 `make_tracking_generate`가
+시도 동안 `DataGenerator.generate`를 바꿔 끼운다. 반복문 본체는 `tmg/generation/generators/isaaclab/tracking_loop.py`의 `TrackingLoop` 하나이고, 패키지마다 다른 단계(초기화, 궤적 생성기 호출, 집게·통과 명령 읽기, 경유점 만들기, `MultiWaypoint.execute` 호출, 결과 수집)는 Soft의 `IsaacLabTrackingLoop`와 Dex의 `AutoDataTrackingLoop`가 훅으로 채운다. 바뀐 함수도 공식 궤적 생성기(`generate_*trajectory`,
 `merge_eef_subtask_trajectory`), `MultiWaypoint.execute`, 공식 기록기를 그대로 부르고, 두 말단이 모두 궤적을 가진 원본
-시간 구간마다 `ErrorAdaptiveFollower` 하나를 만든다(`_cut_interval`이 구간을 자른다). 오차는 설정된 링크
+시간 구간마다 `ErrorAdaptiveFollower` 하나를 만든다(`tracking_loop.cut_interval`이 구간을 자른다). 오차는 설정된 링크
 (`generator.measure_links`, Dex는 `*_hand_pitch_link`)의 자세로 재고, 집게 사건은 두 손의 명령 사건을 합쳐 쓰며, 공식
-걸음별 잡음 뽑기는 `NoiseLedger`가 보존한다(원본 경유점마다 공식 뽑기 한 묶음, 추가 걸음은 사설 난수). `method=none`은
+걸음별 잡음 뽑기는 `tracking_loop.NoiseLedger`가 보존한다(원본 경유점마다 공식 뽑기 한 묶음, 추가 걸음은 사설 난수). `method=none`은
 항상 공식 `generate`를 돈다.
 
 SoftMimicGen의 Rope 성공 판정(`rope_ends_close_tracked`)은 호출 시점에 민감하다. 이 함수는 에피소드마다 밧줄의 두 끝 마디를
@@ -581,7 +581,7 @@ MimicGen은 MimicGen 환경에서 따로"다. CP-Gen의 공식 장면 `official_
   조정한 xml을 쓰므로, Makefile이 cuRobo 작업 설정과 같은 방식으로 그 폴더의 쓰기 가능한 호스트 사본을 이미지 위에 올린다(세 가지 모두
   2026-10-29에 서버에서 발견해 고쳤다).
 - **시도별 원본 선택.** CP-Gen은 특정 모드(`use_reset_near_constraint`)에서만 제약 열(원본)을 고르고 그 밖에는 늘 0번을 쓰므로, 런타임이 시도 시작에서
-  묶음 시드로 고정된 난수열로 원본을 무작위로 고른다(`CPGenRuntime.begin_attempt`). 어댑터는 `selection=ours`일 때 원본을 전부 불러오고 공식 주석 파일을
+  묶음 시드로 고정된 난수열로 원본을 무작위로 고른다(`CPGenRuntime.begin_attempt`가 부르는 `SourcePicker`, 난수열은 `tmg.generation.seeds.source_pick_rng`). 어댑터는 `selection=ours`일 때 원본을 전부 불러오고 공식 주석 파일을
   넘기지 않는다(시범 안의 제약 데이터가 쓰인다). 고른 원본 번호는 시도 기록(`src_demo_inds`)에 남아 `tmg rank_sources`가 다른 생성기와 같은 방식으로
   순위를 매긴다. 섞기는 CP-Gen에 대응물이 없으므로 여전히 끄고, 방법은 추종만 쓴다.
 
@@ -594,9 +594,9 @@ CP-Gen은 원본 구간을 다시 재생하지 않는다. 시도마다 주석된
 
 | 앵커(대입되는 이름) | 끼우는 문장 | 하는 일 |
 |---------------------|-------------|---------|
-| 첫 `state = self.env.get_state()` 뒤 | `_tmg.begin_attempt(self, obs, state)` | 시도 기록을 열고 장면 메타데이터를 읽는다 |
+| 첫 `state = self.env.get_state()` 뒤 | `_tmg.begin_attempt(self)` | 시도 기록을 열고 장면 메타데이터를 읽는다 |
 | `action_dct = self.policy.get_action(obs)` | `action_dct = _tmg.get_action(self, obs)`로 바꾼다 | 공식 `get_action`을 부르고, 새 구간이 계획되면 구간(계획=연결, 제약=기술)과 원본 번호를 기록한다. 추종이 켜지면 계획된 행동들을 경로 하나로 삼아 추종기가 다음 목표를 낸다 |
-| 반복문 안 `state = self.env.get_state()` 뒤 | `_tmg.record_step(self, obs, action, action_to_take, reward, in_constraint_segment, system_noise_cfg)` | 목표 자세, 측정 자세, 라벨, 실행 행동, 잡음 크기를 기록한다 |
+| 반복문 안 `state = self.env.get_state()` 뒤 | `_tmg.record_step(action, action_to_take, reward, in_constraint_segment, system_noise_cfg)` | 목표 자세, 측정 자세, 라벨, 실행 행동, 잡음 크기를 기록한다 |
 | 마지막 `return episode_data` 앞 | `_tmg.end_attempt(self, episode_data)` | 기록을 쓴다 |
 
 추종기가 움직일 때는 정책의 `action_queue`를 추종기의 기준 걸음 번호에 맞춰 잘라 두어, 공식 잡음 규칙

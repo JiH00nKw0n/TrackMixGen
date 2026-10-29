@@ -39,6 +39,8 @@ from collections.abc import Mapping, Sequence
 
 import numpy as np
 
+from tmg.generation.simulators.isaaclab import import_attr, to_numpy
+
 _NODE_CACHE: dict[int, object] = {}       # id(asset) -> LongTensor of selected node indices
 
 
@@ -105,7 +107,7 @@ def deformable_nodes(env, object: str = "object", layout: str = "line", counts: 
     indices = _NODE_CACHE.get(id(asset))
     if indices is None:
         rest = _t(asset.data.default_nodal_state_w)[0, :, :3]
-        chosen = select_nodes(np.asarray(rest.detach().cpu().numpy() if hasattr(rest, "detach") else rest), layout, counts)
+        chosen = select_nodes(np.asarray(to_numpy(rest)), layout, counts)
         indices = _NODE_CACHE[id(asset)] = torch.as_tensor(chosen, dtype=torch.long, device=nodal.device)
     origins = _origins(env)
     picked = nodal[:, indices, :] - origins[:, None, :]                         # (N, k, 3)
@@ -152,14 +154,12 @@ def add_lowdim_terms(env_cfg, task: Mapping) -> dict:
         return {}
     from isaaclab.managers import ObservationTermCfg
 
-    from tmg.generation.simulators.isaaclab import _import_attr
-
     group = env_cfg.observations.policy
     added = {}
     for name, spec in terms.items():
         if getattr(group, name, None) is not None:
             raise KeyError(f"the environment config already has an observation term {name!r}")
         params = {k: (list(v) if isinstance(v, tuple) else v) for k, v in dict(spec.get("params") or {}).items()}
-        setattr(group, str(name), ObservationTermCfg(func=_import_attr(str(spec["func"])), params=params))
+        setattr(group, str(name), ObservationTermCfg(func=import_attr(str(spec["func"])), params=params))
         added[str(name)] = str(spec["func"])
     return added

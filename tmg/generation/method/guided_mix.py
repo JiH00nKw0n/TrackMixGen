@@ -6,13 +6,52 @@ afterwards.
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import NamedTuple
+
 import numpy as np
 
-from tmg.core.poses import invert
+from tmg.core.poses import invert, transform_all
 from tmg.generation.method.event_mix import anchor_rotation_degrees, blend_poses, mix_segments
 from tmg.generation.method.grippers import SignGripper, build_detector
 from tmg.generation.method.interfaces import MixContext, MixedSegment
 from tmg.generation.method.ranking import SourceRanking, load_ranking
+
+DEFAULT_WEIGHT_A = 0.8
+DEFAULT_MAX_ANCHOR_ROTATION_DEG = 20.0
+DEFAULT_SEED_OFFSET = 817263
+DEFAULT_GOOD_FRACTION = 0.5
+
+
+@dataclass(frozen=True)
+class GuidedMixConfig:
+    """The values of a ``method.mixing`` block that ``GuidedMixer`` reads (``ranking`` is loaded separately)."""
+    weight_a: float = DEFAULT_WEIGHT_A                             # share of the primary source in the blend
+    max_anchor_rotation_deg: float = DEFAULT_MAX_ANCHOR_ROTATION_DEG  # donor bound at the anchors (start, close events, end)
+    seed_offset: int = DEFAULT_SEED_OFFSET                         # seed material of the private donor-choice RNG
+    good_fraction: float | None = DEFAULT_GOOD_FRACTION            # top share of the ranking counted as high-success
+    good_count: int | None = None                                  # explicit count instead of the fraction
+    gripper_events: Mapping | None = None                          # detector config ({type: sign} when None)
+
+    @classmethod
+    def from_mapping(cls, cfg: Mapping) -> GuidedMixConfig:
+        """Read the block with the defaults above for missing keys."""
+        return cls(weight_a=cfg.get("weight_a", DEFAULT_WEIGHT_A),
+                   max_anchor_rotation_deg=cfg.get("max_anchor_rotation_deg", DEFAULT_MAX_ANCHOR_ROTATION_DEG),
+                   seed_offset=cfg.get("seed_offset", DEFAULT_SEED_OFFSET),
+                   good_fraction=cfg.get("good_fraction", DEFAULT_GOOD_FRACTION), good_count=cfg.get("good_count"),
+                   gripper_events=cfg.get("gripper_events"))
+
+
+class _Donor(NamedTuple):
+    """A high-success source whose segment is compatible with the primary's, in its own object frame."""
+    index: int
+    poses: np.ndarray            # (T_b, 4, 4) targets in the donor's reference-object frame
+    grippers: np.ndarray         # (T_b, G) raw gripper commands
+    series: np.ndarray           # (T_b,) scalar event series of the commands
+    eef_start: np.ndarray        # (4, 4) first eef pose in the donor's object frame
+    angles: list[float]          # anchor rotation differences to the primary (deg)
 
 
 class GuidedMixer:
@@ -22,27 +61,30 @@ class GuidedMixer:
     ``good`` group whose gripper events match and whose anchor rotations differ by at most
     ``max_anchor_rotation_deg``; otherwise the segment is returned unchanged with the reason recorded.
     """
-    def __init__(self, *, ranking: SourceRanking, weight_a: float, max_anchor_rotation_deg: float, chunk_seed: int,
-                 seed_offset: int, good_fraction: float | None = 0.5, good_count: int | None = None, gripper_events=None):
+    def __init__(self, *, ranking: SourceRanking, chunk_seed: int, config: GuidedMixConfig | None = None, **values):
         """Args:
             ranking: the task's source ranking (task-wide or per subtask).
-            weight_a: share of the primary source in the blend.
-            max_anchor_rotation_deg: donor eligibility bound at the anchors (start, close events, end).
-            chunk_seed, seed_offset: seed the private donor-choice RNG with the mix call index.
-            good_fraction, good_count: how many top-ranked sources count as high-success (see ``RankedSources.split``).
-            gripper_events: the open/closed rule of the gripper commands (``{type: sign}`` for one scalar command per
-                step, the default; ``{type: closure, columns: [...]}`` for many-joint hands such as the GR1's). Events
-                found by this rule align the two segments; with the closure rule the mixed hand commands are the
-                time-warped blend of both sources' joint commands (same phase at every step).
+            chunk_seed: seeds the private donor-choice RNG together with ``seed_offset`` and the mix call index.
+            config: the mixing values; ``values`` may instead give its fields one by one (``weight_a``,
+                ``max_anchor_rotation_deg``, ``seed_offset``, ``good_fraction``, ``good_count``, ``gripper_events``).
+                ``gripper_events`` is the open/closed rule of the gripper commands (``{type: sign}`` for one scalar
+                command per step, the default; ``{type: closure, columns: [...]}`` for many-joint hands such as the
+                GR1's). Events found by this rule align the two segments; with the closure rule the mixed hand commands
+                are the time-warped blend of both sources' joint commands (same phase at every step).
         """
+        if config is None:
+            config = GuidedMixConfig(**values)
+        elif values:
+            raise TypeError(f"give either config or the single values, not both: {sorted(values)}")
+        self.config = config
         self.ranking = ranking
-        self.detector = build_detector(gripper_events)
-        self.good_fraction = None if good_fraction is None else float(good_fraction)
-        self.good_count = None if good_count is None else int(good_count)
-        self.weight_a = float(weight_a)
-        self.max_anchor_deg = float(max_anchor_rotation_deg)
+        self.detector = build_detector(config.gripper_events)
+        self.good_fraction = None if config.good_fraction is None else float(config.good_fraction)
+        self.good_count = None if config.good_count is None else int(config.good_count)
+        self.weight_a = float(config.weight_a)
+        self.max_anchor_deg = float(config.max_anchor_rotation_deg)
         self.chunk_seed = int(chunk_seed)
-        self.seed_offset = int(seed_offset)
+        self.seed_offset = int(config.seed_offset)
         self.calls = 0
         self._groups: dict[int, tuple[set[int], set[int]]] = {}
 
@@ -54,13 +96,11 @@ class GuidedMixer:
         return self._groups[subtask_ind]
 
     @classmethod
-    def from_config(cls, cfg: dict, *, chunk_seed: int) -> GuidedMixer:
-        """Build from the ``method.mixing`` config block: ``ranking`` names ``configs/ranking/<generator>/<task>``."""
-        ranking = load_ranking(str(cfg["ranking"]))
-        return cls(ranking=ranking, weight_a=cfg.get("weight_a", 0.8),
-                   max_anchor_rotation_deg=cfg.get("max_anchor_rotation_deg", 20.0), chunk_seed=chunk_seed,
-                   seed_offset=cfg.get("seed_offset", 817263), good_fraction=cfg.get("good_fraction", 0.5),
-                   good_count=cfg.get("good_count"), gripper_events=cfg.get("gripper_events"))
+    def from_config(cls, cfg: Mapping, *, chunk_seed: int) -> GuidedMixer:
+        """Build from the ``method.mixing`` config block: ``ranking`` names
+        ``configs/experiment/generator/<generator>/ranking/<task>``."""
+        return cls(ranking=load_ranking(str(cfg["ranking"])), chunk_seed=chunk_seed,
+                   config=GuidedMixConfig.from_mapping(cfg))
 
     def describe(self) -> dict:
         """JSON-able description of the mixer settings for logs and provenance."""
@@ -68,13 +108,62 @@ class GuidedMixer:
                 "good_fraction": self.good_fraction, "good_count": self.good_count, "gripper_events": self.detector.name,
                 "ranking": self.ranking.describe()}
 
+    # events ------------------------------------------------------------------------------------------
+    def _scalar_commands(self, commands: np.ndarray) -> bool:
+        """True when the commands are one scalar sign command per step, the official robosuite convention, so the raw
+        column itself is the event series and the blended scalar is the mixed command."""
+        return isinstance(self.detector, SignGripper) and commands.reshape(len(commands), -1).shape[1] == 1
+
     def _event_series(self, commands) -> np.ndarray:
         """The commands as the scalar series the event functions read: the raw first column for the sign rule (the
         official robosuite convention, zeros carry the state), otherwise +1 closed / -1 open from the detector."""
         g = np.asarray(commands, dtype=float).reshape(len(commands), -1)
-        if isinstance(self.detector, SignGripper) and g.shape[1] == 1:
+        if self._scalar_commands(g):
             return g[:, 0]
         return np.where(self.detector.states(g), 1.0, -1.0)
+
+    # one subtask --------------------------------------------------------------------------------------
+    def _identity_reason(self, context: MixContext, primary: int, good: set[int], bad: set[int]) -> str | None:
+        """Why the segment is left unchanged before any donor is looked at, or None when mixing may go ahead."""
+        if primary in good:
+            return "primary is a high-success source"
+        if primary not in bad:
+            return "primary not ranked"
+        if not context.has_reference_object:
+            return "subtask has no reference object"
+        if self.weight_a >= 1:
+            return "weight_a is 1"
+        return None
+
+    def _candidates(self, context: MixContext, good: set[int], pa: np.ndarray, sa: np.ndarray) -> list[_Donor]:
+        """The high-success sources (ascending index) whose events match the primary's and whose anchor rotations stay
+        within ``max_anchor_rotation_deg``; ``pa`` and ``sa`` are the primary's object-frame targets and event series."""
+        candidates = []
+        for b in sorted(good):
+            eef_b, targets_b, gripper_b = context.src_segments[b]
+            inv_b = invert(np.asarray(context.src_object_poses[b], dtype=float))
+            pb = transform_all(inv_b, np.asarray(targets_b, dtype=float))
+            gb = np.asarray(gripper_b, dtype=float)
+            sb = self._event_series(gb)
+            angles = anchor_rotation_degrees(pa, sa, pb, sb)
+            if angles is None or max(angles) > self.max_anchor_deg + 1e-6:
+                continue
+            candidates.append(_Donor(b, pb, gb, sb, inv_b @ np.asarray(eef_b, dtype=float), angles))
+        return candidates
+
+    def _blend_grippers(self, ga: np.ndarray, gb: np.ndarray, grip: np.ndarray, meta: dict) -> np.ndarray:
+        """The mixed gripper commands in the primary's layout: the blended scalar for sign commands, otherwise both
+        sources' joint commands time-warped to the mixed timeline and blended with the pose weights."""
+        ga2, gb2 = ga.reshape(len(ga), -1), gb.reshape(len(gb), -1)
+        if self._scalar_commands(ga2):
+            return grip.reshape(-1) if ga.ndim == 1 else grip.reshape(-1, 1)      # the blended scalar command
+        # many-joint hands: both sources' joint commands, time-warped to the mixed timeline (same open/closed phase
+        # at every step, checked by mix_segments) and blended with the same weights as the poses
+        ia, ib = np.asarray(meta["source_a_index"]), np.asarray(meta["source_b_index"])
+        gripper = self.weight_a * ga2[ia] + (1 - self.weight_a) * gb2[ib]
+        if ga.ndim == 1:
+            gripper = gripper.reshape(-1)
+        return gripper
 
     def mix(self, context: MixContext) -> MixedSegment:
         """Mix one subtask segment (see the class docstring).
@@ -94,53 +183,26 @@ class GuidedMixer:
         record = {"call": call, "subtask": int(context.subtask_ind), "source_a": a, "weight_a": self.weight_a,
                   "mixed": False, "good": sorted(good)}
         identity = MixedSegment(context.primary_eef_start, context.primary_targets, context.primary_gripper, record)
-        if a in good:
-            record["identity_reason"] = "primary is a high-success source"
-            return identity
-        if a not in bad:
-            record["identity_reason"] = "primary not ranked"
-            return identity
-        if not context.has_reference_object:
-            record["identity_reason"] = "subtask has no reference object"
-            return identity
-        if self.weight_a >= 1:
-            record["identity_reason"] = "weight_a is 1"
+        reason = self._identity_reason(context, a, good, bad)
+        if reason is not None:
+            record["identity_reason"] = reason
             return identity
         obj_a = np.asarray(context.src_object_poses[a], dtype=float)
         inv_a = invert(obj_a)
-        pa = np.einsum("ij,tjk->tik", inv_a, context.primary_targets)
+        pa = transform_all(inv_a, context.primary_targets)
         ga = np.asarray(context.primary_gripper, dtype=float)
         sa = self._event_series(ga)
-        candidates = []
-        for b in sorted(good):
-            eef_b, targets_b, gripper_b = context.src_segments[b]
-            inv_b = invert(np.asarray(context.src_object_poses[b], dtype=float))
-            pb = np.einsum("ij,tjk->tik", inv_b, np.asarray(targets_b, dtype=float))
-            gb = np.asarray(gripper_b, dtype=float)
-            sb = self._event_series(gb)
-            angles = anchor_rotation_degrees(pa, sa, pb, sb)
-            if angles is None or max(angles) > self.max_anchor_deg + 1e-6:
-                continue
-            candidates.append((b, pb, gb, sb, inv_b @ np.asarray(eef_b, dtype=float), angles))
-        record["eligible_donors"] = [c[0] for c in candidates]
+        candidates = self._candidates(context, good, pa, sa)
+        record["eligible_donors"] = [c.index for c in candidates]
         if not candidates:
             record["identity_reason"] = "no compatible donor"
             return identity
         rng = np.random.default_rng(np.random.SeedSequence([self.chunk_seed, call, self.seed_offset]))
-        b, pb, gb, sb, eef_b_obj, angles = candidates[int(rng.integers(len(candidates)))]
-        mixed_obj, grip, meta = mix_segments(pa, sa, pb, sb, self.weight_a)
-        mixed = np.einsum("ij,tjk->tik", obj_a, mixed_obj)
+        donor = candidates[int(rng.integers(len(candidates)))]
+        mixed_obj, grip, meta = mix_segments(pa, sa, donor.poses, donor.series, self.weight_a)
+        mixed = transform_all(obj_a, mixed_obj)
         eef_a_obj = inv_a @ np.asarray(context.primary_eef_start, dtype=float)
-        eef_start = obj_a @ blend_poses(eef_a_obj[None], eef_b_obj[None], self.weight_a)[0]
-        ga2, gb2 = ga.reshape(len(ga), -1), gb.reshape(len(gb), -1)
-        if isinstance(self.detector, SignGripper) and ga2.shape[1] == 1:
-            gripper = grip.reshape(-1) if ga.ndim == 1 else grip.reshape(-1, 1)      # the blended scalar command
-        else:
-            # many-joint hands: both sources' joint commands, time-warped to the mixed timeline (same open/closed phase
-            # at every step, checked by mix_segments) and blended with the same weights as the poses
-            ia, ib = np.asarray(meta["source_a_index"]), np.asarray(meta["source_b_index"])
-            gripper = self.weight_a * ga2[ia] + (1 - self.weight_a) * gb2[ib]
-            if ga.ndim == 1:
-                gripper = gripper.reshape(-1)
-        record.update(mixed=True, source_b=int(b), anchor_rotation_degrees=angles, alignment=meta)
+        eef_start = obj_a @ blend_poses(eef_a_obj[None], donor.eef_start[None], self.weight_a)[0]
+        gripper = self._blend_grippers(ga, donor.grippers, grip, meta)
+        record.update(mixed=True, source_b=int(donor.index), anchor_rotation_degrees=donor.angles, alignment=meta)
         return MixedSegment(eef_start, mixed, gripper, record)

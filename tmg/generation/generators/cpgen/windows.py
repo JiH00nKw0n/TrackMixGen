@@ -44,6 +44,8 @@ from pathlib import Path
 import h5py
 import numpy as np
 
+from tmg.core.layout import indexed_keys, key_index
+
 GRID = (0.001, 0.005, 0.01, 0.015, 0.02, 0.025, 0.03, 0.04, 0.05, 0.06, 0.08)   # metres; 0.001 = contact
 GAP = 10          # CP-Gen: steps skipped after a completed interaction before the next one may start
 GROUP = "constraint_data"
@@ -239,8 +241,8 @@ def derive_windows(demo_path: str, constraints: Sequence[Mapping], *, source_roo
     interactions = interactions_of(constraints)
     released = released_windows(constraints)
     with h5py.File(demo_path, "r") as f:
-        demos = [(int(k.split("_")[1]), np.array(f["data"][k]["states"]), str(f["data"][k].attrs["model_file"]))
-                 for k in sorted(f["data"].keys(), key=lambda k: int(k.split("_")[1]))]
+        demos = [(key_index(k), np.array(f["data"][k]["states"]), str(f["data"][k].attrs["model_file"]))
+                 for k in indexed_keys(f["data"].keys())]
     env = make_env(demo_path)
     try:
         _, states0, model0 = demos[0]
@@ -270,7 +272,7 @@ def write_constraint_data(demo_path: str, constraints: Sequence[Mapping], window
     written = {}
     with h5py.File(demo_path, "a") as f:
         for key in f["data"].keys():
-            idx = int(key.split("_")[1])
+            idx = key_index(key)
             g = f["data"][key]
             if GROUP in g:
                 del g[GROUP]

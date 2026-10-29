@@ -20,22 +20,23 @@ success termination taken out of the config and called by hand. Each scene of th
 Every episode row also stores the initial placement read after the reset (rigid objects: position and quaternion in
 the environment frame; deformable objects: mean nodal position), for later analysis of success against the scene.
 Isaac Sim is started once per process and closed when the interpreter exits (``atexit``), after ``tmg eval`` has
-written its summary and validation row.
+written its summary and validation row. The loop around the episodes (server checks, policy seeds, episode rows) is
+``tmg.evaluation.session``; this module never imports the robosuite evaluator.
 """
 from __future__ import annotations
 
 import atexit
 import importlib
-import random
-import time
 import traceback
 from collections.abc import Callable
 
 import numpy as np
 
-from tmg.data.images import resize_frames
+from tmg.core.seeding import seed_all
+from tmg.data.images import resize_frames, to_uint8_frame
 from tmg.evaluation.client import PolicyClient
-from tmg.evaluation.rollout import check_server, episode_seed, policy_input
+from tmg.evaluation.envs import isaaclab_task_id
+from tmg.evaluation.session import Scene, play_scenes, policy_input
 from tmg.generation.generators.autodata.runtime import reset_success_term
 from tmg.generation.simulators.isaaclab import apply_scene
 from tmg.generation.simulators.isaaclab_lowdim import add_lowdim_terms
@@ -122,7 +123,7 @@ def build_env(plain: dict, device: str):
 
     task = plain["task"]
     autodata = is_autodata_stack(plain["generator"])
-    task_id = str(task.get("camera_env") or task["env_name"])
+    task_id = isaaclab_task_id(task)
     env_cfg = parse_env_cfg(task_id, device=str(device), num_envs=1)
     env_cfg.observations.policy.concatenate_terms = False
     success_term = env_cfg.terminations.success
@@ -159,12 +160,8 @@ def build_env(plain: dict, device: str):
 
 
 def seed_everything(env, seed: int) -> None:
-    import torch
-
-    env.seed(int(seed))
-    torch.manual_seed(int(seed))
-    np.random.seed(int(seed) % (2**32))
-    random.seed(int(seed))
+    """The environment, torch, numpy and ``random`` from one seed (``tmg.core.seeding.seed_all``)."""
+    seed_all(seed, env)
 
 
 def _to_numpy(x) -> np.ndarray:
@@ -208,9 +205,7 @@ def observation_input(obs_dict: dict, observation: dict) -> dict:
         group = policy if cam in policy else next((g for g in obs_dict.values() if isinstance(g, dict) and cam in g), None)
         if group is None:
             raise KeyError(f"camera {cam!r} is in no observation group ({list(obs_dict)})")
-        frame = _to_numpy(group[cam])[0]
-        if frame.dtype != np.uint8:
-            frame = (np.clip(frame, 0, 1) * 255).astype(np.uint8) if frame.max() <= 1.0 else frame.astype(np.uint8)
+        frame = to_uint8_frame(_to_numpy(group[cam])[0])
         if observation.get("image_size"):
             frame = resize_frames(frame, observation["image_size"])
         flat[cam] = frame
@@ -219,12 +214,12 @@ def observation_input(obs_dict: dict, observation: dict) -> dict:
     return policy_input(flat, observation, image_key="{cam}")
 
 
-def run_episode(env, success_term, policy: PolicyClient, scene: dict, task: dict, observation: dict, *, horizon: int, seed: int) -> dict:
-    """Play one scene; returns ``{"success", "steps", "error", "initial"}``."""
+def run_episode(env, success_term, policy: PolicyClient, reset: Scene, task: dict, observation: dict, *, horizon: int, seed: int) -> dict:
+    """Play one seed-fixed scene; returns ``{"success", "steps", "error", "initial"}``."""
     import torch
 
     try:
-        seed_everything(env, int(scene["seed"]))
+        seed_all(int(reset["seed"]), env)
         obs_dict, _ = env.reset()
         reset_success_term(success_term, [0])        # class-based terms keep per-environment progress state
         initial = initial_placement(env)
@@ -247,7 +242,7 @@ def run_episode(env, success_term, policy: PolicyClient, scene: dict, task: dict
         return {"success": False, "steps": 0, "error": traceback.format_exc(), "initial": {}}
 
 
-def play_isaaclab(plain: dict, todo: list[dict], checkpoint: str, horizon: int, record: Callable[[dict], None]) -> None:
+def play_isaaclab(plain: dict, todo: list[Scene], checkpoint: str, horizon: int, record: Callable[[dict], None]) -> None:
     """Play the scenes of ``todo`` and hand each episode row to ``record`` (see the module docstring)."""
     task, obs_cfg, ev = plain["task"], plain["observation"], plain["evaluation"]
     device = str((plain.get("cluster") or {}).get("device", "cuda:0"))
@@ -258,20 +253,14 @@ def play_isaaclab(plain: dict, todo: list[dict], checkpoint: str, horizon: int, 
     env, success_term, task_id = build_env(plain, device)
     print(f"[tmg] Isaac Lab environment {task_id} on {device}; success term {getattr(success_term.func, '__name__', success_term.func)} "
           f"called after every step", flush=True)
-    url = f"ws://{ev['server']['host']}:{ev['server']['port']}"
+
+    def run_one(policy, reset, seed):
+        # the scene seed goes first in the row, before success/steps/error/initial
+        result = run_episode(env, success_term, policy, reset, task, obs_cfg, horizon=horizon, seed=seed)
+        return {"scene_seed": int(reset["seed"]), **result}
+
     try:
-        with PolicyClient(url) as policy:
-            info = policy.info()
-            check_server(info, checkpoint)
-            if info["cameras"] != list(obs_cfg.get("cameras") or []):
-                raise RuntimeError(f"policy cameras {info['cameras']} differ from observation={obs_cfg['name']} ({obs_cfg.get('cameras')})")
-            if bool(info.get("env_state_dim", 0)) != bool(obs_cfg.get("object_state")):
-                raise RuntimeError(f"policy env_state_dim {info.get('env_state_dim', 0)} does not match observation={obs_cfg['name']}")
-            for s in todo:
-                seed = episode_seed(int(ev["seed"]), int(plain.get("training_seed", 0)), s["index"])
-                t0 = time.time()
-                r = run_episode(env, success_term, policy, s, task, obs_cfg, horizon=horizon, seed=seed)
-                record({"reset_index": s["index"], "split": s["split"], "scene_seed": int(s["seed"]), **r, "policy_seed": seed,
-                        "checkpoint": checkpoint, "seconds": round(time.time() - t0, 2)})
+        play_scenes(todo, server=ev["server"], checkpoint=checkpoint, obs_cfg=obs_cfg, eval_seed=ev["seed"],
+                    training_seed=plain.get("training_seed", 0), run_one=run_one, record=record)
     finally:
         env.close()

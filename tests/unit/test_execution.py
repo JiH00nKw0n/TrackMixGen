@@ -73,3 +73,20 @@ def test_follower_consumes_one_global_draw_per_original_waypoint():
     assert steps > 13 and draws.private_calls == steps - 13
     assert sum(rec.track["slot"]) == 13
     assert sorted(set(rec.seg_of_step)) == [0, 1] and rec.seg_len[0] + rec.seg_len[1] == steps
+
+
+def test_segment_table_maps_waypoints_to_record_segments():
+    from tmg.core.records import SEG_BRIDGE, SEG_SKILL
+    from tmg.generation.execution import SegmentTable, slot_sources
+
+    table = SegmentTable()
+    assert len(table) == 0 and table.total == 0 and table.seg_id_of(0) == -1 and table.kinds_per_waypoint() == []
+    table.add(3, seg_id=7, kind=SEG_BRIDGE)
+    table.add(2, seg_id=9, kind=SEG_SKILL)
+    assert table.total == 5 and table[1].seg_id == 9 and (table[1].start, table[1].end) == (3, 5)
+    assert [table.seg_id_of(k) for k in range(6)] == [7, 7, 7, 9, 9, 9]        # out of range: the last segment
+    assert table.kinds_per_waypoint() == [SEG_BRIDGE] * 3 + [SEG_SKILL] * 2
+    # a step that newly covers its own waypoint takes the official draw; an extra step draws privately
+    assert slot_sources({"k": 4, "new_slots": [3, 4]}) == (True, "global")
+    assert slot_sources({"k": 4, "new_slots": []}) == (False, "private")
+    assert slot_sources({"k": 4, "new_slots": [5]}) == (False, "private")

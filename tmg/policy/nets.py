@@ -25,6 +25,8 @@ import torch.distributions as D
 import torch.nn.functional as F
 from torch import Tensor, nn
 
+LOW_NOISE_STD = 1e-4   # robomimic's low_noise_eval: the mixture scales at evaluation time (a sample is almost one mode's mean)
+
 
 @dataclass(frozen=True)
 class BCRNNNetConfig:
@@ -132,7 +134,7 @@ class GMMHead(nn.Module):
         means = torch.tanh(self.mean(h)).reshape(*h.shape[:-1], self.num_modes, self.action_dim)
         raw = self.scale(h).reshape(*h.shape[:-1], self.num_modes, self.action_dim)
         if self.low_noise_eval and not self.training:
-            scales = torch.full_like(means, 1e-4)
+            scales = torch.full_like(means, LOW_NOISE_STD)
         else:
             scales = (F.softplus(raw) if self.std_activation == "softplus" else torch.exp(raw)) + self.min_std
         components = D.Independent(D.Normal(means, scales), 1)

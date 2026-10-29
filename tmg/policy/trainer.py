@@ -24,41 +24,45 @@ What the loop does, in order:
    write ``train_result.json``.
 
 The loop never imports a simulator; validation rollouts run in the simulator image through the policy server.
+The run folder's file names are ``tmg.core.layout`` (re-exported here for the callers that import them from the trainer).
 """
 from __future__ import annotations
 
-import json
 import random
 import shutil
 import subprocess
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
 import torch
 
 from tmg.config import dump_yaml, resolved
-from tmg.core.chunks import read_json, write_json
+from tmg.core.io_json import append_jsonl, read_jsonl, write_json
+from tmg.core.layout import (  # noqa: F401  re-exported: server, tests and scripts import the names from here
+    CHECKPOINT_JSON,
+    CHECKPOINTS_DIR,
+    PRETRAINED_DIR,
+    RESOLVED_CONFIG,
+    SELECTED_JSON,
+    TRAIN_LOG,
+    TRAIN_RESULT,
+    TRAINING_STATE,
+    VALIDATION_JSONL,
+    checkpoint_dir,
+)
 from tmg.core.provenance import write_provenance
+from tmg.core.seeding import seed_all
 from tmg.data.loader import FrameDataset, TrajectoryStore, collate, compute_stats
 from tmg.policy.ema import EMA
-from tmg.policy.io import make_io
+from tmg.policy.io import PolicyIO, make_io
 from tmg.policy.lerobot_policies import build_policy, task_policy_overrides
-
-CHECKPOINTS_DIR = "checkpoints"
-PRETRAINED_DIR = "pretrained_model"
-TRAINING_STATE = "training_state.pt"
-CHECKPOINT_JSON = "checkpoint.json"
-TRAIN_LOG = "train_log.jsonl"
-TRAIN_RESULT = "train_result.json"
-VALIDATION_JSONL = "validation.jsonl"
-SELECTED_JSON = "SELECTED.json"
 
 
 def seed_everything(seed: int) -> None:
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
+    """``random``, numpy and torch from one seed (``tmg.core.seeding.seed_all``)."""
+    seed_all(seed)
 
 
 def dataset_features(store: TrajectoryStore, observation: str = "image") -> dict:
@@ -97,10 +101,10 @@ def list_checkpoints(run_dir: Path) -> list[Path]:
     return sorted((p for p in root.iterdir() if p.is_dir() and (p / CHECKPOINT_JSON).exists()), key=lambda p: int(p.name))
 
 
-def save_checkpoint(run_dir: Path, *, update: int, epoch: int, policy, ema: EMA | None, io,
+def save_checkpoint(run_dir: Path, *, update: int, epoch: int, policy, ema: EMA | None, io: PolicyIO,
                     optimizer, scheduler, loss: float) -> Path:
     """Write ``checkpoints/<update>/`` (layout in the module docstring) and return its folder."""
-    folder = Path(run_dir) / CHECKPOINTS_DIR / f"{update:07d}"
+    folder = checkpoint_dir(run_dir, update)
     tmp = folder.with_name(folder.name + ".part")
     if tmp.exists():
         shutil.rmtree(tmp)
@@ -142,26 +146,49 @@ def run_validation_command(template: str, *, run_dir: Path, checkpoint: Path) ->
     return subprocess.run(cmd, shell=True).returncode
 
 
-def train(cfg) -> dict:
-    """Run the loop described in the module docstring.
+@dataclass
+class TrainSetup:
+    """Everything ``train`` needs once ``_setup`` has built it (in the order the module docstring lists)."""
 
-    Args:
-        cfg: the composed ``train`` config.
+    plain: dict
+    run_dir: Path
+    device: str
+    training: dict
+    policy_cfg: dict
+    observation: str
+    store: TrajectoryStore
+    features: dict
+    policy: object
+    io: PolicyIO
+    dataset: FrameDataset
+    batch_size: int
+    updates: int
+    optimizer: object
+    scheduler: object
+    ema: EMA | None
+    clip: float                    # gradient-norm clip; 0 disables
+    per_epoch: int                 # updates per logging epoch
+    ckpt_every: int                # updates between checkpoints
+    use_amp: bool
+    scaler: object                 # torch.amp.GradScaler
+    validation_cmd: str | None
+    start: int                     # update count resumed from (0 for a fresh run)
+    checkpoints: list[str] = field(default_factory=list)   # checkpoint folders so far (resumed ones included)
 
-    Returns:
-        The summary written to ``train_result.json``.
-    """
+
+def _setup(cfg) -> TrainSetup:
+    """Steps 1, 2 and the preparation of 3 to 6: run folder, seeds, dataset, policy, ``PolicyIO``, optimizer, EMA, resume."""
     plain = resolved(cfg)
     run_dir = Path(plain["output"])
     run_dir.mkdir(parents=True, exist_ok=True)
-    dump_yaml(plain, run_dir / "resolved_config.yaml")
+    dump_yaml(plain, run_dir / RESOLVED_CONFIG)
     write_provenance(run_dir, extra={"command": "train", "output": str(run_dir)})
     training, policy_cfg = plain["training"], plain["policy"]
     device = str(plain.get("device", "cuda"))
     if device.startswith("cuda") and not torch.cuda.is_available():
         raise RuntimeError("device=cuda but no GPU is visible")
     torch.set_num_threads(int(training.get("num_threads", 8)))
-    seed_everything(int(plain["seed"]))
+    seed_all(int(plain["seed"]))
 
     observation = str(plain["observation"]["name"])
     store = TrajectoryStore.load(Path(plain["dataset"]["path"]), action_key=str(training.get("action_key", "actions")))
@@ -195,59 +222,98 @@ def train(cfg) -> dict:
         print(f"[tmg] resumed from {existing[-1]} at update {start}", flush=True)
     print(f"[tmg] train {policy_cfg['name']} on {store.num_demos} demos / {store.num_frames} frames, batch {batch_size}, "
           f"updates {start}->{updates}, device {device}, ema {ema is not None}, clip {clip}", flush=True)
+    return TrainSetup(plain=plain, run_dir=run_dir, device=device, training=training, policy_cfg=policy_cfg,
+                      observation=observation, store=store, features=features, policy=policy, io=io, dataset=dataset,
+                      batch_size=batch_size, updates=updates, optimizer=optimizer, scheduler=scheduler, ema=ema, clip=clip,
+                      per_epoch=per_epoch, ckpt_every=ckpt_every, use_amp=use_amp, scaler=scaler, validation_cmd=validation_cmd,
+                      start=start, checkpoints=[str(p) for p in existing])
 
-    rng = np.random.default_rng(int(plain["seed"]) + start)
-    batches = dataset.batches(batch_size, rng)
-    log_path = run_dir / TRAIN_LOG
-    epoch_losses, epoch_norms, epoch_clipped, t_epoch, n_examples = [], [], 0, time.time(), 0
-    checkpoints = [str(p) for p in existing]
-    update = start
-    while update < updates:
+
+def _train_step(s: TrainSetup, batch: dict) -> tuple[float, float]:
+    """One optimizer update on a prepared batch: forward (mixed precision when enabled), backward, gradient-norm clip,
+    step, scheduler and EMA. Returns ``(loss, gradient norm before clipping)``."""
+    with torch.autocast(device_type="cuda", enabled=s.use_amp):
+        loss, _ = s.policy.forward(batch)
+    s.optimizer.zero_grad(set_to_none=True)
+    s.scaler.scale(loss).backward()
+    s.scaler.unscale_(s.optimizer)
+    norm = float(torch.nn.utils.clip_grad_norm_(s.policy.parameters(), s.clip if s.clip > 0 else float("inf")))
+    s.scaler.step(s.optimizer)
+    s.scaler.update()
+    if s.scheduler is not None:
+        s.scheduler.step()
+    if s.ema is not None:
+        s.ema.update(s.policy)
+    return float(loss.detach()), norm
+
+
+class EpochLog:
+    """Running statistics of the current logging epoch, written as one ``train_log.jsonl`` row at its end."""
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self) -> None:
+        self.losses, self.norms, self.clipped, self.t0, self.examples = [], [], 0, time.time(), 0
+
+    def add(self, loss: float, norm: float, *, clipped: bool, examples: int) -> None:
+        self.losses.append(loss)
+        self.norms.append(norm)
+        self.clipped += int(clipped)
+        self.examples += examples
+
+    def row(self, *, epoch: int, update: int, lr: float, ema_decay: float | None) -> dict:
+        seconds = time.time() - self.t0
+        return {"epoch": epoch, "update": update, "loss": float(np.mean(self.losses)),
+                "grad_norm_mean": float(np.mean(self.norms)), "grad_norm_max": float(np.max(self.norms)),
+                "clipped_fraction": self.clipped / max(len(self.norms), 1),
+                "lr": lr, "seconds": round(seconds, 2),
+                "examples_per_s": round(self.examples / max(seconds, 1e-9), 1), "ema_decay": ema_decay}
+
+
+def train(cfg) -> dict:
+    """Run the loop described in the module docstring.
+
+    Args:
+        cfg: the composed ``train`` config.
+
+    Returns:
+        The summary written to ``train_result.json``.
+    """
+    s = _setup(cfg)
+    rng = np.random.default_rng(int(s.plain["seed"]) + s.start)
+    batches = s.dataset.batches(s.batch_size, rng)
+    log_path = s.run_dir / TRAIN_LOG
+    epoch_log = EpochLog()
+    update = s.start
+    while update < s.updates:
         idx = next(batches)
-        batch = io.prepare(collate([dataset[int(i)] for i in idx]))
-        with torch.autocast(device_type="cuda", enabled=use_amp):
-            loss, _ = policy.forward(batch)
-        optimizer.zero_grad(set_to_none=True)
-        scaler.scale(loss).backward()
-        scaler.unscale_(optimizer)
-        norm = float(torch.nn.utils.clip_grad_norm_(policy.parameters(), clip if clip > 0 else float("inf")))
-        scaler.step(optimizer)
-        scaler.update()
-        if scheduler is not None:
-            scheduler.step()
-        if ema is not None:
-            ema.update(policy)
+        batch = s.io.prepare(collate([s.dataset[int(i)] for i in idx]))
+        loss, norm = _train_step(s, batch)
         update += 1
-        n_examples += len(idx)
-        epoch_losses.append(float(loss.detach()))
-        epoch_norms.append(norm)
-        epoch_clipped += int(clip > 0 and norm > clip)
-        if update % per_epoch == 0 or update == updates:
-            epoch = update // per_epoch
-            seconds = time.time() - t_epoch
-            row = {"epoch": epoch, "update": update, "loss": float(np.mean(epoch_losses)),
-                   "grad_norm_mean": float(np.mean(epoch_norms)), "grad_norm_max": float(np.max(epoch_norms)),
-                   "clipped_fraction": epoch_clipped / max(len(epoch_norms), 1),
-                   "lr": float(optimizer.param_groups[0]["lr"]), "seconds": round(seconds, 2),
-                   "examples_per_s": round(n_examples / max(seconds, 1e-9), 1), "ema_decay": ema.decay() if ema else None}
-            with open(log_path, "a") as f:
-                f.write(json.dumps(row) + "\n")
+        epoch_log.add(loss, norm, clipped=s.clip > 0 and norm > s.clip, examples=len(idx))
+        if update % s.per_epoch == 0 or update == s.updates:
+            epoch = update // s.per_epoch
+            row = epoch_log.row(epoch=epoch, update=update, lr=float(s.optimizer.param_groups[0]["lr"]),
+                                ema_decay=s.ema.decay() if s.ema else None)
+            append_jsonl(log_path, row)
             print(f"[tmg] epoch {epoch} update {update} loss {row['loss']:.4f} grad {row['grad_norm_mean']:.1f}/{row['grad_norm_max']:.1f} "
                   f"clipped {row['clipped_fraction']:.2f} lr {row['lr']:.2e} {row['examples_per_s']} ex/s", flush=True)
-            epoch_losses, epoch_norms, epoch_clipped, t_epoch, n_examples = [], [], 0, time.time(), 0
-            if update % ckpt_every == 0 or update == updates:
-                folder = save_checkpoint(run_dir, update=update, epoch=epoch, policy=policy, ema=ema, io=io,
-                                         optimizer=optimizer, scheduler=scheduler, loss=row["loss"])
-                checkpoints.append(str(folder))
+            epoch_log.reset()
+            if update % s.ckpt_every == 0 or update == s.updates:
+                folder = save_checkpoint(s.run_dir, update=update, epoch=epoch, policy=s.policy, ema=s.ema, io=s.io,
+                                         optimizer=s.optimizer, scheduler=s.scheduler, loss=row["loss"])
+                s.checkpoints.append(str(folder))
                 print(f"[tmg] checkpoint {folder}", flush=True)
-                if validation_cmd:
-                    run_validation_command(str(validation_cmd), run_dir=run_dir, checkpoint=folder)
-    result = {"policy": policy_cfg["name"], "observation": observation, "updates": updates, "batch_size": batch_size, "checkpoints": checkpoints,
-              "dataset": plain["dataset"]["path"], "demos": store.num_demos, "frames": store.num_frames,
-              "features": {k: (list(v) if isinstance(v, tuple) else v) for k, v in features.items()},
-              "selection": training.get("selection", "best_validation")}
-    write_json(run_dir / TRAIN_RESULT, result)
-    print(f"[tmg] training done: {len(checkpoints)} checkpoints in {run_dir}", flush=True)
+                if s.validation_cmd:
+                    run_validation_command(str(s.validation_cmd), run_dir=s.run_dir, checkpoint=folder)
+    result = {"policy": s.policy_cfg["name"], "observation": s.observation, "updates": s.updates, "batch_size": s.batch_size,
+              "checkpoints": s.checkpoints, "dataset": s.plain["dataset"]["path"], "demos": s.store.num_demos,
+              "frames": s.store.num_frames,
+              "features": {k: (list(v) if isinstance(v, tuple) else v) for k, v in s.features.items()},
+              "selection": s.training.get("selection", "best_validation")}
+    write_json(s.run_dir / TRAIN_RESULT, result)
+    print(f"[tmg] training done: {len(s.checkpoints)} checkpoints in {s.run_dir}", flush=True)
     return result
 
 
@@ -272,11 +338,7 @@ def select_checkpoint(run_dir: Path, rule: str = "best_validation") -> dict:
         path = run_dir / VALIDATION_JSONL
         if not path.exists():
             raise FileNotFoundError(f"{path} missing: validate the checkpoints first (make validate)")
-        rows = {}
-        for line in path.read_text().splitlines():
-            if line.strip():
-                r = json.loads(line)
-                rows[Path(r["checkpoint"]).name] = float(r["success_rate"])
+        rows = {Path(r["checkpoint"]).name: float(r["success_rate"]) for r in validation_rows(run_dir)}
         missing = [f.name for f in folders if f.name not in rows]
         if missing:
             raise ValueError(f"checkpoints without a validation row: {missing}")
@@ -290,13 +352,13 @@ def select_checkpoint(run_dir: Path, rule: str = "best_validation") -> dict:
     return out
 
 
+def select_checkpoint_cmd(cfg) -> dict:
+    """``tmg select_checkpoint``: ``select_checkpoint`` of the composed config's run folder (``output``) with its
+    ``training.selection`` rule."""
+    plain = resolved(cfg)
+    return select_checkpoint(plain["output"], str(plain["training"].get("selection", "best_validation")))
+
+
 def validation_rows(run_dir: Path) -> list[dict]:
-    """Rows of ``validation.jsonl`` (``make validate`` appends one per evaluated checkpoint)."""
-    path = Path(run_dir) / VALIDATION_JSONL
-    if not path.exists():
-        return []
-    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
-
-
-def checkpoint_meta(folder: Path) -> dict:
-    return read_json(Path(folder) / CHECKPOINT_JSON)
+    """Rows of ``validation.jsonl`` (``make validate`` appends one per evaluated checkpoint; empty when absent)."""
+    return read_jsonl(Path(run_dir) / VALIDATION_JSONL)

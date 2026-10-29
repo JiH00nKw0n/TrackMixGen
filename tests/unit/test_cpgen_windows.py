@@ -77,11 +77,11 @@ def test_runtime_picks_one_source_per_attempt_when_all_sources_are_used():
 
     picks = set()
     for _ in range(40):
-        runtime.begin_attempt(Gen, {}, {})
+        runtime.begin_attempt(Gen)
         picks.add(Gen.policy.current_constraint_sequence_idx)
         assert Gen.policy.current_constraint_idx == 0
     assert picks <= set(range(10)) and len(picks) > 3
     official = rt.CPGenRuntime(method, chunk_seed=3, records_dir=None)        # selection=official: CP-Gen's own choice (sequence 0)
     Gen.policy.current_constraint_sequence_idx = 0
-    official.begin_attempt(Gen, {}, {})
+    official.begin_attempt(Gen)
     assert Gen.policy.current_constraint_sequence_idx == 0

@@ -2,31 +2,20 @@
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 
 from tmg.core.chunks import Chunk
-from tmg.core.records import ATTEMPTS_JSONL, RECORDS_DIR, validate_records
-from tmg.generation.base import ChunkSpec, SyntheticDataGenerator
+from tmg.core.records import ATTEMPTS_JSONL, RECORDS_DIR
+from tmg.generation.base import ChunkSpec
+from tmg.generation.generators._shared import count_hdf5_demos, records_summary
 from tmg.generation.generators.mimicgen import config_builder
-from tmg.generation.simulators.robosuite import env_class_name, load_scene_chain
+from tmg.generation.generators.robosuite_base import RobosuiteGenerator
+
+__all__ = ["ENTRYPOINT", "IMPORTANT_STATS", "MG_CONFIG", "MimicGenGenerator", "RobosuiteGenerator"]
 
 IMPORTANT_STATS = "important_stats.json"
 MG_CONFIG = "mg_config.json"
 ENTRYPOINT = "tmg.generation.generators.mimicgen.entrypoint"
-
-
-class RobosuiteGenerator(SyntheticDataGenerator):
-    """Shared part of the adapters that run on robosuite: scene chain resolution and environment class name."""
-    simulator = "robosuite"
-
-    def scene_chain(self) -> dict:
-        """The scene config with its parent chain inlined (``simulators.robosuite.load_scene_chain``)."""
-        return load_scene_chain(self.scene, self.generator_cfg["name"])
-
-    def env_name(self) -> str:
-        """Name of the robosuite environment class of (task, scene), e.g. ``Square_D1`` or ``Square_OURS``."""
-        return env_class_name(self.task, self.scene_chain())
 
 
 class MimicGenGenerator(RobosuiteGenerator):
@@ -36,6 +25,7 @@ class MimicGenGenerator(RobosuiteGenerator):
     our protocol; the chunk process (``entrypoint.py``) installs the grafts before running it.
     """
     name = "mimicgen"
+    entrypoint_module = ENTRYPOINT
 
     def template_path(self) -> Path:
         """Path of the MimicGen config template of the task under ``generator.source_root``.
@@ -82,13 +72,10 @@ class MimicGenGenerator(RobosuiteGenerator):
             output_folder=str(folder), attempts=chunk.attempts, seed=chunk.seed)
         config_path = config_builder.save_config(config, folder / MG_CONFIG)
         experiment = config_builder.experiment_name(env_name, chunk.attempts, chunk.seed)
-        return ChunkSpec(
-            generator=self.name, chunk={"index": chunk.index, "seed": chunk.seed, "attempts": chunk.attempts},
-            folder=str(folder), records_dir=str(folder / RECORDS_DIR), task=self.task, scene=self.scene_chain(),
-            method=self.method, protocol=protocol, generator_config=str(config_path),
+        return self._spec(
+            chunk, folder, generator=self.name, scene=self.scene_chain(), protocol=protocol, generator_config=str(config_path),
             expected_outputs=[str(folder / experiment / IMPORTANT_STATS), str(folder / RECORDS_DIR / ATTEMPTS_JSONL)],
-            extra={"env_name": env_name, "experiment": experiment,
-                   "graft_hashes": dict(self.generator_cfg.get("graft_hashes") or {}),
+            extra={"env_name": env_name, "experiment": experiment, "graft_hashes": self.graft_hashes(),
                    "commit": self.generator_cfg.get("commit")})
 
     def demo_layout(self) -> dict:
@@ -96,26 +83,20 @@ class MimicGenGenerator(RobosuiteGenerator):
         return {"demo_glob": "*/demo.hdf5", "image_key": "{cam}_image", "actions_key": "actions", "states_key": "states",
                 "labels_from_records": False, "success_only_file": True}
 
-    def chunk_command(self, spec: ChunkSpec, spec_path: Path) -> list[str]:
-        """Command line of the chunk process: the entrypoint module with the spec path."""
-        return [sys.executable, "-m", ENTRYPOINT, "--spec", str(spec_path)]
-
     def chunk_result(self, spec: ChunkSpec) -> dict | None:
         """Summary of a finished chunk, an ``error`` entry when MimicGen's outputs and our records disagree,
         or None when the chunk did not finish. Generic record checks live in ``tmg.core.records``."""
-        import h5py
-
         stats_path = Path(spec.folder) / spec.extra["experiment"] / IMPORTANT_STATS
-        if not stats_path.exists() or not (Path(spec.records_dir) / ATTEMPTS_JSONL).exists():
+        if not stats_path.exists():
             return None
-        checked = validate_records(spec.records_dir, spec.chunk["attempts"])
-        if not checked["ok"]:
-            return {"error": checked["error"]}
+        summary = records_summary(spec.records_dir, spec.chunk["attempts"], check_ok=True)
+        if summary is None or "error" in summary:
+            return summary
         stats = json.loads(stats_path.read_text())
-        successes, failures = checked["successes"], checked["failures"]
-        if (len(checked["lines"]), successes, failures) != tuple(int(stats.get(k, -1)) for k in
-                                                                 ("num_attempts", "num_success", "num_failures")):
-            return {"error": f"records ({len(checked['lines'])} attempts, {successes} successes, {failures} failures) "
+        attempts, successes, failures = len(summary["lines"]), summary["successes"], summary["failures"]
+        official = tuple(int(stats.get(k, -1)) for k in ("num_attempts", "num_success", "num_failures"))
+        if (attempts, successes, failures) != official:
+            return {"error": f"records ({attempts} attempts, {successes} successes, {failures} failures) "
                              f"differ from important_stats.json ({stats.get('num_attempts')}, {stats.get('num_success')}, "
                              f"{stats.get('num_failures')})"}
         cap = spec.protocol.get("max_num_failures")
@@ -129,13 +110,12 @@ class MimicGenGenerator(RobosuiteGenerator):
             if not path.exists():
                 return {"error": f"{path} missing although {want} demonstrations were expected"}
             try:
-                with h5py.File(path, "r") as f:
-                    counts[name] = len(f["data"].keys()) if "data" in f else 0
+                counts[name] = count_hdf5_demos(path)
             except Exception as error:  # noqa: BLE001
                 return {"error": f"unreadable {path}: {error!r}"}
             if counts[name] != want:
                 return {"error": f"{path} holds {counts[name]} demonstrations, expected {want}"}
-        return {"attempts": len(checked["lines"]), "successes": successes, "failures": failures,
+        return {"attempts": attempts, "successes": successes, "failures": failures,
                 "num_problematic": stats.get("num_problematic"), "time_hours": stats.get("time spent (hrs)"),
                 "demo_hdf5": str(stats_path.parent / "demo.hdf5") if successes else None,
                 "failed_hdf5": str(stats_path.parent / "demo_failed.hdf5") if expected["demo_failed.hdf5"] else None,

@@ -8,6 +8,8 @@ from __future__ import annotations
 import msgpack
 import numpy as np
 
+MAX_MESSAGE = 64 * 1024 * 1024   # bytes per websocket message, server and client alike (a few 84x84 cameras fit easily)
+
 
 def _encode(obj):
     if isinstance(obj, np.ndarray):

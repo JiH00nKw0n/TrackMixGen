@@ -5,11 +5,13 @@ adapter calls, the current implementations behind them, and the pieces they shar
 simulator, so every class is unit-tested with numpy arrays alone.
 
 ```
-interfaces.py   MixContext, MixedSegment, SegmentMixer, PathFollower, Method, build_method (type registries)
-guided_mix.py   GuidedMixer: source mixing guided by the measured ranking         (mixing.type: guided)
+interfaces.py   MixContext, MixedSegment, SegmentMixer, PathFollower, Method, build_method and the type
+                registries _MIXERS / _FOLLOWERS (MixerType, FollowerType protocols)
+guided_mix.py   GuidedMixer and its GuidedMixConfig: source mixing guided by the measured ranking (mixing.type: guided)
 event_mix.py    event-aligned blending of two segments (used by GuidedMixer)
 tracking.py     ErrorAdaptiveFollower, EndEffectorPath: error-adaptive following  (tracking.type: error_adaptive)
-grippers.py     gripper event detectors: SignGripper (scalar +/- commands), ClosureGripper (many-joint hands)
+grippers.py     gripper state and event rules: gripper_states / change_indices (scalar sign commands),
+                SignGripper and ClosureGripper detectors (scalar +/- commands, many-joint hands), build_detector
 ranking.py      reading the measured source rankings and splitting them into high- and low-success groups
 ```
 
@@ -30,12 +32,13 @@ segment to the current object pose, the adapter calls `mixer.mix(context)`.
 | `src_object_poses` | per source: the reference object's pose (4x4) at that source's segment start, so a mixer can express every segment in the object frame |
 | `src_segments` | per source: (eef_start, targets, gripper) of its segment |
 | `num_sources`, `has_reference_object` | how many sources exist; whether the subtask has a reference object (no object: no frame to mix in) |
-| `rng` | a numpy generator seeded from the chunk seed and the call index; use it for every random choice so a run is reproducible |
+| `rng` | optional (defaults to `default_rng(0)`); `GuidedMixer` ignores it and draws its donor choice from its own generator seeded with `(chunk_seed, call index, seed_offset)`, so a run is reproducible without the adapter passing a stream. A new mixer may use `rng` only if the adapter seeds it deliberately |
 
 The mixer returns a `MixedSegment`: the segment the generator should transform and execute (`eef_start`,
 `targets`, `gripper`) and a `record` dict. Returning the inputs unchanged is the identity (the official
 behaviour). The record goes into the attempt's `subtasks[i]["mix"]` entry of `attempts.jsonl`; `GuidedMixer`
-writes `mixed`, `source_a`, `donor`, `weight_a`, `eligible_donors` and, when it did nothing, `identity_reason`.
+writes `call`, `subtask`, `mixed`, `source_a`, `weight_a`, `good`, `eligible_donors`, on a mix `source_b`,
+`anchor_rotation_degrees` and `alignment`, and when it did nothing `identity_reason`.
 
 **Path follower, once per trajectory.** When the official code starts executing a transformed trajectory (all
 waypoint sequences of a subtask, all end effectors), the adapter makes one follower with `method.follower_factory()`
@@ -110,11 +113,13 @@ the `trackmix` folders; use it only for a quick look.
 **Another algorithm.** Three steps, no adapter changes:
 
 1. Write the class in this folder. A mixer implements `mix(context) -> MixedSegment` and a class method
-   `from_config(cfg, chunk_seed=...)` that reads its own values from the `mixing` block. A follower implements the
-   four `PathFollower` methods and a class method `factory(cfg)` that returns a zero-argument constructor (one
-   follower per trajectory). Use `context.rng` (mixer) or a generator seeded from the chunk seed (follower) for
-   every random draw. Put everything you want to analyse later into the returned `record`.
-2. Register the class under a name in `_mixer_types()` or `_follower_types()` in `interfaces.py`.
+   `from_config(cfg, chunk_seed=...)` that reads its own values from the `mixing` block (`MixerType` in
+   `interfaces.py`). A follower implements the four `PathFollower` methods and a class method `factory(cfg)` that
+   returns a zero-argument constructor, one follower per trajectory (`FollowerType`). Seed every random draw from
+   the chunk seed yourself, as `GuidedMixer` does with `SeedSequence([chunk_seed, call, seed_offset])`; the
+   adapters do not seed `context.rng`. Put everything you want to analyse later into the returned `record`.
+2. Register the class under a name in `interfaces.py`: followers in the `_FOLLOWERS` dict, mixers in
+   `_mixer_types()` (filled lazily because `guided_mix` imports `MixContext` from `interfaces`).
 3. Add a method file that names it (`mixing: {type: <name>, ...}` or `tracking: {type: <name>, ...}`) and lists
    its values. An unknown type stops `build_method` with the list of known names.
 

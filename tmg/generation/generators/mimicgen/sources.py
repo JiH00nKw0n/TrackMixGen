@@ -1,51 +1,38 @@
 """MimicGen source demonstrations: download from the Hugging Face release and add ``datagen_info``.
 
 The released source files do not carry ``datagen_info``; MimicGen's ``prepare_src_dataset.py`` replays the
-demos in the simulator to add it, so this runs inside the robosuite image.
+demos in the simulator to add it, so this runs inside the robosuite image. ``download`` and ``file_md5`` live in
+``tmg.generation.generators._sources`` and are re-exported here because the other generators import them from this module.
 """
 from __future__ import annotations
 
-import hashlib
-import json
-import shutil
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
+
+import h5py
+
+from tmg.core.layout import indexed_keys
+from tmg.generation.generators._sources import (
+    count_demos,
+    download,
+    ensure_downloaded,
+    file_facts,
+    file_md5,
+    write_manifest,
+)
+from tmg.generation.simulators.robosuite import interface_name
+
+__all__ = ["MANIFEST", "PREPARE_MODULE", "demos_without_datagen_info", "download", "fetch", "file_md5", "prepare"]
 
 PREPARE_MODULE = "mimicgen.scripts.prepare_src_dataset"
 MANIFEST = "manifest.json"
 
 
-def file_md5(path: Path) -> str:
-    """Hex md5 of a file read in 1 MiB blocks."""
-    digest = hashlib.md5()
-    with open(path, "rb") as f:
-        for block in iter(lambda: f.read(1 << 20), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
-def download(repo_id: str, filename: str, dest: Path, revision: str | None = None) -> Path:
-    """Download one file of a Hugging Face dataset repo (at ``revision`` when given) to ``dest`` (written atomically)."""
-    from huggingface_hub import hf_hub_download
-
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(dir=str(dest.parent)) as tmp:
-        got = hf_hub_download(repo_id=repo_id, filename=filename, repo_type="dataset", cache_dir=tmp, revision=revision)
-        partial = dest.with_suffix(dest.suffix + ".partial")
-        shutil.move(str(Path(got).resolve()), str(partial))
-        partial.chmod(0o644)      # the Hugging Face cache keeps its files read-only; the CP-Gen step appends constraint windows
-        partial.replace(dest)
-    return dest
-
-
 def demos_without_datagen_info(path: Path) -> list[str]:
     """Demo keys of a source hdf5 that lack ``datagen_info`` (empty list means ready for MimicGen)."""
-    import h5py
-
     with h5py.File(str(path), "r") as f:
-        demos = sorted(f["data"].keys(), key=lambda k: int(k.split("_")[-1]))
+        demos = indexed_keys(f["data"].keys())
         return [d for d in demos if f"data/{d}/datagen_info" not in f]
 
 
@@ -57,13 +44,12 @@ def prepare(path: Path, interface: str) -> None:
     subprocess.run(cmd, check=True, stdin=subprocess.DEVNULL)
 
 
-def fetch(task: dict, generator: dict, *, force: bool = False) -> dict:
+def fetch(task: dict, generator: dict) -> dict:
     """Make the task's source file ready and return its manifest.
 
     Args:
         task: task config (``source``, ``source_registry_name``, ``datagen_interface``, ``name``).
         generator: generator config (``source_repo``).
-        force: re-download even if the file exists.
 
     Returns:
         The manifest written next to the file (path, bytes, md5, demo count, whether it was prepared here).
@@ -75,23 +61,16 @@ def fetch(task: dict, generator: dict, *, force: bool = False) -> dict:
     name = str(task.get("source_registry_name", task["name"]))
     if name not in registry:
         raise KeyError(f"mimicgen has no source dataset {name!r}; known: {sorted(registry)}")
-    if force or not dest.exists():
-        print(f"[tmg] downloading {registry[name]['url']} -> {dest}", flush=True)
-        download(str(generator.get("source_repo", mimicgen.HF_REPO_ID)), registry[name]["url"], dest)
-    else:
-        print(f"[tmg] using existing {dest}", flush=True)
+    ensure_downloaded(str(generator.get("source_repo", mimicgen.HF_REPO_ID)), registry[name]["url"], dest)
     missing = demos_without_datagen_info(dest)
     prepared = bool(missing)
     if missing:
-        prepare(dest, str(task.get("datagen_interface") or f"MG_{task['env_prefix']}"))
+        prepare(dest, interface_name(task))
         if demos_without_datagen_info(dest):
             raise RuntimeError(f"{dest} still lacks datagen_info after prepare_src_dataset")
-    import h5py
-
-    with h5py.File(str(dest), "r") as f:
-        n = len(f["data"].keys())
-    manifest = {"task": task["name"], "file": str(dest), "bytes": dest.stat().st_size, "md5": file_md5(dest),
-                "demos": n, "prepared_here": prepared, "registry_url": registry[name]["url"]}
-    (dest.parent / MANIFEST).write_text(json.dumps(manifest, indent=2) + "\n")
+    n = count_demos(dest)
+    manifest = {"task": task["name"], "file": str(dest), **file_facts(dest), "demos": n, "prepared_here": prepared,
+                "registry_url": registry[name]["url"]}
+    write_manifest(dest.parent / MANIFEST, manifest, indent=2, trailing_newline=True)
     print(f"[tmg] {task['name']}: {n} source demos ready (md5 {manifest['md5']})", flush=True)
     return manifest

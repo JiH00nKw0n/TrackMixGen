@@ -7,10 +7,11 @@ when ``DONE.json`` exists at the pool root.
 """
 from __future__ import annotations
 
-import json
 import shutil
 from dataclasses import asdict, dataclass
 from pathlib import Path
+
+from tmg.core.io_json import read_json, read_jsonl, write_json  # noqa: F401  re-exported: callers import them from here
 
 CHUNKS_DIR = "chunks"
 CHUNK_DONE = "CHUNK_DONE.json"
@@ -64,21 +65,6 @@ def plan_chunks(attempts: int, chunk: int, seed_offset: int) -> list[Chunk]:
         remaining -= n
         index += 1
     return out
-
-
-def write_json(path: Path, data) -> Path:
-    """Write ``data`` as pretty JSON atomically (temp file then rename) and return the path."""
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(data, indent=2, sort_keys=True, default=str) + "\n")
-    tmp.replace(path)
-    return path
-
-
-def read_json(path: Path):
-    """Load a JSON file."""
-    return json.loads(Path(path).read_text())
 
 
 def chunk_is_done(folder: Path) -> bool:

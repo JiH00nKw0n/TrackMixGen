@@ -18,6 +18,9 @@
 #   TMG_RESULTS_ROOT (persistent summaries and driver logs; defaults to the data root),
 #   GENERATION (pool_isaac), SELECTION (source selection rule in the folder names, official; the Isaac Lab generators always use their
 #   official rule), TRAIN_OVERRIDES (extra `tmg train` overrides), EVAL_EXTRA (extra `tmg eval` overrides),
+#   METHOD (none: the official generator settings; trackmix, tracking_only or mixup_only for a method check, where mixing
+#   needs the task's ranking file configs/experiment/generator/<generator>/ranking/<task>.yaml),
+#   PORT_BASE (8800: first policy-server port; each task takes 120 ports, so two drivers at once need different bases),
 #   MINI (1: an end-to-end check at toy scale: 20-success pools, 10-demo datasets, 200 training updates, 6 evaluation
 #   scenes per split; same code path and files as the real run, finishes in about two hours per task).
 set -uo pipefail
@@ -29,11 +32,11 @@ SEQUENTIAL_TASKS=${SEQUENTIAL_TASKS:-0}
 GENERATION=${GENERATION:-pool_isaac}; TRAIN_OVERRIDES=${TRAIN_OVERRIDES:-}; EVAL_EXTRA=${EVAL_EXTRA:-}
 if [ "${MINI:-0}" = 1 ]; then
   GENERATION=test/pilot50; SIZE=10; VAL_PARALLEL=1; TEST_SHARDS=2
-  TRAIN_OVERRIDES="training.by_policy.diffusion_policy.image.updates=200 training.updates_per_epoch=100 training.checkpoint_every_epochs=2 $TRAIN_OVERRIDES"
+  TRAIN_OVERRIDES="training.by_policy.$POLICY.image.updates=200 training.by_policy.$POLICY.low_dim.updates=200 training.updates_per_epoch=100 training.checkpoint_every_epochs=2 $TRAIN_OVERRIDES"
   EVAL_EXTRA="max_scenes=6 $EVAL_EXTRA"
   BUNDLE_NAME=${BUNDLE_NAME:-isaaclab_mini_$(date +%Y%m%d)}
 fi
-SCENE=ours; METHOD=none; OBSERVATION=${OBSERVATION:-image}   # low_dim: the tasks' object_state terms (task configs, 2026-10-29)
+SCENE=ours; METHOD=${METHOD:-none}; OBSERVATION=${OBSERVATION:-image}   # low_dim: the tasks' object_state terms (task configs, 2026-10-29)
 SELECTION=${SELECTION:-official}
 GEN_NAME=${GENERATION##*/}       # pool folders are named after the config's `name`, without the `test/` folder
 DATA_ROOT=$(make -s -C "$REPO" print-data-root CLUSTER="$CLUSTER")
@@ -101,7 +104,7 @@ policy_task() {   # all seeds of one task, SEED_PARALLEL at a time; each seed ha
 }
 
 policy_lane() {
-  local port=8800
+  local port=${PORT_BASE:-8800}
   for job in $JOBS; do
     IFS=: read -r gen image task <<< "$job"
     until [ -f "$(dataset_of $gen $task)" ] && [ -f "$(resets_of $gen $task)" ]; do

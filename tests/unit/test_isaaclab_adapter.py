@@ -1,6 +1,8 @@
 """Isaac Lab adapter units that run without Isaac Sim: chunk spec, entrypoint grafting, interval cutting."""
 import ast
+import json
 import types
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -17,6 +19,21 @@ def test_soft_generator_uses_the_soft_builder(tmp_path, monkeypatch):
     gen = make_generator(cfg)
     spec = gen.prepare_chunk(plan_chunks(5, 5, 1)[0], tmp_path / "c")
     assert spec.extra["soft"] is True and spec.extra["package"] == "softmimicgen.datagen" and "--task" not in spec.extra["script_args"]
+    # the whole chunk spec of a SoftMimicGen chunk, as the committed adapter wrote it (the entrypoint reads these keys)
+    assert spec.extra == {
+        "package": "softmimicgen.datagen", "soft": True,
+        "script": str(Path(gen.generator_cfg["source_root"]) / "scripts/imitation_learning/isaaclab_mimic/generate_dataset.py"),
+        "script_args": ["--headless", "--enable_cameras", "--device", "cuda:0", "--num_envs", "1", "--generation_num_trials", "5",
+                        "--input_file", str(tmp_path / "sources/softmimicgen/rope/source.hdf5"), "--output_file", str(tmp_path / "c/generated.hdf5"),
+                        "--kit_args", "--/renderer/multiGpu/enabled=false --/renderer/activeGpu=0"],
+        "layout": {"eefs": ["robot0"], "arm_action_dims": {"robot0": [0, 6]}, "hand_prefixes": None, "hand_term": None, "measure_links": None,
+                   "noise_draw_shapes": [6]},
+        "graft_hashes": {"generate": None, "trajectory": None, "execute": None},
+        "camera_module": None, "env_name": "Isaac-Rope-Franka-IK-Rel-Mimic-v0"}
+    assert list(spec.extra) == ["package", "soft", "script", "script_args", "layout", "graft_hashes", "camera_module", "env_name"]
+    assert spec.generator_config == "" and spec.generator == "softmimicgen" and spec.chunk == {"index": 0, "seed": 2, "attempts": 5}
+    assert spec.records_dir == str(tmp_path / "c/records") and spec.expected_outputs == [str(tmp_path / "c/records/attempts.jsonl")]
+    assert json.loads((tmp_path / "c/chunk_args.json").read_text()) == spec.extra["script_args"]
 
 
 def test_entrypoint_inserts_install_before_main_guard(tmp_path):
@@ -60,6 +77,13 @@ def test_cut_interval_aligns_two_hands_to_the_common_source_interval():
     unequal = {"left": {**active["left"], "prefix": 1, "raw": wps(7, 100)}, "right": active["right"]}
     with pytest.raises(NotImplementedError):
         _cut_interval(unequal, ["left", "right"], 0, W, {})
+    # second interval [6, 10): the right hand continues its trajectory (its bridge was spent in the first interval, so no
+    # prefix counts now, and its body starts 2 + 6 waypoints in); the left hand starts a new subtask without a bridge
+    later = {"right": active["right"], "left": {"raw": wps(4, 200), "begin": 6, "end": 10, "prefix": 0, "subtask": 1}}
+    interval = _cut_interval(later, ["left", "right"], 6, W, {"left": active["left"]["raw"][-1]})
+    assert (interval.start, interval.end, interval.kinds, interval.source_indices) == (6, 10, [1, 1, 1, 1], [6, 7, 8, 9])
+    assert interval.subtasks == {"left": 1, "right": 0} and len(interval.waypoints["left"]) == len(interval.waypoints["right"]) == 4
+    assert interval.waypoints["right"][0] is active["right"]["raw"][8] and interval.waypoints["left"][0] is later["left"]["raw"][0]
 
 
 def test_layout_hand_layout_reads_the_action_term():

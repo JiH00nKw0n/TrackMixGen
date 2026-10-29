@@ -2,79 +2,52 @@
 
     python -m tmg.generation.generators.cpgen.entrypoint --spec <chunk>/chunk_spec.json
 
-Steps: put the CP-Gen checkout on ``sys.path`` (``scripts.dataset.mp4_from_h5``) and work in a per-chunk folder
-that mirrors it (its code opens ``demo_aug/configs/...`` relative to the working directory and writes scratch
-files there), register the scene's environment class,
-install the grafts (``runtime.apply``) unless the spec disables them for the identity check, then call
-``demo_aug.generate.main`` with the chunk's ``Config``. CP-Gen's ``main`` raises after the attempts when no
+Steps: work inside the CP-Gen checkout (``checkout.cpgen_checkout``: the checkout on ``sys.path`` for
+``scripts.dataset.mp4_from_h5``, and a per-chunk folder that mirrors it as the working directory, because its code
+opens ``demo_aug/configs/...`` relative to the working directory and writes scratch files there), register the scene's
+environment class, install the grafts (``runtime.apply``) unless the spec disables them for the identity check, then
+call ``demo_aug.generate.main`` with the chunk's ``Config``. CP-Gen's ``main`` raises after the attempts when no
 attempt succeeded (it tries to render observations of a merged file that does not exist); that case ends the
 chunk normally once every attempt is recorded.
 """
 from __future__ import annotations
 
-import argparse
-import json
-import os
-import sys
 import traceback
 from pathlib import Path
 
+from tmg.generation.generators._entry import install_runtime, load_spec, register_scene_env
+from tmg.generation.generators.cpgen.checkout import cpgen_checkout
+
 
 def main(argv=None):
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--spec", required=True)
-    args = parser.parse_args(argv)
-    spec = json.loads(Path(args.spec).read_text())
+    spec = load_spec(argv)
     from tmg.core import egl
 
     egl.apply()
     extra = spec["extra"]
-    root = Path(extra["source_root"])
-    if not (root / "demo_aug").exists():
-        raise FileNotFoundError(f"CP-Gen checkout {root} has no demo_aug/ (generator.source_root, TMG_CPGEN_SRC)")
-    sys.path.insert(0, str(root))
-    # CP-Gen opens ``demo_aug/configs/...`` relative to its checkout and writes scratch files (``eef_and_env_model.xml``,
-    # ``updated_xml.xml``) into the working directory. The checkout is read-only in the images and shared by the
-    # chunk processes, so each chunk works in its own folder that mirrors the checkout's top level with symlinks.
-    workdir = Path(spec["folder"]) / "cwd"
-    workdir.mkdir(parents=True, exist_ok=True)
-    for entry in root.iterdir():
-        link = workdir / entry.name
-        if not link.exists() and not link.is_symlink():
-            link.symlink_to(entry)
-    os.chdir(workdir)
+    with cpgen_checkout(extra["source_root"], workdir=Path(spec["folder"]) / "cwd"):
+        from tmg.core.records import RECORDS_DIR, read_attempts
+        from tmg.generation.generators.cpgen import runtime
 
-    from tmg.core.records import RECORDS_DIR, read_attempts
-    from tmg.generation.generators.cpgen import runtime
-    from tmg.generation.method import build_method
-    from tmg.generation.simulators.robosuite import register_env_class
+        register_scene_env(spec)
+        install_runtime(spec, runtime.apply, all_sources=bool(extra.get("all_sources")))
+        import demo_aug.generate as official
 
-    env_name = register_env_class(spec["task"], spec["scene"])
-    print(f"[tmg] environment class: {env_name}", flush=True)
-    if extra.get("disable_graft"):
-        print("[tmg] grafts DISABLED: running the official generator without records (identity check)", flush=True)
-    else:
-        method = build_method(spec["method"], chunk_seed=int(spec["chunk"]["seed"]))
-        info = runtime.apply(method, chunk_seed=int(spec["chunk"]["seed"]), records_dir=Path(spec["records_dir"]), all_sources=bool(extra.get("all_sources")),
-                             graft_hashes=dict(extra.get("graft_hashes") or {}))
-        print(f"[tmg] grafts installed: {json.dumps(info, indent=1)}", flush=True)
-    import demo_aug.generate as official
-
-    config = dict(extra["cpgen_config"])
-    config["save_dir"] = Path(config["save_dir"])
-    cfg = official.Config(**config)
-    print(f"[tmg] CP-Gen main: seed {cfg.seed}, {cfg.n_demos} attempts, env {cfg.env_name}, source {cfg.demo_path} "
-          f"[{cfg.load_demos_start_idx}, {cfg.load_demos_end_idx})", flush=True)
-    try:
-        official.main(cfg)
-    except Exception:
-        records = read_attempts(Path(spec["folder"]) / RECORDS_DIR)
-        attempts = int(spec["chunk"]["attempts"])
-        if len(records) >= attempts and not any(r.get("success") for r in records):
-            print(f"[tmg] CP-Gen main failed after all {attempts} attempts with no success (expected: nothing to render):\n"
-                  f"{traceback.format_exc()}", flush=True)
-            return
-        raise
+        config = dict(extra["cpgen_config"])
+        config["save_dir"] = Path(config["save_dir"])
+        cfg = official.Config(**config)
+        print(f"[tmg] CP-Gen main: seed {cfg.seed}, {cfg.n_demos} attempts, env {cfg.env_name}, source {cfg.demo_path} "
+              f"[{cfg.load_demos_start_idx}, {cfg.load_demos_end_idx})", flush=True)
+        try:
+            official.main(cfg)
+        except Exception:
+            records = read_attempts(Path(spec["folder"]) / RECORDS_DIR)
+            attempts = int(spec["chunk"]["attempts"])
+            if len(records) >= attempts and not any(r.get("success") for r in records):
+                print(f"[tmg] CP-Gen main failed after all {attempts} attempts with no success (expected: nothing to render):\n"
+                      f"{traceback.format_exc()}", flush=True)
+                return
+            raise
 
 
 if __name__ == "__main__":

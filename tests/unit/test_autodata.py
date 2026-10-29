@@ -52,6 +52,26 @@ def test_autodata_chunk_spec(tmp_path, monkeypatch):
     assert spec.extra["layout"]["arm_action_dims"] == {"left": [0, 7], "right": [7, 14]} and spec.extra["layout"]["hand_prefixes"] is None
     assert gen.demo_layout()["image_key"] == "{cam}" and gen.demo_layout()["images_from_records"] is True
     assert spec.extra["cameras"] == ["robot_pov_cam_rgb"] and spec.extra["image_size"] == [128, 128]
+    # the whole chunk spec of an Arena-task chunk, as the committed adapter wrote it
+    hashes = spec.extra["graft_hashes"]
+    assert set(hashes) == {"generate", "trajectory", "execute"} and all(len(h) == 64 for h in hashes.values())
+    assert spec.extra == {
+        "package": "autodata_core", "soft": False, "runtime_module": RUNTIME_MODULE,
+        "script": str(src / "scripts/generate_dataset.py"),
+        "script_args": ["--external_callback", "isaaclab_arena.environments.isaaclab_interop.environment_registration_callback",
+                        "--env_name", "gr1_open_microwave", "--alg", "dexmimicgen", "--task_descriptor", str(tmp_path / "c" / DESCRIPTOR),
+                        "--embodiment", str(src / "autodata_examples/embodiments/gr1_ik_abs.yaml"),
+                        "--input_file", str(tmp_path / "sources/dexmimicgen/microwave/source.hdf5"),
+                        "--output_file", str(tmp_path / "c/generated.hdf5"), "--result_file", str(tmp_path / "c/result.json"),
+                        "--generation_num_trials", "250", "--num_envs", "1", "--device", "cuda:0", "--viz", "none", "--enable_cameras",
+                        "--", "--seed", "30002"],
+        "layout": {"eefs": ["left", "right"], "arm_action_dims": {"left": [0, 7], "right": [7, 14]}, "hand_prefixes": None, "hand_term": None,
+                   "measure_links": {"left": "left_hand_pitch_link", "right": "right_hand_pitch_link"}, "noise_draw_shapes": [3, 4, 3, 4]},
+        "graft_hashes": hashes, "camera_module": None, "register_modules": [], "env_name": "gr1_open_microwave",
+        "cameras": ["robot_pov_cam_rgb"], "image_size": [128, 128]}
+    assert spec.generator_config == yaml.safe_dump(written, sort_keys=False) and spec.chunk == {"index": 1, "seed": 30002, "attempts": 250}
+    assert spec.records_dir == str(tmp_path / "c/records") and spec.expected_outputs == [str(tmp_path / "c/records/attempts.jsonl")]
+    assert json.loads((tmp_path / "c" / "chunk_args.json").read_text()) == spec.extra["script_args"]
 
 
 def test_graft_anchors_on_autodata_shaped_functions(tmp_path, monkeypatch):
@@ -240,7 +260,7 @@ def test_runtime_captures_and_resizes_frames_from_any_observation_group(tmp_path
 
     layout = IsaacLabLayout(eefs=["left", "right"], arm_action_dims={"left": (0, 7), "right": (7, 14)}, hand_prefixes=None,
                             hand_term=None, measure_links=None)
-    rt = AutoDataRuntime(Method(), layout, chunk_seed=1, records_dir=None, cameras=["robot_pov_cam_rgb"], image_size=[128, 128])
+    rt = AutoDataRuntime(Method(), layout, records_dir=None, cameras=["robot_pov_cam_rgb"], image_size=[128, 128])
     rt._frames = {"robot_pov_cam_rgb": []}
 
     class Env:
@@ -251,5 +271,5 @@ def test_runtime_captures_and_resizes_frames_from_any_observation_group(tmp_path
     rt.capture_frames(Env(), 0)
     assert len(rt._frames["robot_pov_cam_rgb"]) == 2 and rt._frames["robot_pov_cam_rgb"][0].shape == (128, 128, 3)
     with pytest.raises(KeyError):
-        AutoDataRuntime(Method(), layout, 1, None, cameras=["missing"], image_size=None)._frames.update(missing=[]) or \
-            AutoDataRuntime(Method(), layout, 1, None, cameras=["missing"], image_size=None).capture_frames(Env(), 0)
+        AutoDataRuntime(Method(), layout, None, cameras=["missing"], image_size=None)._frames.update(missing=[]) or \
+            AutoDataRuntime(Method(), layout, None, cameras=["missing"], image_size=None).capture_frames(Env(), 0)

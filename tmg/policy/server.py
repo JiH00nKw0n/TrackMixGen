@@ -23,10 +23,11 @@ import numpy as np
 import torch
 
 from tmg.config import resolved
-from tmg.core.wire import pack, unpack
+from tmg.core.features import ENV_STATE, STATE, TASK, camera_of, image_feature
+from tmg.core.layout import PRETRAINED_DIR
+from tmg.core.wire import MAX_MESSAGE, pack, unpack
 from tmg.policy.io import load_io
 from tmg.policy.lerobot_policies import load_policy, policy_name_of
-from tmg.policy.trainer import PRETRAINED_DIR
 
 
 class PolicyRunner:
@@ -41,13 +42,15 @@ class PolicyRunner:
         self.policy_name = policy_name_of(cfg)
         self.io = load_io(self.checkpoint, self.policy_name, cfg, device)
         self.task = None
-        self.cameras = [k.split("observation.images.", 1)[1] for k in cfg.image_features]
+        self.cameras = [camera_of(k) for k in cfg.image_features]
         self.state_dim = int(cfg.robot_state_feature.shape[0])
         self.env_state_dim = int(cfg.env_state_feature.shape[0]) if cfg.env_state_feature is not None else 0
         self.action_dim = int(cfg.action_feature.shape[0])
         self._lock = asyncio.Lock()
 
     def info(self) -> dict:
+        # "policy" is the LeRobot type (tmg_bc_rnn, diffusion, pi0), not our name (self.policy_name): kept so the reply
+        # a running server gives does not change; nothing in the repository reads the field
         return {"policy": self.policy.name, "checkpoint": str(self.checkpoint), "cameras": self.cameras,
                 "state_dim": self.state_dim, "env_state_dim": self.env_state_dim, "action_dim": self.action_dim,
                 "device": self.device}
@@ -64,12 +67,12 @@ class PolicyRunner:
         """One action for one observation dict (layout in the module docstring)."""
         batch = {}
         for cam in self.cameras:
-            batch[f"observation.images.{cam}"] = torch.as_tensor(obs[f"observation.images.{cam}"])[None]
-        batch["observation.state"] = torch.as_tensor(obs["observation.state"], dtype=torch.float32)[None]
+            batch[image_feature(cam)] = torch.as_tensor(obs[image_feature(cam)])[None]
+        batch[STATE] = torch.as_tensor(obs[STATE], dtype=torch.float32)[None]
         if self.env_state_dim:
-            batch["observation.environment_state"] = torch.as_tensor(obs["observation.environment_state"], dtype=torch.float32)[None]
+            batch[ENV_STATE] = torch.as_tensor(obs[ENV_STATE], dtype=torch.float32)[None]
         if self.task is not None:
-            batch["task"] = [self.task]
+            batch[TASK] = [self.task]
         batch = self.io.prepare(batch)
         action = self.policy.select_action(batch)
         action = self.io.postprocess(action)
@@ -96,7 +99,7 @@ class PolicyRunner:
 async def serve_forever(runner: PolicyRunner, host: str, port: int) -> None:
     import websockets
 
-    async with websockets.serve(runner.handle, host, port, max_size=64 * 1024 * 1024):
+    async with websockets.serve(runner.handle, host, port, max_size=MAX_MESSAGE):
         print(f"[tmg] policy server {runner.policy.name} from {runner.checkpoint} on ws://{host}:{port}", flush=True)
         await asyncio.Future()
 

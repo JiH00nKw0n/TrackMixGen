@@ -28,26 +28,31 @@ from __future__ import annotations
 import time
 import traceback
 from collections import defaultdict
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
 
 from tmg.config import dump_yaml, resolved
-from tmg.core.chunks import write_json
+from tmg.core.chunks import RESOLVED_CONFIG, write_json
 from tmg.core.provenance import write_provenance
 from tmg.generation.simulators.robosuite import (
+    INTERFACE_TYPE,
     SCENE_META_ATTR,
     TABLE_OFFSET,
     effective_bounds,
+    effective_reach_constraint,
+    interface_name,
     load_scene_chain,
-    reach_constraint,
     register_env_class,
     robot_base_xy,
-    scene_chain,
 )
 
 REPORT = "SCENE_CHECK.json"
 DEFAULT_REACH_M = 0.85
+MAX_CONTACT_DETAILS = 50            # contact details kept in the report (the pair counts cover every reset)
+MAX_FAILURES = 20                   # placement failures kept in the report
+PER_OBJECT_COUNTS = ("centre_outside", "footprint_over_edge", "beyond_reach", "dropped", "off_table", "drifted")
 
 
 def make_env(env_name: str, robot: str):
@@ -128,6 +133,106 @@ def penetrating_contacts(env, geometry: dict, robot_root: int) -> list[tuple[str
     return sorted(pairs)
 
 
+def _r3(value) -> float:
+    """``round(float(value), 3)``: the precision of the positions and distances in the report."""
+    return round(float(value), 3)
+
+
+def _table_facts(env) -> dict:
+    """Centre, top height and half extents of the table top (``table_offset`` and ``table_full_size`` of the env)."""
+    full = np.asarray(env.table_full_size, dtype=float)
+    off = np.asarray(env.table_offset, dtype=float)
+    return {"centre_xy": [float(off[0]), float(off[1])], "top_z": float(off[2]),
+            "half_x": float(full[0] / 2), "half_y": float(full[1] / 2)}
+
+
+@dataclass
+class _Tally:
+    """Everything ``check_scene`` accumulates over the resets."""
+    counts: dict = field(default_factory=lambda: defaultdict(lambda: defaultdict(int)))   # object -> count name -> n
+    dists: dict = field(default_factory=lambda: defaultdict(list))                      # object -> base distances (m)
+    xy_min: dict = field(default_factory=dict)                                          # object -> smallest x, y seen
+    xy_max: dict = field(default_factory=dict)
+    failures: list = field(default_factory=list)                                        # {reset, error}
+    contact_pairs: dict = field(default_factory=lambda: defaultdict(int))               # "a & b" -> resets with contact
+    contact_details: list = field(default_factory=list)                                 # first MAX_CONTACT_DETAILS hits
+    rejects: list = field(default_factory=list)                                         # reach-constraint rejects per reset
+    times: list = field(default_factory=list)                                           # reset wall times (s)
+    done: int = 0                                                                       # resets that succeeded
+
+    def add_contacts(self, reset: int, hits: list, before: dict) -> None:
+        """Count the penetrating contacts of one reset and keep the first few as details."""
+        for obj, other, geom in hits:
+            self.contact_pairs[f"{obj} & {other}"] += 1
+            if len(self.contact_details) < MAX_CONTACT_DETAILS:
+                self.contact_details.append({"reset": reset, "object": obj, "other": other, "robot_geom": geom,
+                                             "object_xy": [_r3(v) for v in before[obj][:2]],
+                                             "other_xy": [_r3(v) for v in before[other][:2]] if other in before else None})
+
+    def add_placement(self, name: str, p: np.ndarray, radius: float, table: dict, base_xy, margin: float, reach_m: float) -> None:
+        """Classify one object's reset position against the table edge and the reach radius."""
+        c = self.counts[name]
+        cx, cy = table["centre_xy"]
+        dx, dy = abs(p[0] - cx), abs(p[1] - cy)
+        c["n"] += 1
+        if dx > table["half_x"] or dy > table["half_y"]:
+            c["centre_outside"] += 1
+        if dx + radius > table["half_x"] - margin or dy + radius > table["half_y"] - margin:
+            c["footprint_over_edge"] += 1
+        d = float(np.hypot(p[0] - base_xy[0], p[1] - base_xy[1]))
+        self.dists[name].append(d)
+        if d > reach_m:
+            c["beyond_reach"] += 1
+        self.xy_min[name] = np.minimum(self.xy_min.get(name, p[:2]), p[:2])
+        self.xy_max[name] = np.maximum(self.xy_max.get(name, p[:2]), p[:2])
+
+    def add_settling(self, name: str, before: np.ndarray, after: np.ndarray, table: dict, fall_thr: float,
+                     drift_thr: float) -> None:
+        """Compare one object's position after the settle steps with its reset position."""
+        c = self.counts[name]
+        if before[2] - after[2] > fall_thr:
+            c["dropped"] += 1
+        if after[2] < table["top_z"]:
+            c["off_table"] += 1
+        if np.hypot(*(after[:2] - before[:2])) > drift_thr:
+            c["drifted"] += 1
+
+    def objects(self, geometry: dict) -> dict:
+        """The per-object block of the report: radius, position range, base distance and the count fractions."""
+        out = {}
+        for k, c in self.counts.items():
+            m = max(c["n"], 1)
+            out[k] = {"radius_m": round(geometry[k]["radius"], 4),
+                      "xy_min": [_r3(v) for v in self.xy_min[k]], "xy_max": [_r3(v) for v in self.xy_max[k]],
+                      "base_dist_m": {"min": _r3(min(self.dists[k])), "mean": _r3(np.mean(self.dists[k])),
+                                      "max": _r3(max(self.dists[k]))},
+                      **{key: {"count": c[key], "fraction": round(c[key] / m, 4)} for key in PER_OBJECT_COUNTS}}
+        return out
+
+
+def _build_report(tally: _Tally, *, env_name: str, task: dict, scene: dict, interface: str, resets: int, table: dict | None,
+                  base_xy, bounds_match: dict | None, constraint: dict | None, reach_m: float, geometry: dict | None) -> dict:
+    """Assemble the report of the module docstring from the tally and the facts read once, with the ``ok`` verdict."""
+    objects = tally.objects(geometry) if tally.counts else {}
+    any_contact = sum(tally.contact_pairs.values())
+    rejects = tally.rejects
+    report = {
+        "env": env_name, "task": task["name"], "scene": scene["name"], "interface": interface,
+        "resets_requested": resets, "resets_done": tally.done, "placement_failures": len(tally.failures),
+        "table": table, "robot_base_xy": list(base_xy) if base_xy else None, "bounds_match_class": bounds_match,
+        "reach": {"constraint": constraint, "radius_used_m": reach_m,
+                  "rejects": {"mean": round(float(np.mean(rejects)), 2), "max": int(max(rejects))} if rejects else None,
+                  "resets_with_any_object_beyond": _resets_beyond(tally.dists, reach_m)},
+        "contacts_at_reset": {"resets_with_penetration": any_contact, "pairs": dict(tally.contact_pairs),
+                              "details": tally.contact_details},
+        "objects": objects, "failures": tally.failures[:MAX_FAILURES],
+        "reset_time_s": {"mean": _r3(np.mean(tally.times)) if tally.times else None},
+    }
+    report["ok"] = (not tally.failures and any_contact == 0 and (bounds_match is None or bounds_match["match"])
+                    and all(o["off_table"]["count"] == 0 and o["drifted"]["count"] == 0 for o in objects.values()))
+    return report
+
+
 def check_scene(cfg) -> dict:
     """Run the check described in the module docstring and write ``SCENE_CHECK.json``.
 
@@ -143,12 +248,12 @@ def check_scene(cfg) -> dict:
     task, scene = plain["task"], load_scene_chain(plain["scene"], plain["generator"]["name"])
     output = Path(plain["output"])
     output.mkdir(parents=True, exist_ok=True)
-    dump_yaml(plain, output / "resolved_config.yaml")
+    dump_yaml(plain, output / RESOLVED_CONFIG)
     write_provenance(output, extra={"command": "check_scene", "output": str(output)})
 
     env_name = register_env_class(task, scene)
-    interface = str(task.get("datagen_interface") or f"MG_{task['env_prefix']}")
-    constraint = next((reach_constraint(n) for n in reversed(scene_chain(scene)) if reach_constraint(n)), None)
+    interface = interface_name(task)
+    constraint = effective_reach_constraint(scene)
     reach_m = float(constraint["radius_m"]) if constraint else DEFAULT_REACH_M
 
     env = make_env(env_name, str(plain["robot"]))
@@ -156,41 +261,32 @@ def check_scene(cfg) -> dict:
     from mimicgen.env_interfaces.base import REGISTERED_ENV_INTERFACES
     from robosuite.utils import RandomizationError
 
-    iface = REGISTERED_ENV_INTERFACES["robosuite"][interface](env)
+    iface = REGISTERED_ENV_INTERFACES[INTERFACE_TYPE][interface](env)
     n = int(plain["resets"])
     settle = int(plain["settle_steps"])
     margin = float(plain["edge_margin_m"])
     fall_thr, drift_thr = float(plain["fall_threshold_m"]), float(plain["drift_threshold_m"])
 
-    counts: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
-    dists: dict[str, list[float]] = defaultdict(list)
-    failures, contact_pairs, rejects, times = [], defaultdict(int), [], []
-    contact_details: list[dict] = []
-    table = None
+    tally = _Tally()
+    table = None             # read once, after the first successful reset
     base_xy = None
     bounds_match: dict | None = None
     geometry = None
-    xy_min: dict[str, np.ndarray] = {}
-    xy_max: dict[str, np.ndarray] = {}
-    done = 0
     for i in range(n):
         t0 = time.time()
         try:
             env.reset()
         except RandomizationError as exc:
-            failures.append({"reset": i, "error": str(exc)})
+            tally.failures.append({"reset": i, "error": str(exc)})
             continue
         except Exception:  # noqa: BLE001  report, do not hide
-            failures.append({"reset": i, "error": traceback.format_exc()})
+            tally.failures.append({"reset": i, "error": traceback.format_exc()})
             continue
-        times.append(time.time() - t0)
-        done += 1
+        tally.times.append(time.time() - t0)
+        tally.done += 1
         if table is None:
             bounds_match = compare_bounds(env, effective_bounds(scene, str(task["name"])))
-            full = np.asarray(env.table_full_size, dtype=float)
-            off = np.asarray(env.table_offset, dtype=float)
-            table = {"centre_xy": [float(off[0]), float(off[1])], "top_z": float(off[2]),
-                     "half_x": float(full[0] / 2), "half_y": float(full[1] / 2)}
+            table = _table_facts(env)
             base_xy = robot_base_xy(env)
         poses = iface.get_object_poses()
         if geometry is None:
@@ -198,68 +294,25 @@ def check_scene(cfg) -> dict:
             geometry = object_geometry(env, bodies)
         meta = getattr(env, SCENE_META_ATTR, None)
         if meta is not None:
-            rejects.append(int(meta.get("n_reject", 0)))
+            tally.rejects.append(int(meta.get("n_reject", 0)))
         env.sim.forward()
         before = {k: np.asarray(p)[:3, 3].copy() for k, p in poses.items()}
         hits = penetrating_contacts(env, geometry, env.sim.model.body_name2id(env.robots[0].robot_model.root_body))
-        for obj, other, geom in hits:
-            contact_pairs[f"{obj} & {other}"] += 1
-            if len(contact_details) < 50:
-                contact_details.append({"reset": i, "object": obj, "other": other, "robot_geom": geom,
-                                        "object_xy": [round(float(v), 3) for v in before[obj][:2]],
-                                        "other_xy": [round(float(v), 3) for v in before[other][:2]] if other in before else None})
+        tally.add_contacts(i, hits, before)
         for k, p in before.items():
-            cx, cy = table["centre_xy"]
-            dx, dy = abs(p[0] - cx), abs(p[1] - cy)
-            r = geometry[k]["radius"]
-            counts[k]["n"] += 1
-            if dx > table["half_x"] or dy > table["half_y"]:
-                counts[k]["centre_outside"] += 1
-            if dx + r > table["half_x"] - margin or dy + r > table["half_y"] - margin:
-                counts[k]["footprint_over_edge"] += 1
-            d = float(np.hypot(p[0] - base_xy[0], p[1] - base_xy[1]))
-            dists[k].append(d)
-            if d > reach_m:
-                counts[k]["beyond_reach"] += 1
-            xy_min[k] = np.minimum(xy_min.get(k, p[:2]), p[:2])
-            xy_max[k] = np.maximum(xy_max.get(k, p[:2]), p[:2])
+            tally.add_placement(k, p, geometry[k]["radius"], table, base_xy, margin, reach_m)
         if settle > 0:
             zero = np.zeros(env.action_dim)
             for _ in range(settle):
                 env.step(zero)
             after = {k: np.asarray(p)[:3, 3] for k, p in iface.get_object_poses().items()}
             for k in before:
-                if before[k][2] - after[k][2] > fall_thr:
-                    counts[k]["dropped"] += 1
-                if after[k][2] < table["top_z"]:
-                    counts[k]["off_table"] += 1
-                if np.hypot(*(after[k][:2] - before[k][:2])) > drift_thr:
-                    counts[k]["drifted"] += 1
+                tally.add_settling(k, before[k], after[k], table, fall_thr, drift_thr)
     env.close()
 
-    objects = {}
-    for k, c in counts.items():
-        m = max(c["n"], 1)
-        objects[k] = {"radius_m": round(geometry[k]["radius"], 4),
-                      "xy_min": [round(float(v), 3) for v in xy_min[k]], "xy_max": [round(float(v), 3) for v in xy_max[k]],
-                      "base_dist_m": {"min": round(min(dists[k]), 3), "mean": round(float(np.mean(dists[k])), 3), "max": round(max(dists[k]), 3)},
-                      **{key: {"count": c[key], "fraction": round(c[key] / m, 4)}
-                         for key in ("centre_outside", "footprint_over_edge", "beyond_reach", "dropped", "off_table", "drifted")}}
-    any_contact = sum(contact_pairs.values())
-    report = {
-        "env": env_name, "task": task["name"], "scene": scene["name"], "interface": interface,
-        "resets_requested": n, "resets_done": done, "placement_failures": len(failures),
-        "table": table, "robot_base_xy": list(base_xy) if base_xy else None, "bounds_match_class": bounds_match,
-        "reach": {"constraint": constraint, "radius_used_m": reach_m,
-                  "rejects": {"mean": round(float(np.mean(rejects)), 2), "max": int(max(rejects))} if rejects else None,
-                  "resets_with_any_object_beyond": _resets_beyond(dists, reach_m)},
-        "contacts_at_reset": {"resets_with_penetration": any_contact, "pairs": dict(contact_pairs), "details": contact_details},
-        "objects": objects, "failures": failures[:20],
-        "reset_time_s": {"mean": round(float(np.mean(times)), 3) if times else None},
-    }
-    report["ok"] = (not failures and any_contact == 0 and (bounds_match is None or bounds_match["match"])
-                    and all(o["off_table"]["count"] == 0 and o["drifted"]["count"] == 0
-                            for o in objects.values()))
+    report = _build_report(tally, env_name=env_name, task=task, scene=scene, interface=interface, resets=n, table=table,
+                           base_xy=base_xy, bounds_match=bounds_match, constraint=constraint, reach_m=reach_m,
+                           geometry=geometry)
     write_json(output / REPORT, report)
     _print_summary(report)
     return report

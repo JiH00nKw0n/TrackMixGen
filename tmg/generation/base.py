@@ -8,12 +8,14 @@ import time, because the runner also runs where the package is absent.
 """
 from __future__ import annotations
 
+import sys
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from tmg.core.chunks import Chunk
+from tmg.core.records import RECORDS_DIR
 
 
 @dataclass
@@ -74,10 +76,14 @@ def _without_paths(mapping: dict) -> dict:
 
 
 class SyntheticDataGenerator(ABC):
-    """Base of all generator adapters."""
+    """Base of all generator adapters.
+
+    Class attributes: ``name`` is the generator name (``generator.name`` of its config file); ``entrypoint_module`` is
+    the module the default :meth:`chunk_command` runs with ``python -m <module> --spec <path>``.
+    """
 
     name: str = "abstract"
-    simulator: str = "abstract"
+    entrypoint_module: str = ""
 
     def __init__(self, cfg: dict):
         """``generator`` and ``task`` are always present; ``scene``, ``method`` and ``generation`` only in the
@@ -116,13 +122,40 @@ class SyntheticDataGenerator(ABC):
     def prepare_chunk(self, chunk: Chunk, folder: Path) -> ChunkSpec:
         """Write the official config of the chunk into ``folder`` and return the spec."""
 
-    @abstractmethod
+    def _spec(self, chunk: Chunk, folder: Path, *, scene: dict, generator_config: str, expected_outputs: list,
+              extra: dict, protocol: dict | None = None, generator: str | None = None) -> ChunkSpec:
+        """The ``ChunkSpec`` of ``chunk`` in ``folder`` with the fields every adapter fills the same way.
+
+        ``chunk`` becomes ``{"index", "seed", "attempts"}``, ``records_dir`` is ``<folder>/records``, ``task`` and
+        ``method`` are the adapter's, ``protocol`` defaults to the adapter's and ``generator`` to the config's
+        ``generator.name``. ``extra`` is written as given: its keys and values are part of the chunk identity, so the
+        adapter adds ``graft_hashes`` itself with :meth:`graft_hashes`.
+        """
+        folder = Path(folder)
+        return ChunkSpec(
+            generator=self.generator_cfg["name"] if generator is None else generator,
+            chunk={"index": chunk.index, "seed": chunk.seed, "attempts": chunk.attempts},
+            folder=str(folder), records_dir=str(folder / RECORDS_DIR), task=self.task, scene=scene, method=self.method,
+            protocol=self.protocol if protocol is None else protocol, generator_config=generator_config,
+            expected_outputs=list(expected_outputs), extra=extra)
+
+    def graft_hashes(self) -> dict:
+        """``generator.graft_hashes`` as a plain dict (the pinned source hashes the chunk process verifies)."""
+        return dict(self.generator_cfg.get("graft_hashes") or {})
+
     def chunk_command(self, spec: ChunkSpec, spec_path: Path) -> list[str]:
-        """Command line of the chunk process."""
+        """Command line of the chunk process: ``python -m <entrypoint_module> --spec <spec_path>``."""
+        if not self.entrypoint_module:
+            raise NotImplementedError(f"{type(self).__name__} sets no entrypoint_module and overrides no chunk_command")
+        return [sys.executable, "-m", self.entrypoint_module, "--spec", str(spec_path)]
 
     @abstractmethod
     def chunk_result(self, spec: ChunkSpec) -> dict | None:
         """Summary of a finished chunk (attempts, successes, ...) or None when it did not finish."""
+
+    @abstractmethod
+    def demo_layout(self) -> dict:
+        """How ``tmg dataset`` reads this generator's chunk outputs (the ``tmg.data.dataset.DemoLayout`` fields)."""
 
     def chunk_environment(self) -> dict:
         """Extra environment variables of a chunk process."""

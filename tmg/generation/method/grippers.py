@@ -19,7 +19,34 @@ from typing import Protocol
 
 import numpy as np
 
-from tmg.generation.method.event_mix import gripper_states
+CLOSE_THRESHOLD = 0.65      # normalised closure at or above which a many-joint hand counts as closed
+OPEN_THRESHOLD = 0.35       # normalised closure at or below which it counts as open again (hysteresis)
+
+
+class IncompatibleGripperEvents(ValueError):
+    """Two gripper command sequences cannot be aligned on the same open/close events."""
+
+
+def gripper_states(commands) -> np.ndarray:
+    """Boolean closed/open per step of scalar sign commands, carrying the state through zero commands."""
+    commands = np.asarray(commands, dtype=float).reshape(-1)
+    if commands.size == 0 or not np.isfinite(commands).all():
+        raise ValueError("gripper commands must be a finite non-empty sequence")
+    if commands[0] == 0:
+        raise IncompatibleGripperEvents("initial zero command has no known open/closed state")
+    state = commands[0] > 0
+    out = np.empty(len(commands), dtype=bool)
+    for i, value in enumerate(commands):
+        if value != 0:
+            state = value > 0
+        out[i] = state
+    return out
+
+
+def change_indices(states) -> np.ndarray:
+    """Indices of the steps whose state differs from the step before (the first step of every new state)."""
+    states = np.asarray(states, dtype=bool)
+    return np.flatnonzero(states[1:] != states[:-1]) + 1
 
 
 class GripperEventDetector(Protocol):
@@ -50,11 +77,11 @@ class SignGripper:
 
 class ClosureGripper:
     """Many-joint hands (GR1): closure = negated mean of ``columns``, normalised by its 10th/90th percentiles
-    over the path, with 0.65/0.35 hysteresis thresholds.
+    over the path, with ``CLOSE_THRESHOLD`` / ``OPEN_THRESHOLD`` hysteresis.
     """
     name = "closure"
 
-    def __init__(self, columns, close_threshold: float = 0.65, open_threshold: float = 0.35):
+    def __init__(self, columns, close_threshold: float = CLOSE_THRESHOLD, open_threshold: float = OPEN_THRESHOLD):
         """Args:
             columns: indices of the finger joints whose mean flexion defines the closure.
             close_threshold: normalised closure at or above which the hand counts as closed.
@@ -95,7 +122,7 @@ class ClosureGripper:
 def event_indices(detector: GripperEventDetector, commands, previous_state: bool | None) -> list[int]:
     """Step indices whose state differs from the step before; index 0 counts when ``previous_state`` differs."""
     states = detector.states(commands)
-    out = [int(i) for i in np.flatnonzero(states[1:] != states[:-1]) + 1]
+    out = [int(i) for i in change_indices(states)]
     if previous_state is not None and len(states) and bool(states[0]) != bool(previous_state):
         out.insert(0, 0)
     return out
@@ -108,5 +135,6 @@ def build_detector(cfg) -> GripperEventDetector:
     if kind == "sign":
         return SignGripper()
     if kind == "closure":
-        return ClosureGripper(cfg["columns"], cfg.get("close_threshold", 0.65), cfg.get("open_threshold", 0.35))
+        return ClosureGripper(cfg["columns"], cfg.get("close_threshold", CLOSE_THRESHOLD),
+                              cfg.get("open_threshold", OPEN_THRESHOLD))
     raise KeyError(f"unknown gripper event detector {kind!r} (sign | closure)")

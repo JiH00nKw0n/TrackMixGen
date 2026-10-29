@@ -34,13 +34,13 @@ logic, its inputs and its outputs.
 | `tmg/core/records.py` | The attempt recorder. For each attempt it writes one `attempt_%06d.npz` with the target poses, the measured poses, the commands before and after noise, the segment ids and the follower state of every step, and 1 line in `attempts.jsonl`. |
 | `tmg/core/chunks.py` | Chunk planning. A pool of N attempts is split into chunks of at most `chunk` attempts, each with its own seed, so that a pool can be resumed chunk by chunk. |
 | `tmg/core/poses.py`, `actions.py`, `workers.py`, `provenance.py` | Pose arithmetic, action column grouping by joint name prefix, worker count selection, and the `provenance.json` writer (code revision, package versions, image, host). |
-| `tmg/generation/base.py` | `SyntheticDataGenerator`, the abstract class every generator adapter implements. It defines `fetch_sources`, `prepare_chunk`, `chunk_command` and `chunk_result`. |
+| `tmg/generation/base.py` | `SyntheticDataGenerator`, the abstract class every generator adapter implements. It defines `fetch_sources`, `prepare_chunk`, `chunk_result` and `demo_layout`, builds the chunk spec (`_spec`), and gives a default `chunk_command` that runs the adapter's `entrypoint_module`. |
 | `tmg/generation/runner.py` | `run_pool`. It plans the chunks, skips the finished ones, runs the others in parallel processes, validates each result, and writes `DONE.json`. |
 | `tmg/generation/verify.py` | `verify_baseline`. It runs one chunk with the official generator and one chunk with the adapter and `method=none`, then compares the outputs byte for byte. |
 | `tmg/generation/execution.py` | `TrajectoryExecution`. This is the step-by-step bookkeeping that is the same for every generator. It applies the path follower, counts the random draws, keeps the labels before noise and feeds the recorder. |
 | `tmg/generation/method/` | The TrackMix method. `guided_mix.py` is the source mixer. `tracking.py` is the error-adaptive follower. `grippers.py` finds the gripper events. `interfaces.py` defines the `SegmentMixer`, `PathFollower` and `Method` protocols and `build_method(cfg)`. |
-| `tmg/generation/simulators/robosuite.py` | Scene handling for robosuite. It reads a scene chain from `configs/scene/`, validates the placement bounds, and registers an environment class with the configured bounds and reach constraint. |
-| `tmg/generation/generators/mimicgen/` | The MimicGen adapter. `graft.py` edits a function's syntax tree. `runtime.py` holds the callbacks the grafted code calls. `adapter.py` builds the chunk config. `entrypoint.py` is the chunk process. `sources.py` downloads and prepares the source demonstrations. |
+| `tmg/generation/simulators/` | Scene handling. `scenes.py` reads a generator's scene files (`configs/experiment/generator/<generator>/scene/`) and their inheritance chain for every generator. `robosuite.py` validates the placement bounds and registers an environment class with the configured bounds and reach constraint. |
+| `tmg/generation/generators/` | One folder per generator adapter (`mimicgen/`, `cpgen/`, `isaaclab/` for SoftMimicGen, `autodata/` for DexMimicGen). In each, `runtime.py` holds the callbacks the grafted code calls, `adapter.py` builds the chunk config, `entrypoint.py` is the chunk process and `sources.py` downloads and prepares the source demonstrations. Code the adapters share sits next to the folders: `robosuite_base.py` (the robosuite adapter base), `_sources.py` (download, md5, manifest), `_shared.py` (record summary, record-error file), `_entry.py` (chunk process start-up). `tmg/generation/graft.py` edits an official function's syntax tree. |
 | `configs/` | All YAML config groups. See section 2. |
 | `docker/robosuite.Dockerfile`, `requirements/` | The image for the MimicGen generator. All packages are pinned in `requirements/robosuite.lock`. |
 | `tests/unit/` | Unit tests that run without a simulator. |
@@ -188,7 +188,8 @@ The pool folder contains:
 
 If a chunk fails, the run stops with an error that names the log file of each failed chunk, and `DONE.json` is
 not written. If the failure was in the recorder, the chunk's `records/` folder also keeps `RECORD_ERROR.json`
-with the traceback.
+with the attempt, the error, the traceback and the time (the same four keys for every generator since 2026-10-29;
+CP-Gen files written before that have no `error` key).
 
 ### 3.8 Run a method variant
 
@@ -221,7 +222,7 @@ overwritten.
    ```
 
 3. Read the attempt records before you train anything. `chunks/seed<N>/records/attempts.jsonl` has the success
-   of every attempt and the mix record of every subtask (`mixed`, `donor`, `identity_reason`), and the `.npz`
+   of every attempt and the mix record of every subtask (`mixed`, `source_b`, `identity_reason`), and the `.npz`
    files have the per-step follower records (`track_k`, `track_region`, ...). The generation success rate and
    these records already show whether the variant did what it should.
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from tmg.core.wire import pack, unpack
+from tmg.core.wire import MAX_MESSAGE, pack, unpack
 
 
 class PolicyClient:
@@ -17,7 +17,7 @@ class PolicyClient:
     def __enter__(self):
         from websockets.sync.client import connect
 
-        self._ws = connect(self.url, max_size=64 * 1024 * 1024, open_timeout=self.timeout_s)
+        self._ws = connect(self.url, max_size=MAX_MESSAGE, open_timeout=self.timeout_s)
         return self
 
     def __exit__(self, *exc):

@@ -7,6 +7,11 @@
   ``DiffusionConfig`` (the config file lists only the fields that differ from LeRobot's defaults);
 - ``pi0``: LeRobot's ``PI0Policy`` from the hub weights (stage 6).
 
+The three are one table, ``POLICY_SPECS``: our policy name, the LeRobot config type that ``config.json`` stores
+(``tmg_bc_rnn``, ``diffusion``, ``pi0``; what ``load_policy`` reads back), the config and policy classes (imported
+only when used, since the LeRobot modules are heavy), and whether the policy needs LeRobot's processor pipelines
+(``tmg.policy.io``). ``POLICIES`` is the tuple of names in table order.
+
 ``features`` is ``{"cameras": [...], "image_shape": (3, H, W) or None, "state_dim": D, "env_state_dim": E,
 "action_dim": A}`` as read from the dataset: an image dataset has cameras and no object state (E = 0), a low-dim
 dataset has no cameras and E > 0 (``observation.environment_state``, LeRobot's ENV feature). ``observation``
@@ -17,14 +22,61 @@ dataset has no cameras and E > 0 (``observation.environment_state``, LeRobot's E
 """
 from __future__ import annotations
 
+import importlib
+from dataclasses import dataclass
 from pathlib import Path
 
 from lerobot.configs import PreTrainedConfig
 from lerobot.configs.types import FeatureType, PolicyFeature
 
 import tmg.policy.bc_rnn  # noqa: F401  registers the tmg_bc_rnn config type before any from_pretrained
+from tmg.core.features import ACTION, ENV_STATE, STATE, image_feature
+from tmg.core.layout import PRETRAINED_DIR
 
-POLICIES = ("bc_rnn", "diffusion_policy", "pi0")
+# Importing tmg.policy.bc_rnn above is a required side effect, not an unused import: its ``@PreTrainedConfig.register_subclass``
+# decorator makes LeRobot's ``PreTrainedConfig.from_pretrained`` recognise ``"type": "tmg_bc_rnn"`` in a checkpoint's
+# config.json. Without it ``load_policy`` of a BC-RNN checkpoint fails inside LeRobot.
+
+
+@dataclass(frozen=True)
+class PolicySpec:
+    """One row of ``POLICY_SPECS``: how a policy name maps onto LeRobot."""
+
+    name: str                       # our name (configs/experiment/policy/<name>.yaml, run folder component)
+    config_type: str                # LeRobot config type stored as "type" in a checkpoint's config.json
+    config_class: str               # "module:Class" of the PreTrainedConfig subclass
+    policy_class: str               # "module:Class" of the PreTrainedPolicy subclass
+    tuple_params: tuple[str, ...] = ()   # params the config class declares as tuples (lists in yaml)
+    uses_pipeline: bool = False     # LeRobot's pre/post processor pipelines (tokenizer) instead of our normalizer
+
+
+POLICY_SPECS: dict[str, PolicySpec] = {
+    "bc_rnn": PolicySpec("bc_rnn", "tmg_bc_rnn", "tmg.policy.bc_rnn:BCRNNConfig", "tmg.policy.bc_rnn:BCRNNPolicy"),
+    "diffusion_policy": PolicySpec("diffusion_policy", "diffusion",
+                                   "lerobot.policies.diffusion.configuration_diffusion:DiffusionConfig",
+                                   "lerobot.policies.diffusion.modeling_diffusion:DiffusionPolicy",
+                                   tuple_params=("crop_shape", "down_dims")),
+    "pi0": PolicySpec("pi0", "pi0", "lerobot.policies.pi0.configuration_pi0:PI0Config",
+                      "lerobot.policies.pi0.modeling_pi0:PI0Policy", uses_pipeline=True),
+}
+POLICIES = tuple(POLICY_SPECS)      # ("bc_rnn", "diffusion_policy", "pi0")
+
+
+def policy_spec(name: str) -> PolicySpec:
+    """The spec of our policy name.
+
+    Raises:
+        ValueError: the name is not one of ``POLICIES``.
+    """
+    if name not in POLICY_SPECS:
+        raise ValueError(f"unknown policy {name!r}; known: {POLICIES}")
+    return POLICY_SPECS[name]
+
+
+def _load_target(target: str):
+    """The object ``"module:attribute"`` names, imported on first use."""
+    module, _, attribute = target.partition(":")
+    return getattr(importlib.import_module(module), attribute)
 
 
 def policy_features(features: dict) -> tuple[dict, dict]:
@@ -32,11 +84,11 @@ def policy_features(features: dict) -> tuple[dict, dict]:
     inputs = {}
     if features.get("cameras"):
         c, h, w = (int(v) for v in features["image_shape"])
-        inputs = {f"observation.images.{cam}": PolicyFeature(type=FeatureType.VISUAL, shape=(c, h, w)) for cam in features["cameras"]}
-    inputs["observation.state"] = PolicyFeature(type=FeatureType.STATE, shape=(int(features["state_dim"]),))
+        inputs = {image_feature(cam): PolicyFeature(type=FeatureType.VISUAL, shape=(c, h, w)) for cam in features["cameras"]}
+    inputs[STATE] = PolicyFeature(type=FeatureType.STATE, shape=(int(features["state_dim"]),))
     if int(features.get("env_state_dim", 0) or 0) > 0:
-        inputs["observation.environment_state"] = PolicyFeature(type=FeatureType.ENV, shape=(int(features["env_state_dim"]),))
-    outputs = {"action": PolicyFeature(type=FeatureType.ACTION, shape=(int(features["action_dim"]),))}
+        inputs[ENV_STATE] = PolicyFeature(type=FeatureType.ENV, shape=(int(features["env_state_dim"]),))
+    outputs = {ACTION: PolicyFeature(type=FeatureType.ACTION, shape=(int(features["action_dim"]),))}
     return inputs, outputs
 
 
@@ -85,42 +137,18 @@ def task_policy_overrides(task: dict, policy_name: str) -> dict:
 
 def build_config(policy_cfg: dict, features: dict, device: str, observation: str = "image", overrides: dict | None = None) -> PreTrainedConfig:
     """The LeRobot config object of ``policy_cfg['name']`` with our values, the task's overrides and the dataset features."""
-    name = str(policy_cfg["name"])
+    spec = policy_spec(str(policy_cfg["name"]))
     inputs, outputs = policy_features(features)
     params = resolve_crop({**policy_params(policy_cfg, observation), **(overrides or {})}, features)
-    if name == "bc_rnn":
-        from tmg.policy.bc_rnn import BCRNNConfig
-
-        return BCRNNConfig(input_features=inputs, output_features=outputs, device=device, **params)
-    if name == "diffusion_policy":
-        from lerobot.policies.diffusion.configuration_diffusion import DiffusionConfig
-
-        for key in ("crop_shape", "down_dims"):
-            if key in params and params[key] is not None:
-                params[key] = tuple(params[key])
-        return DiffusionConfig(input_features=inputs, output_features=outputs, device=device, **params)
-    if name == "pi0":
-        from lerobot.policies.pi0.configuration_pi0 import PI0Config
-
-        return PI0Config(input_features=inputs, output_features=outputs, device=device, **params)
-    raise ValueError(f"unknown policy {name!r}; known: {POLICIES}")
+    for key in spec.tuple_params:
+        if key in params and params[key] is not None:
+            params[key] = tuple(params[key])
+    return _load_target(spec.config_class)(input_features=inputs, output_features=outputs, device=device, **params)
 
 
 def policy_class(name: str):
     """The ``PreTrainedPolicy`` subclass of a policy name."""
-    if name == "bc_rnn":
-        from tmg.policy.bc_rnn import BCRNNPolicy
-
-        return BCRNNPolicy
-    if name == "diffusion_policy":
-        from lerobot.policies.diffusion.modeling_diffusion import DiffusionPolicy
-
-        return DiffusionPolicy
-    if name == "pi0":
-        from lerobot.policies.pi0.modeling_pi0 import PI0Policy
-
-        return PI0Policy
-    raise ValueError(f"unknown policy {name!r}; known: {POLICIES}")
+    return _load_target(policy_spec(name).policy_class)
 
 
 def build_policy(policy_cfg: dict, features: dict, device: str, observation: str = "image", overrides: dict | None = None):
@@ -149,7 +177,7 @@ def normalization_modes(config: PreTrainedConfig) -> dict[str, str]:
 
 def load_policy(checkpoint_dir: Path, device: str):
     """Restore a policy saved by ``trainer`` (``pretrained_model/`` with ``config.json`` and the weights)."""
-    folder = Path(checkpoint_dir) / "pretrained_model"
+    folder = Path(checkpoint_dir) / PRETRAINED_DIR
     config = PreTrainedConfig.from_pretrained(str(folder))
     config.device = device
     cls = policy_class(policy_name_of(config))
@@ -157,8 +185,8 @@ def load_policy(checkpoint_dir: Path, device: str):
 
 
 def policy_name_of(config: PreTrainedConfig) -> str:
-    """Our policy name of a LeRobot config type."""
-    table = {"tmg_bc_rnn": "bc_rnn", "diffusion": "diffusion_policy", "pi0": "pi0"}
-    if config.type not in table:
-        raise ValueError(f"checkpoint config type {config.type!r} is not one of ours")
-    return table[config.type]
+    """Our policy name of a LeRobot config type (``config.json``'s ``type``)."""
+    for spec in POLICY_SPECS.values():
+        if spec.config_type == config.type:
+            return spec.name
+    raise ValueError(f"checkpoint config type {config.type!r} is not one of ours")

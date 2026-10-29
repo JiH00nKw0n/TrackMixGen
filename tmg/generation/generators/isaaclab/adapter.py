@@ -13,6 +13,11 @@ lets the official script run. Outputs of a chunk::
 The source demonstrations are the released annotated datasets (``sources.py``). ``chunk_result`` validates the
 records against the attempt count and counts the exported episodes.
 
+``prepare_chunk`` is a template: the official script's arguments come from ``chunk_inputs`` (files written and choices made
+first), ``launcher_args`` (the script's own options), ``generator_args`` (``extra_args`` and ``kit_args`` of the generator
+config) and ``provider_args`` (options after ``--``); ``task_extra`` and ``generator_config_text`` fill the spec. The AutoData
+adapter overrides the hooks only.
+
 Success is never computed by tmg: the grafts read the official ``success`` value inside ``MultiWaypoint.execute``.
 SoftMimicGen's rope term fixes the rope end nodes at its first call of an episode, so calling it at reset (before the
 first action) would change the verdict; see ``docs/GENERATORS.md`` and ``task.success_term``.
@@ -29,6 +34,7 @@ from tmg.core.chunks import Chunk
 from tmg.core.records import ATTEMPTS_JSONL, RECORDS_DIR, read_attempts, validate_records
 from tmg.generation.base import ChunkSpec, SyntheticDataGenerator
 from tmg.generation.simulators.isaaclab import validate_isaaclab_scene
+from tmg.generation.simulators.scenes import load_scene_file
 
 ENTRYPOINT = "tmg.generation.generators.isaaclab.entrypoint"
 GENERATED = "generated.hdf5"
@@ -40,13 +46,10 @@ class IsaacLabGenerator(SyntheticDataGenerator):
     simulator = "isaaclab"
     package = ""                       # official datagen package, e.g. "isaaclab_mimic.datagen"
     soft_objects = False               # trajectory builder is Soft's ``generate_trajectory``
+    runtime_module: str | None = None  # module whose ``install_from_spec`` grafts the package (None: the Isaac Lab runtime)
 
     def scene_dict(self) -> dict:
         """The scene config of this generator (ranges per reset event), validated."""
-        from tmg.generation.simulators.robosuite import (
-            load_scene_file,  # the file layout is shared by every generator
-        )
-
         scene = dict(self.scene)
         if "override_bounds" not in scene:
             scene = load_scene_file(str(scene["name"]), self.generator_cfg["name"])
@@ -65,10 +68,36 @@ class IsaacLabGenerator(SyntheticDataGenerator):
                 "hand_prefixes": g.get("hand_prefixes"), "hand_term": g.get("hand_term"),
                 "measure_links": g.get("measure_links"), "noise_draw_shapes": list(g.get("noise_draw_shapes") or [])}
 
+    def script_path(self) -> str:
+        """The official script: ``generator.script`` under ``generator.source_root``."""
+        return str(Path(str(self.generator_cfg["source_root"])) / str(self.generator_cfg["script"]))
+
+    # prepare_chunk and its hooks ----------------------------------------------------------------------
     def prepare_chunk(self, chunk: Chunk, folder: Path) -> ChunkSpec:
-        """Describe the chunk: the official script's arguments and everything the entrypoint needs."""
+        """Describe the chunk: the official script's arguments and everything the entrypoint needs (hooks in the module
+        docstring)."""
         self.require_generation_config()
         folder.mkdir(parents=True, exist_ok=True)
+        inputs = self.chunk_inputs(chunk, folder)
+        args = self.launcher_args(chunk, folder, inputs) + self.generator_args() + self.provider_args(chunk, inputs)
+        extra = {"package": self.package, "soft": self.soft_objects,
+                 **({"runtime_module": self.runtime_module} if self.runtime_module else {}),
+                 "script": self.script_path(), "script_args": args, "layout": self.layout_dict(),
+                 "graft_hashes": dict(self.generator_cfg.get("graft_hashes") or {}), **self.task_extra(inputs)}
+        spec = ChunkSpec(
+            chunk={"index": chunk.index, "seed": chunk.seed, "attempts": chunk.attempts}, generator=self.generator_cfg["name"],
+            task=self.task, scene=self.scene_dict(), method=self.method,
+            protocol=self.protocol, generator_config=self.generator_config_text(inputs), folder=str(folder),
+            records_dir=str(folder / RECORDS_DIR), expected_outputs=[str(folder / RECORDS_DIR / ATTEMPTS_JSONL)], extra=extra)
+        (folder / "chunk_args.json").write_text(json.dumps(args, indent=1))
+        return spec
+
+    def chunk_inputs(self, chunk: Chunk, folder: Path) -> dict:
+        """Files written into ``folder`` and choices made before the arguments are built (nothing for SoftMimicGen)."""
+        return {}
+
+    def launcher_args(self, chunk: Chunk, folder: Path, inputs: dict) -> list[str]:
+        """The official script's own options."""
         task = self.task
         args = ["--headless", "--enable_cameras", "--device", str(self.cluster_device()), "--num_envs", "1",
                 "--generation_num_trials", str(chunk.attempts), "--input_file", str(self.source_path()),
@@ -77,25 +106,33 @@ class IsaacLabGenerator(SyntheticDataGenerator):
         # entrypoint's setup_env_config wrapper (the value the script seeds random, numpy and torch with)
         if task.get("camera_env"):
             args += ["--task", str(task["camera_env"])]
-        args += [str(a) for a in (self.generator_cfg.get("extra_args") or [])]
+        return args
+
+    def generator_args(self) -> list[str]:
+        """``generator.extra_args`` and ``generator.kit_args`` (Isaac Sim kit settings) of the generator config."""
+        args = [str(a) for a in (self.generator_cfg.get("extra_args") or [])]
         kit = self.generator_cfg.get("kit_args")
         if kit:
             args += ["--kit_args", str(kit)]
-        spec = ChunkSpec(
-            chunk={"index": chunk.index, "seed": chunk.seed, "attempts": chunk.attempts}, generator=self.generator_cfg["name"],
-            task=task, scene=self.scene_dict(), method=self.method,
-            protocol=self.protocol, generator_config="", folder=str(folder), records_dir=str(folder / RECORDS_DIR),
-            expected_outputs=[str(folder / RECORDS_DIR / ATTEMPTS_JSONL)],
-            extra={"package": self.package, "soft": self.soft_objects, "script": str(Path(self.generator_cfg["source_root"]) / self.generator_cfg["script"]),
-                   "script_args": args, "layout": self.layout_dict(), "graft_hashes": dict(self.generator_cfg.get("graft_hashes") or {}),
-                   "camera_module": task.get("camera_module"), "env_name": task.get("env_name")})
-        (folder / "chunk_args.json").write_text(json.dumps(args, indent=1))
-        return spec
+        return args
+
+    def provider_args(self, chunk: Chunk, inputs: dict) -> list[str]:
+        """Options after ``--`` for an environment provider (none for SoftMimicGen)."""
+        return []
+
+    def task_extra(self, inputs: dict) -> dict:
+        """Task fields of ``spec.extra`` the entrypoint reads (camera environment module, environment name)."""
+        return {"camera_module": self.task.get("camera_module"), "env_name": self.task.get("env_name")}
+
+    def generator_config_text(self, inputs: dict) -> str:
+        """``ChunkSpec.generator_config``: the official generator's own config file (none for the Isaac Lab scripts)."""
+        return ""
 
     def cluster_device(self) -> str:
         """``cluster.device`` (the GPU Isaac Sim renders and simulates on), default ``cuda:0``."""
         return str((self.cfg.get("cluster") or {}).get("device", "cuda:0"))
 
+    # chunk process and results --------------------------------------------------------------------------
     def chunk_command(self, spec: ChunkSpec, spec_path: Path) -> list[str]:
         return [sys.executable, "-m", ENTRYPOINT, "--spec", str(spec_path)]
 
@@ -116,7 +153,6 @@ class IsaacLabGenerator(SyntheticDataGenerator):
         return {"attempts": len(records), "successes": successes, "exported_episodes": exported,
                 "generated_hdf5": str(generated) if generated.exists() else None}
 
-
     def demo_layout(self) -> dict:
         """How ``tmg dataset`` reads this generator's chunk outputs (see ``tmg.data.dataset.DemoLayout``)."""
         return {"demo_glob": GENERATED, "image_key": "{cam}", "actions_key": "actions", "states_key": None,
@@ -129,4 +165,3 @@ class SoftMimicGenGenerator(IsaacLabGenerator):
     name = "softmimicgen"
     package = "softmimicgen.datagen"
     soft_objects = True
-

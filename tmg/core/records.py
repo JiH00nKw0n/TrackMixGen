@@ -36,12 +36,16 @@ from pathlib import Path
 
 import numpy as np
 
+from tmg.core.io_json import read_jsonl
+from tmg.core.layout import ATTEMPTS_JSONL, RECORDS_DIR  # noqa: F401  re-exported: callers import them from here
 from tmg.core.poses import pose_to_list
 
-RECORDS_DIR = "records"
-ATTEMPTS_JSONL = "attempts.jsonl"
 NPZ_FORMAT = "attempt_%06d.npz"
 NPZ_GLOB = "attempt_*.npz"
+# Written by the Isaac Lab runtimes next to the attempt npz (tmg/generation/generators/isaaclab/runtime.py writes the
+# labels, tmg/generation/generators/autodata/runtime.py the images); read by tmg.data.dataset through record_file.
+LABELS_FORMAT = "labels_%06d.npz"     # actions_executed, actions_pre_noise of one attempt
+IMAGES_FORMAT = "images_%06d.npz"     # one array per camera of one attempt
 SEG_BRIDGE = 0
 SEG_SKILL = 1
 REGION_CODES = {"rest": 0, "approach": 1, "bridge": 2}
@@ -309,13 +313,15 @@ def validate_records(folder: Path, expected_attempts: int) -> dict:
             return {"ok": False, "error": f"unreadable step arrays {npz}: {error!r}", "lines": lines}
         if n != line["n_steps"]:
             return {"ok": False, "error": f"{npz}: {n} steps recorded, line says {line['n_steps']}", "lines": lines}
-    successes = sum(1 for l in lines if l["success"])
+    successes = sum(1 for line in lines if line["success"])
     return {"ok": True, "error": None, "lines": lines, "successes": successes, "failures": len(lines) - successes}
 
 
 def read_attempts(folder: Path) -> list[dict]:
     """All ``attempts.jsonl`` lines of a records folder as dicts (empty list when absent)."""
-    path = Path(folder) / ATTEMPTS_JSONL
-    if not path.exists():
-        return []
-    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    return read_jsonl(Path(folder) / ATTEMPTS_JSONL)
+
+
+def record_file(records_folder: Path, name_format: str, attempt: int) -> Path:
+    """The per-attempt file of ``attempt`` in a records folder: ``record_file(f, NPZ_FORMAT, 12)`` is ``attempt_000012.npz``."""
+    return Path(records_folder) / (name_format % int(attempt))

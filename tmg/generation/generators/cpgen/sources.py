@@ -12,44 +12,57 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from tmg.generation.generators.mimicgen.sources import download, file_md5
+from tmg.generation.generators._sources import (
+    check_num_sources,
+    count_demos,
+    ensure_downloaded,
+    file_facts,
+    file_md5,
+    write_manifest,
+)
+
+MANIFEST_SUFFIX = ".manifest.json"      # next to the source file: <task>/source.manifest.json
+WINDOWS_SUFFIX = ".windows.json"        # the derivation report of the per-demonstration windows
 
 
-def fetch(task: dict, generator: dict, *, force: bool = False) -> dict:
-    """Make the task's source file and annotation ready and write the manifest next to the source."""
+def manifest_path(source: Path) -> Path:
+    """``<source>.manifest.json`` beside the source file (the suffix replaces ``.hdf5``)."""
+    return source.with_suffix(MANIFEST_SUFFIX)
+
+
+def fetch(task: dict, generator: dict) -> dict:
+    """Make the task's source file and annotation ready and write the manifest next to the source.
+
+    When the source, the annotation and the manifest exist and the per-demonstration windows are present (or not
+    wanted, ``task.per_demo_windows: false``), the stored manifest is returned as is.
+    """
     from tmg.generation.generators.cpgen import windows as win
 
-    source, annotation = Path(task["source"]), Path(task["annotation"])
-    manifest = source.with_suffix(".manifest.json")
+    source, annotation = Path(str(task["source"])).expanduser(), Path(str(task["annotation"])).expanduser()
+    manifest = manifest_path(source)
     want_windows = bool(task.get("per_demo_windows", True))
-    if source.exists() and annotation.exists() and manifest.exists() and not force:
-        if not want_windows or win.has_constraint_data(str(source)):
-            return json.loads(manifest.read_text())
+    if source.exists() and annotation.exists() and manifest.exists() and (not want_windows or win.has_constraint_data(str(source))):
+        return json.loads(manifest.read_text())
     repo = str(generator["source_repo"])
-    if not source.exists() or force:
-        print(f"[tmg] downloading {repo}:{task['source_file']} -> {source}", flush=True)
-        download(repo, str(task["source_file"]), source)
-    if not annotation.exists() or force:
-        print(f"[tmg] downloading {repo}:{task['annotation_file']} -> {annotation}", flush=True)
-        download(repo, str(task["annotation_file"]), annotation)
-    with __import__("h5py").File(source, "r") as f:
-        demos = len(f["data"].keys())
+    ensure_downloaded(repo, str(task["source_file"]), source)
+    ensure_downloaded(repo, str(task["annotation_file"]), annotation)
+    demos = count_demos(source)
     constraints = json.loads(annotation.read_text())
-    out = {"path": str(source), "bytes": source.stat().st_size, "md5": file_md5(source), "demos": demos,
+    out = {"path": str(source), **file_facts(source), "demos": demos,
            "annotation": str(annotation), "annotation_md5": file_md5(annotation), "constraints": len(constraints),
            "expected_sources": task.get("num_sources")}
-    if task.get("num_sources") and demos != int(task["num_sources"]):
-        raise RuntimeError(f"{source}: {demos} demos, task config expects {task['num_sources']}")
-    if want_windows and (force or not win.has_constraint_data(str(source))):
+    check_num_sources(source, demos, task)
+    if want_windows and not win.has_constraint_data(str(source)):
         # every demonstration gets its own constraint windows (demo 0: the released ones), so that selection=ours can use all
         # of them; the thresholds are calibrated on demonstration 0 against the released windows (windows.py)
         print(f"[tmg] deriving per-demonstration constraint windows of {task['name']} (CP-Gen segmentation, calibrated on demo 0)", flush=True)
+        report_path = source.with_suffix(WINDOWS_SUFFIX)
         report = win.annotate_source(str(source), str(annotation), source_root=str(generator["source_root"]),
-                                     report_path=str(source.with_suffix(".windows.json")))
+                                     report_path=str(report_path))
         out["windows"] = {"thresholds_m": report["thresholds"], "calibration_demo0": report["calibration"], "written": report["written"],
-                          "report": str(source.with_suffix(".windows.json"))}
-        out["md5"] = file_md5(source)
+                          "report": str(report_path)}
+        out["md5"] = file_md5(source)       # the windows were appended to the file
         print(f"[tmg] windows written for demos {sorted(k for k, n in report['written'].items() if n)}; thresholds {report['thresholds']}", flush=True)
-    manifest.write_text(json.dumps(out, indent=1))
+    write_manifest(manifest, out, indent=1, trailing_newline=False)
     print(f"[tmg] {task['name']}: {demos} source demos and {len(constraints)} constraints ready (md5 {out['md5']})", flush=True)
     return out

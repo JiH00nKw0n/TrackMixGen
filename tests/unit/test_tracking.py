@@ -130,3 +130,41 @@ def test_build_method_picks_implementations_by_type():
         build_method({"name": "t", "mixing": {"enabled": False}, "tracking": {**tracking, "type": "nope"}}, chunk_seed=1)
     with pytest.raises(ValueError):
         build_method({"name": "t", "mixing": {"enabled": True, "type": "nope", "ranking": "mimicgen/square"}, "tracking": {"enabled": False}}, chunk_seed=1)
+
+
+def test_gripper_state_helpers_live_in_grippers_and_are_re_exported():
+    from tmg.generation.method import event_mix
+    from tmg.generation.method.grippers import (
+        CLOSE_THRESHOLD,
+        OPEN_THRESHOLD,
+        IncompatibleGripperEvents,
+        build_detector,
+        change_indices,
+        gripper_states,
+    )
+
+    states = gripper_states([-1.0, 0.0, 1.0, 1.0, 0.0, -1.0])
+    assert states.tolist() == [False, False, True, True, True, False]            # zeros carry the state
+    assert change_indices(states).tolist() == [2, 5]
+    assert change_indices([True, True]).tolist() == []
+    with pytest.raises(IncompatibleGripperEvents):
+        gripper_states([0.0, 1.0])
+    assert event_mix.gripper_states is gripper_states and event_mix.IncompatibleGripperEvents is IncompatibleGripperEvents
+    closure = build_detector({"type": "closure", "columns": [0]})
+    assert (closure.close_threshold, closure.open_threshold) == (CLOSE_THRESHOLD, OPEN_THRESHOLD) == (0.65, 0.35)
+
+
+def test_guided_mix_config_matches_the_single_value_constructor():
+    from tmg.generation.method.guided_mix import GuidedMixConfig, GuidedMixer
+    from tmg.generation.method.ranking import RankedSources, SourceRanking
+
+    ranking = SourceRanking(name="x/y", generator="x", task="y", basis="t", default=RankedSources(order=(0, 1, 2)), subtasks={}, path="")
+    cfg = GuidedMixConfig.from_mapping({"weight_a": 0.7, "good_count": 1, "gripper_events": {"type": "sign"}})
+    assert cfg == GuidedMixConfig(weight_a=0.7, max_anchor_rotation_deg=20.0, seed_offset=817263, good_fraction=0.5,
+                                  good_count=1, gripper_events={"type": "sign"})
+    by_config = GuidedMixer(ranking=ranking, chunk_seed=3, config=cfg)
+    by_values = GuidedMixer(ranking=ranking, chunk_seed=3, weight_a=0.7, max_anchor_rotation_deg=20.0, seed_offset=817263,
+                            good_count=1, gripper_events={"type": "sign"})
+    assert by_config.describe() == by_values.describe() and by_config.groups(0) == ({0}, {1, 2})
+    with pytest.raises(TypeError):
+        GuidedMixer(ranking=ranking, chunk_seed=3, config=cfg, weight_a=0.5)

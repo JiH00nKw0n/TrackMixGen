@@ -39,3 +39,30 @@ def test_recorder_writes_npz_and_jsonl(tmp_path):
     assert arrays["seg_len"].tolist() == [3] and arrays["track_region"].tolist() == [-1, -1, -1]
     assert arrays["w_pos"].shape == (3, 1, 3) and arrays["eef_names"].tolist() == ["robot0"]
     assert json.loads((tmp_path / "attempts.jsonl").read_text().splitlines()[0])["success"] is True
+
+
+def test_seed_all_seeds_env_torch_numpy_and_random(monkeypatch):
+    """``tmg.core.seeding.seed_all`` replaces three seeders: the trainer's (random, numpy, torch), the Isaac Lab
+    evaluator's (env first, numpy modulo 2**32) and the server's (torch, numpy modulo 2**32). torch is stood in
+    for by a stub module, so the check runs without it."""
+    import random
+    import sys
+    import types
+
+    from tmg.core.seeding import seed_all
+
+    torch_seeds, env_seeds = [], []
+    monkeypatch.setitem(sys.modules, "torch", types.SimpleNamespace(manual_seed=torch_seeds.append))
+    env = types.SimpleNamespace(seed=env_seeds.append)
+    big = 2**32 + 2**31 + 7          # beyond 32 bits, and not the same residue modulo 2**31
+    seed_all(big, env)
+    drawn = (random.random(), np.random.random())
+    assert torch_seeds == [big] and env_seeds == [big]                 # torch and the environment take the seed whole
+    random.seed(big)
+    np.random.seed(2**31 + 7)                                           # numpy only accepts 32 bits: seed modulo 2**32
+    assert drawn == (random.random(), np.random.random())
+    seed_all(7)
+    drawn = (random.random(), np.random.random())
+    random.seed(7)
+    np.random.seed(7)
+    assert drawn == (random.random(), np.random.random()) and torch_seeds == [big, 7] and env_seeds == [big]

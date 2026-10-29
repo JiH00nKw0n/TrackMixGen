@@ -7,14 +7,14 @@ This module only maps MimicGen's local variables onto the shared pieces: the att
 Anchors (by the name the official statement assigns):
 
 generate():
-  after  ``new_initial_state = env.get_state()``                 -> _tmg.begin_attempt(...)
+  after  ``new_initial_state = env.get_state()``                 -> _tmg.begin_attempt(env)
   after  ``src_subtask_object_pose = ...``                       -> segment mixer (identity returns inputs)
   after  ``transformed_seq = WaypointSequence.from_poses(...)``   -> _tmg.record_subtask(locals())
   before the final ``return results``                            -> _tmg.end_attempt(results)
 execute():
   first statement of ``for seq in self.waypoint_sequences``      -> _tmg.begin_segment(seq, self)
   ``for j in range(len(seq))``  becomes  ``for j in _tmg.step_indices(seq)``
-  ``waypoint = seq[j]``         becomes  ``waypoint = _tmg.waypoint(seq, j, env, env_interface)``
+  ``waypoint = seq[j]``         becomes  ``waypoint = _tmg.waypoint(seq, j, env_interface)``
   after  ``action_pose = env_interface.target_pose_to_action(...)`` -> _tmg.pre_noise(action_pose)
   after  ``datagen_info = env_interface.get_datagen_info(...)``   -> _tmg.record_step(waypoint, datagen_info, play_action)
   after  ``cur_success_metrics = env.is_success()``               -> _tmg.record_success(cur_success_metrics, env_interface)
@@ -26,23 +26,20 @@ a private draw for an extra step).
 """
 from __future__ import annotations
 
-import json
-import time
-import traceback
 from pathlib import Path
 
 import numpy as np
 
 from tmg.core.records import AttemptRecorder
 from tmg.generation.execution import TrajectoryExecution, WaypointView
-from tmg.generation.graft import Graft
+from tmg.generation.generators._shared import record_error_guard
+from tmg.generation.graft import Graft, Installed, install_grafts
 from tmg.generation.method.interfaces import Method, MixContext
+from tmg.generation.seeds import private_noise_seed
 from tmg.generation.simulators.robosuite import SCENE_META_ATTR
 
-REC = AttemptRecorder()
-RECORD_ERROR = "RECORD_ERROR.json"
 EEF = "robot0"                      # MimicGen's robosuite tasks have one arm
-_STATE: dict = {"applied": False, "originals": {}}
+_INSTALLED: Installed | None = None  # the grafts of this process (apply installs once; restore undoes it)
 
 
 class MimicGenRuntime:
@@ -50,20 +47,21 @@ class MimicGenRuntime:
     def __init__(self, method: Method, chunk_seed: int, records_dir: Path | None):
         """Args:
             method: configured method.
-            chunk_seed: seed of the private noise stream (``chunk_seed + 7919``).
+            chunk_seed: seed of the chunk; the private noise stream is ``seeds.private_noise_seed(chunk_seed)``.
             records_dir: records folder, or None to record nothing.
         """
         self.method = method
-        self.rec = REC
+        self.rec = AttemptRecorder()
+        self.rec.configure(records_dir)
         self.records_dir = records_dir
-        private = np.random.RandomState(int(chunk_seed) + 7919)
-        self.exec = TrajectoryExecution(method, REC, global_draw=lambda n: np.random.randn(n),
+        private = np.random.RandomState(private_noise_seed(chunk_seed))
+        self.exec = TrajectoryExecution(method, self.rec, global_draw=lambda n: np.random.randn(n),
                                         private_draw=lambda n: private.randn(n))
         self._last_mix = None
         self._traj = None
 
     # generate() -----------------------------------------------------------------------------------
-    def begin_attempt(self, env, env_interface, initial_state):
+    def begin_attempt(self, env):
         """Grafted after ``env.reset()``: start the attempt record and read the scene metadata."""
         self.rec.begin_attempt()
         self.rec.set_scene_meta(getattr(getattr(env, "env", None), SCENE_META_ATTR, None))
@@ -141,15 +139,8 @@ class MimicGenRuntime:
             results["actions_executed"] = np.array(results["actions"])
             results["actions"] = labels
         self.rec.add_extra(labels=self.method.labels)
-        try:
+        with record_error_guard(self.records_dir, self.rec):
             self.rec.flush(success=bool(results["success"]), src_demo_inds=results["src_demo_inds"])
-        except Exception as error:
-            if self.records_dir is not None:
-                Path(self.records_dir).mkdir(parents=True, exist_ok=True)
-                (Path(self.records_dir) / RECORD_ERROR).write_text(json.dumps(
-                    {"attempt": self.rec.attempt, "error": repr(error), "traceback": traceback.format_exc(),
-                     "time": time.time()}, indent=2))
-            raise
 
     # execute() ------------------------------------------------------------------------------------
     @staticmethod
@@ -172,7 +163,7 @@ class MimicGenRuntime:
         index = next(i for i, s in enumerate(self._traj.waypoint_sequences) if s is seq)
         return self.exec.steps_of_sequence(index, len(seq))
 
-    def waypoint(self, seq, j, env, env_interface):
+    def waypoint(self, seq, j, env_interface):
         """Replaces ``seq[j]``: the original waypoint (identity) or a ``Waypoint`` built from the follower's target
         with ``noise=None`` (the noise is applied by :meth:`pre_noise`).
         """
@@ -206,45 +197,45 @@ class MimicGenRuntime:
         self.exec.after_step(task_success=bool(metrics["task"]), term_signals=env_interface.get_subtask_term_signals())
 
 
-def apply(method: Method, *, chunk_seed: int, records_dir: Path | None, graft_hashes: dict) -> dict:
-    """Install the grafted functions; returns a description for the chunk log."""
-    from mimicgen.datagen.data_generator import DataGenerator
-    from mimicgen.datagen.waypoint import WaypointTrajectory
-
-    if _STATE["applied"]:
-        raise RuntimeError("MimicGen runtime already applied in this process")
-    runtime = MimicGenRuntime(method, chunk_seed, records_dir)
-    REC.configure(records_dir)
-    gen = Graft(DataGenerator.generate, expected_hash=graft_hashes.get("generate"), label="DataGenerator.generate")
-    gen.insert_after_assign("new_initial_state", "_tmg.begin_attempt(env, env_interface, new_initial_state)")
+def build_grafts(generate, execute, graft_hashes: dict) -> tuple[Graft, Graft]:
+    """The edits of ``DataGenerator.generate`` and ``WaypointTrajectory.execute`` (module docstring), on any pair of
+    functions with those anchors; ``graft_hashes`` holds the pinned hashes under ``generate`` and ``execute``."""
+    gen = Graft(generate, expected_hash=graft_hashes.get("generate"), label="DataGenerator.generate")
+    gen.insert_after_assign("new_initial_state", "_tmg.begin_attempt(env)")
     gen.insert_after_assign(
         "src_subtask_object_pose",
         "src_subtask_eef_poses, src_subtask_target_poses, src_subtask_gripper_actions = _tmg.mix_segment(self, locals())")
     gen.insert_after_assign("transformed_seq", "_tmg.record_subtask(locals())")
     gen.insert_before_final_return("_tmg.end_attempt(results)")
-    exe = Graft(WaypointTrajectory.execute, expected_hash=graft_hashes.get("execute"), label="WaypointTrajectory.execute")
+    exe = Graft(execute, expected_hash=graft_hashes.get("execute"), label="WaypointTrajectory.execute")
     exe.insert_at_for_start("seq", "_tmg.begin_segment(seq, self)")
     exe.replace_for_iter("j", "_tmg.step_indices(seq)")
-    exe.replace_assign_value("waypoint", "_tmg.waypoint(seq, j, env, env_interface)")
+    exe.replace_assign_value("waypoint", "_tmg.waypoint(seq, j, env_interface)")
     exe.insert_after_assign("action_pose", "_tmg.pre_noise(action_pose)", occurrence=0)
     exe.insert_after_assign("datagen_info", "_tmg.record_step(waypoint, datagen_info, play_action)")
     exe.insert_after_assign("cur_success_metrics", "_tmg.record_success(cur_success_metrics, env_interface)")
-    _STATE["originals"] = {"generate": DataGenerator.generate, "execute": WaypointTrajectory.execute}
-    DataGenerator.generate = gen.compile({"_tmg": runtime})
-    WaypointTrajectory.execute = exe.compile({"_tmg": runtime})
-    _STATE["applied"] = True
-    _STATE["runtime"] = runtime
-    return {"generate": DataGenerator.generate.__tmg_graft__, "execute": WaypointTrajectory.execute.__tmg_graft__,
-            "method": method.name, "labels": method.labels, "records_dir": None if records_dir is None else str(records_dir)}
+    return gen, exe
+
+
+def apply(method: Method, *, chunk_seed: int, records_dir: Path | None, graft_hashes: dict) -> dict:
+    """Install the grafted functions; returns a description for the chunk log."""
+    global _INSTALLED
+    from mimicgen.datagen.data_generator import DataGenerator
+    from mimicgen.datagen.waypoint import WaypointTrajectory
+
+    if _INSTALLED is not None:
+        raise RuntimeError("MimicGen runtime already applied in this process")
+    runtime = MimicGenRuntime(method, chunk_seed, records_dir)
+    gen, exe = build_grafts(DataGenerator.generate, WaypointTrajectory.execute, graft_hashes)
+    _INSTALLED = install_grafts([(DataGenerator, "generate", gen), (WaypointTrajectory, "execute", exe)], {"_tmg": runtime})
+    return {**_INSTALLED.info, "method": method.name, "labels": method.labels,
+            "records_dir": None if records_dir is None else str(records_dir)}
 
 
 def restore() -> None:
     """Put the original MimicGen functions back (tests and interactive use)."""
-    if not _STATE["applied"]:
+    global _INSTALLED
+    if _INSTALLED is None:
         return
-    from mimicgen.datagen.data_generator import DataGenerator
-    from mimicgen.datagen.waypoint import WaypointTrajectory
-
-    DataGenerator.generate = _STATE["originals"]["generate"]
-    WaypointTrajectory.execute = _STATE["originals"]["execute"]
-    _STATE["applied"] = False
+    _INSTALLED.restore()
+    _INSTALLED = None

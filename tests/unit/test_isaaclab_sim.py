@@ -153,3 +153,55 @@ def test_isolate_controller_scratch_gives_each_pink_controller_its_own_folder(tm
     assert moved == {"upper_body_ik": str(tmp_path / "chunk" / "urdf" / "upper_body_ik")}
     assert pink.controller.urdf_output_dir == str(tmp_path / "chunk" / "urdf" / "upper_body_ik") and (tmp_path / "chunk" / "urdf" / "upper_body_ik").is_dir()
     assert plain.controller.gains == 1.0 and isolate_controller_scratch(types.SimpleNamespace(), tmp_path) == {}
+
+
+def test_tensor_and_attribute_helpers():
+    from tmg.generation.simulators import isaaclab
+    from tmg.generation.simulators.isaaclab import has_ranges, import_attr, to_numpy
+
+    class FakeTensor:                                     # not an ndarray: only the detach/cpu/numpy chain reaches the values
+        def __init__(self, values):
+            self.values = values
+            self.trail = []
+
+        def detach(self):
+            self.trail.append("detach")
+            return self
+
+        def cpu(self):
+            self.trail.append("cpu")
+            return self
+
+        def numpy(self):
+            self.trail.append("numpy")
+            return np.asarray(self.values)
+
+    t = FakeTensor([1.0, 2.0])
+    assert to_numpy(t).tolist() == [1.0, 2.0] and t.trail == ["detach", "cpu", "numpy"]
+    assert to_numpy([3, 4]).tolist() == [3, 4] and isinstance(to_numpy(np.zeros(2)), np.ndarray)
+    assert import_attr("tmg.generation.simulators.isaaclab:to_numpy") is to_numpy
+    assert isaaclab._import_attr is import_attr                                           # the adapters' older name
+    with pytest.raises(ValueError):
+        import_attr("no_colon_here")
+    assert has_ranges({"x": [0, 1]}) and has_ranges({"pose_range": {"x": [0, 1]}}) and has_ranges({"partial_pose_range": {}})
+    assert not has_ranges({"add": True, "func": "m:f", "asset": "a", "params": {"velocity_range": {}}})
+
+
+def test_added_event_without_ranges_gets_no_pose_range(monkeypatch):
+    import sys
+
+    managers = types.ModuleType("isaaclab.managers")
+    managers.EventTermCfg = lambda **kw: types.SimpleNamespace(**kw)
+    managers.SceneEntityCfg = lambda name: ("entity", name)
+    isaaclab = types.ModuleType("isaaclab"); isaaclab.managers = managers
+    monkeypatch.setitem(sys.modules, "isaaclab", isaaclab); monkeypatch.setitem(sys.modules, "isaaclab.managers", managers)
+    target = types.ModuleType("tmg_fake_events2"); target.reset_joints = lambda *a, **k: None
+    monkeypatch.setitem(sys.modules, "tmg_fake_events2", target)
+    scene = {"name": "ours", "override_bounds": True,
+             "bounds": {"microwave": {"tmg_open_door": {"add": True, "func": "tmg_fake_events2:reset_joints", "asset": "microwave",
+                                                        "params": {"position_range": [0.0, 1.0]}}}}}
+    env_cfg = types.SimpleNamespace(events=types.SimpleNamespace())
+    applied = apply_scene(env_cfg, scene, "microwave")
+    added = env_cfg.events.tmg_open_door
+    assert added.params == {"asset_cfg": ("entity", "microwave"), "position_range": [0.0, 1.0]}      # no empty pose_range
+    assert applied == {"tmg_open_door": {"added": "tmg_fake_events2:reset_joints", "position_range": [0.0, 1.0]}}

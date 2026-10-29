@@ -32,6 +32,10 @@ from pathlib import Path
 import h5py
 import numpy as np
 
+from tmg.core.features import ACTION, ACTION_IS_PAD, ENV_STATE, STATE, TASK, image_feature, is_image_key
+from tmg.core.layout import indexed_keys
+from tmg.data.images import camera_obs_key
+
 
 @dataclass
 class TrajectoryStore:
@@ -63,7 +67,7 @@ class TrajectoryStore:
             data = f["data"]
             attrs = {k: (v.decode() if isinstance(v, bytes) else v) for k, v in data.attrs.items()}
             cams = list(cameras) if cameras is not None else list(json.loads(attrs.get("cameras", "[]")))
-            keys = list(demos) if demos is not None else sorted(data.keys(), key=lambda k: int(k.split("_")[1]))
+            keys = list(demos) if demos is not None else indexed_keys(data.keys())
             if json.loads(attrs.get("object_state_keys", "[]")):
                 env_state = []
             for cam in cams:
@@ -72,8 +76,7 @@ class TrajectoryStore:
                 g = data[key]
                 for cam in cams:
                     # the dataset stores a camera under the generator's own obs key: MimicGen "<cam>_image", Isaac Lab "<cam>"
-                    key = cam if cam in g["obs"] else f"{cam}_image"
-                    images[cam].append(np.asarray(g["obs"][key], dtype=np.uint8))
+                    images[cam].append(np.asarray(g["obs"][camera_obs_key(g["obs"], cam)], dtype=np.uint8))
                 state.append(np.asarray(g["obs"]["robot_state"], dtype=np.float32))
                 if env_state is not None:
                     env_state.append(np.asarray(g["obs"]["object_state"], dtype=np.float32))
@@ -151,17 +154,17 @@ class FrameDataset:
         n = int(self.store.lengths[d])
         obs_idx, _ = padded_indices(t, n, self.obs_delta if self.obs_delta is not None else (0,))
         act_idx, act_pad = padded_indices(t, n, self.action_delta)
-        item = {f"observation.images.{cam}": np.ascontiguousarray(self.store.images[cam][d][obs_idx].transpose(0, 3, 1, 2))
+        item = {image_feature(cam): np.ascontiguousarray(self.store.images[cam][d][obs_idx].transpose(0, 3, 1, 2))
                 for cam in self.store.cameras}
-        item["observation.state"] = self.store.state[d][obs_idx]
+        item[STATE] = self.store.state[d][obs_idx]
         if self.store.env_state is not None:
-            item["observation.environment_state"] = self.store.env_state[d][obs_idx]
+            item[ENV_STATE] = self.store.env_state[d][obs_idx]
         if self.obs_delta is None:                       # single frame: drop the time axis
             item = {k: v[0] for k, v in item.items()}
         if self.task is not None:
-            item["task"] = self.task
-        item["action"] = self.store.actions[d][act_idx]
-        item["action_is_pad"] = act_pad
+            item[TASK] = self.task
+        item[ACTION] = self.store.actions[d][act_idx]
+        item[ACTION_IS_PAD] = act_pad
         item["index"], item["episode_index"], item["frame_index"] = int(self._global_index[i]), d, t
         return item
 
@@ -190,6 +193,20 @@ def collate(items: Sequence[dict]):
     return out
 
 
+def image_to_float(key: str, value):
+    """``value`` as float32 in [0, 1] when it is a uint8 image tensor under an ``observation.images.<cam>`` key, else as is."""
+    import torch
+
+    if is_image_key(key) and isinstance(value, torch.Tensor) and value.dtype == torch.uint8:
+        return value.float() / 255.0
+    return value
+
+
+def images_to_float(batch: dict) -> dict:
+    """A copy of ``batch`` with every uint8 image tensor converted by ``image_to_float``."""
+    return {key: image_to_float(key, v) for key, v in batch.items()}
+
+
 def to_device(batch: dict, device, *, images_to_float: bool = True) -> dict:
     """Move a collated batch to ``device``; uint8 images become float32 in [0, 1] when requested."""
     import torch
@@ -200,9 +217,7 @@ def to_device(batch: dict, device, *, images_to_float: bool = True) -> dict:
             out[key] = v
             continue
         v = v.to(device, non_blocking=True)
-        if images_to_float and key.startswith("observation.images.") and v.dtype == torch.uint8:
-            v = v.float() / 255.0
-        out[key] = v
+        out[key] = image_to_float(key, v) if images_to_float else v
     return out
 
 
@@ -222,9 +237,9 @@ def compute_stats(store: TrajectoryStore, *, max_image_frames: int = 20000, seed
         return {"min": arr.min(0).astype(np.float32), "max": arr.max(0).astype(np.float32),
                 "mean": arr.mean(0).astype(np.float32), "std": arr.std(0).astype(np.float32)}
 
-    stats = {"observation.state": vec_stats(np.concatenate(store.state)), "action": vec_stats(np.concatenate(store.actions))}
+    stats = {STATE: vec_stats(np.concatenate(store.state)), ACTION: vec_stats(np.concatenate(store.actions))}
     if store.env_state is not None:
-        stats["observation.environment_state"] = vec_stats(np.concatenate(store.env_state))
+        stats[ENV_STATE] = vec_stats(np.concatenate(store.env_state))
     rng = np.random.default_rng(seed)
     for cam in store.cameras:
         frames = np.concatenate(store.images[cam])
@@ -233,5 +248,5 @@ def compute_stats(store: TrajectoryStore, *, max_image_frames: int = 20000, seed
         x = frames.astype(np.float32) / 255.0
         per_channel = {"min": x.min(axis=(0, 1, 2)), "max": x.max(axis=(0, 1, 2)), "mean": x.mean(axis=(0, 1, 2)),
                        "std": x.std(axis=(0, 1, 2))}
-        stats[f"observation.images.{cam}"] = {k: v.astype(np.float32).reshape(3, 1, 1) for k, v in per_channel.items()}
+        stats[image_feature(cam)] = {k: v.astype(np.float32).reshape(3, 1, 1) for k, v in per_channel.items()}
     return stats

@@ -20,9 +20,8 @@ from pathlib import Path
 
 import yaml
 
-from tmg import CONFIGS_ROOT
+from tmg.generation.simulators.scenes import GENERATOR_DIR, generator_config_dir  # noqa: F401  GENERATOR_DIR kept for readers
 
-GENERATOR_DIR = "experiment/generator"
 RANKING_DIR = "ranking"
 
 
@@ -110,7 +109,7 @@ def ranking_path(name: str, root: Path | None = None) -> Path:
     generator, _, task = name.partition("/")
     if not task:
         raise ValueError(f"ranking name must be <generator>/<task>, got {name!r}")
-    return Path(root or CONFIGS_ROOT) / GENERATOR_DIR / generator / RANKING_DIR / f"{task}.yaml"
+    return generator_config_dir(generator, root) / RANKING_DIR / f"{task}.yaml"
 
 
 def load_ranking(name: str, root: Path | None = None) -> SourceRanking:

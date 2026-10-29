@@ -4,11 +4,18 @@
 overrides given on the command line, resolves interpolations and returns a plain-dict-convertible
 ``DictConfig`` in struct mode (unknown keys are rejected). Hydra's run directory and logging are not used:
 result folders are chosen by each command (``output``), never by Hydra.
+
+``COMMANDS`` is the command table of the ``tmg`` command line: for every command the config file
+``configs/command/<name>.yaml``, the function that runs it (``module:function``, imported only when the command
+runs, since most of them need a simulator or torch), its one-line help, and the result key that decides the exit
+code. ``tmg.cli`` builds its argument parser and its help text from this table.
 """
 from __future__ import annotations
 
+import importlib
 import re
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from pathlib import Path
 
 from hydra import compose as _hydra_compose
@@ -18,14 +25,50 @@ from omegaconf import DictConfig, OmegaConf
 from tmg import CONFIGS_ROOT
 
 LAYERS = ("machine", "experiment")
-COMMANDS = ("generate", "verify_baseline", "sources", "check_scene", "rank_sources", "dataset", "train", "select_checkpoint",
-          "serve", "resets", "eval", "report")
+
+
+@dataclass(frozen=True)
+class CommandSpec:
+    """One ``tmg`` subcommand."""
+
+    target: str                     # "module:function"; the function takes the composed DictConfig
+    help: str                       # one line for ``tmg --help``
+    exit_code: str | None = None    # key of the result dict: exit 1 when its value is false, else 0; None: always 0
+
+    def resolve(self) -> Callable:
+        """Import the module and return the function (deferred: most targets import a simulator or torch)."""
+        module, _, function = self.target.partition(":")
+        return getattr(importlib.import_module(module), function)
+
+
+COMMANDS: dict[str, CommandSpec] = {
+    "generate": CommandSpec("tmg.generation.runner:run_pool",
+                            "one pool of generation attempts (generator, task, scene, method, generation)"),
+    "verify_baseline": CommandSpec("tmg.generation.verify:verify_baseline",
+                                   "run one chunk officially and through the adapter (method=none) and compare the demos",
+                                   exit_code="identical"),
+    "sources": CommandSpec("tmg.cli:fetch_sources", "download and prepare the human source demonstrations of a task"),
+    "check_scene": CommandSpec("tmg.generation.scene_check:check_scene",
+                               "reset a (task, scene) environment many times and report edge overhang, contacts, falls, reach",
+                               exit_code="ok"),
+    "rank_sources": CommandSpec("tmg.generation.rank_sources:rank_sources",
+                                "order a task's source demonstrations by their generation success in a baseline pool"),
+    "dataset": CommandSpec("tmg.data.dataset:build_dataset",
+                           "select successful attempts of a finished pool and write one training hdf5"),
+    "train": CommandSpec("tmg.policy.trainer:train", "train one policy on one dataset (train image)"),
+    "select_checkpoint": CommandSpec("tmg.policy.trainer:select_checkpoint_cmd",
+                                     "choose a run's checkpoint from validation.jsonl (or the last one)"),
+    "serve": CommandSpec("tmg.policy.server:serve", "policy server for one checkpoint (train image)"),
+    "resets": CommandSpec("tmg.evaluation.resets:make_resets",
+                          "draw the fixed evaluation scenes of (task, scene) (simulator image)"),
+    "eval": CommandSpec("tmg.evaluation.rollout:evaluate", "play the fixed scenes against a served checkpoint (simulator image)"),
+}
 
 
 def compose(command: str, overrides: Iterable[str] = (), *, configs_root: Path | None = None) -> DictConfig:
     """Compose the config of ``command`` from ``configs/command/<command>.yaml`` plus command-line overrides."""
     if command not in COMMANDS:
-        raise ValueError(f"unknown command {command!r}; known: {COMMANDS}")
+        raise ValueError(f"unknown command {command!r}; known: {tuple(COMMANDS)}")
     root = Path(configs_root or CONFIGS_ROOT).resolve()
     overrides = [str(o) for o in overrides]
     for o in overrides:

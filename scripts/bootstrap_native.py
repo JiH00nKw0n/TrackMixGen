@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Install a native environment under a user-owned directory. Never install a kernel driver or accept an EULA."""
+"""Install a native environment under a user-owned directory. Never install a kernel driver or accept an EULA.
+
+One stage per image (``train``, ``isaaclab-soft``, ``isaaclab-dex``; ``IMAGES`` lists what each one needs), plus
+``tools`` (uv and make), ``graphics`` (the host driver's user-space libraries) and ``verify`` (the installed pins).
+The exact command sequence of every image is frozen in ``tests/unit/test_native_bootstrap.py``.
+"""
 from __future__ import annotations
 
 import argparse
@@ -11,6 +16,7 @@ import shutil
 import subprocess
 import sys
 import urllib.request
+from dataclasses import dataclass, field
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
@@ -18,6 +24,59 @@ SOFT_COMMIT = "c9d146ba57358a544167de8ebe946caaac8f6220"
 SOFT_LAB_COMMIT = "25c69e088fa8122ad189b3a566d38ef24fa74d6f"
 DEX_LAB_COMMIT = "3c6e67bb5c7ada942a6d1884ab69338f57596f77"
 SOFT_PILLOW_FILE = "source/isaaclab/setup.py"
+
+TORCH_INDEX = "https://download.pytorch.org/whl/cu128"
+ISAAC_TORCH, ISAAC_TORCHVISION = "2.7.0", "0.22.0"       # the Isaac Sim 5.1 images; the train image pins torch in requirements/
+ISAAC_PINS = {"isaacsim": "5.1.0", "torch": f"{ISAAC_TORCH}+cu128", "torchvision": f"{ISAAC_TORCHVISION}+cu128",
+              "torchaudio": f"{ISAAC_TORCH}+cu128"}
+# Unpinned helpers are resolved together with the exact Isaac Sim requirements: installing the pins alone leaves recent
+# pytest/IPython/wheel/Hugging Face releases with incompatible requirements. These are the versions that resolution gives.
+ISAAC_HELPER_PINS = {"packaging": "23.0", "click": "8.1.7", "idna": "3.10", "psutil": "5.9.8"}
+
+
+@dataclass(frozen=True)
+class ImageSpec:
+    """What ``install`` and ``verify_installation`` need to know about one image."""
+
+    name: str
+    python: str                                   # interpreter version of the venv
+    expected: dict[str, str]                      # pins verify_installation checks, in the order they are reported
+    lab_repo: str | None = None                   # Isaac Lab repository to check out (Isaac Lab images only)
+    lab_commit: str | None = None
+    source_packages: tuple[str, ...] = field(default=("isaaclab", "isaaclab_assets", "isaaclab_tasks", "isaaclab_mimic"))
+
+    @property
+    def isaaclab(self) -> bool:
+        return self.lab_repo is not None
+
+    @property
+    def python_tuple(self) -> list[int]:
+        """``[3, 11]`` for ``"3.11"`` (what ``sys.version_info[:2]`` must equal)."""
+        return [int(v) for v in self.python.split(".")]
+
+
+IMAGES = {
+    "train": ImageSpec("train", "3.12", {"torch": "2.8.0+cu128", "torchvision": "0.23.0+cu128", "lerobot": "0.6.1"}),
+    "isaaclab-soft": ImageSpec("isaaclab-soft", "3.11",
+                               {**ISAAC_PINS, "qpsolvers": "4.8.1", **ISAAC_HELPER_PINS, "pillow": "11.3.0"},
+                               lab_repo="https://github.com/masoudmoghani/IsaacLab", lab_commit=SOFT_LAB_COMMIT),
+    "isaaclab-dex": ImageSpec("isaaclab-dex", "3.11",
+                              {**ISAAC_PINS, "qpsolvers": "4.3.1", **ISAAC_HELPER_PINS, "pillow": "11.3.0"},
+                              lab_repo="https://github.com/isaac-sim/IsaacLab", lab_commit=DEX_LAB_COMMIT),
+}
+
+
+def uv_path(root: Path) -> Path:
+    return root / "bin/uv"
+
+
+def venv_python(root: Path, image: str) -> Path:
+    return root / "envs" / image / "bin/python"
+
+
+def apt_cmd(root: Path) -> list[str]:
+    """``apt-get`` with its lists and cache under the native root, so no system directory is touched."""
+    return ["apt-get", "-o", f"Dir::State::lists={root / 'tools/apt/lists'}", "-o", f"Dir::Cache={root / 'tools/apt/cache'}"]
 
 
 def soft_pillow_contents(path):
@@ -72,7 +131,7 @@ def checkout(url, path, revision, *, soft_pillow_patch=False):
 
 
 def tools(root):
-    uv = root / "bin/uv"
+    uv = uv_path(root)
     if not uv.exists():
         bootstrap = root / "tools/bootstrap"
         if not (bootstrap / "bin/python").exists():
@@ -84,10 +143,9 @@ def tools(root):
         folder = root / "downloads/deb"
         folder.mkdir(parents=True, exist_ok=True)
         lists = root / "tools/apt/lists"
-        cache = root / "tools/apt/cache"
         (lists / "partial").mkdir(parents=True, exist_ok=True)
-        (cache / "archives/partial").mkdir(parents=True, exist_ok=True)
-        apt = ["apt-get", "-o", f"Dir::State::lists={lists}", "-o", f"Dir::Cache={cache}"]
+        (root / "tools/apt/cache" / "archives/partial").mkdir(parents=True, exist_ok=True)
+        apt = apt_cmd(root)
         if not any(lists.glob("*Packages*")):
             run([*apt, "update"])
         run([*apt, "download", "make"], cwd=folder)
@@ -104,8 +162,7 @@ def graphics(root):
     for package in ("libglu1-mesa", "libopengl0"):
         archives = list(packages.glob(f"{package}_*.deb"))
         if not archives:
-            run(["apt-get", "-o", f"Dir::State::lists={root / 'tools/apt/lists'}",
-                 "-o", f"Dir::Cache={root / 'tools/apt/cache'}", "download", package], cwd=packages)
+            run([*apt_cmd(root), "download", package], cwd=packages)
             archives = list(packages.glob(f"{package}_*.deb"))
         for archive in archives:
             run(["dpkg-deb", "-x", archive, root / "tools"])
@@ -157,60 +214,67 @@ def graphics(root):
     run(["python3", REPO / "scripts/probe_native_graphics.py"], env=dict(os.environ, **env))
 
 
+def install_isaaclab_sources(root, spec: ImageSpec, python, pip):
+    """Isaac Sim, the pinned Isaac Lab checkout and the generator's own packages of an Isaac Lab image."""
+    pip("--index-strategy", "unsafe-best-match", "--extra-index-url", "https://pypi.nvidia.com",
+        f"isaacsim[all,extscache]=={ISAAC_PINS['isaacsim']}")
+    pip("--index-url", TORCH_INDEX, f"torch=={ISAAC_TORCH}", f"torchvision=={ISAAC_TORCHVISION}")
+    src = root / "src" / spec.name
+    src.mkdir(parents=True, exist_ok=True)
+    lab = src / "IsaacLab"
+    soft = spec.name == "isaaclab-soft"
+    checkout(spec.lab_repo, lab, spec.lab_commit, soft_pillow_patch=soft)
+    if soft:
+        align_soft_pillow(lab)
+        checkout("https://github.com/NVlabs/SoftMimicGen", src / "SoftMimicGen", SOFT_COMMIT)
+    for name in spec.source_packages:
+        pip("--no-build-isolation", "-e", lab / "source" / name)
+    if soft:
+        # The original Dockerfile follows rapprentice HEAD. Record its actual commit below.
+        if not (src / "rapprentice").exists():
+            run(["git", "clone", "--depth", "1", "https://github.com/masoudmoghani/rapprentice", src / "rapprentice"])
+        pip("-e", src / "rapprentice", f"qpsolvers=={spec.expected['qpsolvers']}", "h5py", "huggingface_hub")
+        for name in ["softmimicgen", "softmimicgen_assets", "softmimicgen_tasks"]:
+            pip("--no-build-isolation", "-e", src / "SoftMimicGen/source" / name)
+        run([python, "-c", ("from huggingface_hub import snapshot_download; import sys; "
+             "snapshot_download('masoudmoghani/SoftMimicGen', repo_type='dataset', "
+             "allow_patterns='data/*', local_dir=sys.argv[1])"),
+             src / "SoftMimicGen/source/softmimicgen_assets"], env=pip.env)
+    else:
+        pip("h5py", "robomimic @ git+https://github.com/ARISE-Initiative/robomimic.git@v0.4.0",
+            "osqp==0.6.7.post3", f"qpsolvers=={spec.expected['qpsolvers']}")
+    # torch a second time, now as the explicit +cu128 builds (kept from the original sequence: the source installs
+    # above may have replaced the wheels; test_native_bootstrap freezes this command list)
+    pip("--index-url", TORCH_INDEX, f"torch=={ISAAC_PINS['torch']}", f"torchvision=={ISAAC_PINS['torchvision']}",
+        f"torchaudio=={ISAAC_PINS['torchaudio']}")
+
+
 def install(root, image):
+    spec = IMAGES[image]
     uv = tools(root)
     venv = root / "envs" / image
-    python = venv / "bin/python"
+    python = venv_python(root, image)
     env = dict(os.environ, UV_CACHE_DIR=str(root / "cache/uv"), UV_PYTHON_INSTALL_DIR=str(root / "python"),
                UV_LINK_MODE="hardlink",
                PATH=f"{venv / 'bin'}:{root / 'tools/usr/bin'}:{root / 'bin'}:{os.environ.get('PATH', '')}")
     env.setdefault("UV_HTTP_TIMEOUT", "180")
     env.setdefault("UV_CONCURRENT_DOWNLOADS", "4")
     if not python.exists():
-        run([uv, "venv", "--python", "3.12" if image == "train" else "3.11", "--seed", venv], env=env)
+        run([uv, "venv", "--python", spec.python, "--seed", venv], env=env)
+
     def pip(*args):
         run([uv, "pip", "install", "--python", python, *args], env=env)
+    pip.env = env                 # the one non-pip command of the Isaac Lab images runs with the same environment
     pip("pip<26", "setuptools<77", "wheel", "toml", "ninja", "cmake<4")
-    if image == "train":
+    if spec.isaaclab:
+        install_isaaclab_sources(root, spec, python, pip)
+    else:
         pip("-r", REPO / "requirements/train-torch.txt")
         pip("-r", REPO / "requirements/train.txt")
-    else:
-        pip("--index-strategy", "unsafe-best-match", "--extra-index-url", "https://pypi.nvidia.com",
-            "isaacsim[all,extscache]==5.1.0")
-        pip("--index-url", "https://download.pytorch.org/whl/cu128", "torch==2.7.0", "torchvision==0.22.0")
-        src = root / "src" / image
-        src.mkdir(parents=True, exist_ok=True)
-        lab = src / "IsaacLab"
-        if image == "isaaclab-soft":
-            checkout("https://github.com/masoudmoghani/IsaacLab", lab, SOFT_LAB_COMMIT, soft_pillow_patch=True)
-            align_soft_pillow(lab)
-            checkout("https://github.com/NVlabs/SoftMimicGen", src / "SoftMimicGen", SOFT_COMMIT)
-        else:
-            checkout("https://github.com/isaac-sim/IsaacLab", lab, DEX_LAB_COMMIT)
-        for name in ["isaaclab", "isaaclab_assets", "isaaclab_tasks", "isaaclab_mimic"]:
-            pip("--no-build-isolation", "-e", lab / "source" / name)
-        if image == "isaaclab-soft":
-            # The original Dockerfile follows rapprentice HEAD. Record its actual commit below.
-            if not (src / "rapprentice").exists():
-                run(["git", "clone", "--depth", "1", "https://github.com/masoudmoghani/rapprentice", src / "rapprentice"])
-            pip("-e", src / "rapprentice", "qpsolvers==4.8.1", "h5py", "huggingface_hub")
-            for name in ["softmimicgen", "softmimicgen_assets", "softmimicgen_tasks"]:
-                pip("--no-build-isolation", "-e", src / "SoftMimicGen/source" / name)
-            run([python, "-c", ("from huggingface_hub import snapshot_download; import sys; "
-                 "snapshot_download('masoudmoghani/SoftMimicGen', repo_type='dataset', "
-                 "allow_patterns='data/*', local_dir=sys.argv[1])"),
-                 src / "SoftMimicGen/source/softmimicgen_assets"], env=env)
-        else:
-            pip("h5py", "robomimic @ git+https://github.com/ARISE-Initiative/robomimic.git@v0.4.0",
-                "osqp==0.6.7.post3", "qpsolvers==4.3.1")
-        pip("--index-url", "https://download.pytorch.org/whl/cu128",
-            "torch==2.7.0+cu128", "torchvision==0.22.0+cu128", "torchaudio==2.7.0+cu128")
     pip("--no-deps", "-e", REPO)
     pip("hydra-core>=1.3,<1.4", "omegaconf>=2.3,<2.4", "pyyaml", "scipy", "msgpack", "websockets")
-    if image != "train":
-        # Resolve unpinned helper packages together with the exact Isaac Sim requirements. Installing the
-        # pins alone leaves recent pytest/IPython/wheel/Hugging Face releases with incompatible requirements.
-        pip("packaging==23.0", "click==8.1.7", "idna==3.10", "psutil==5.9.8",
+    if spec.isaaclab:
+        pip(*(f"{name}=={version}" for name, version in ISAAC_HELPER_PINS.items()),
             "pytest", "ipython", "wheel", "transformers", "huggingface_hub")
         prune_unused_httpx2(root, python)
     verify_installation(root, image)
@@ -233,13 +297,14 @@ print(json.dumps(users))
 """
     users = json.loads(subprocess.check_output([str(python), "-c", code], text=True))
     if not users:
-        run([root / "bin/uv", "pip", "uninstall", "--python", python, "httpx2"])
+        run([uv_path(root), "pip", "uninstall", "--python", python, "httpx2"])
 
 
 def verify_installation(root, image):
     """Check the installed pins and source revisions without reinstalling or importing Isaac Sim."""
-    uv = root / "bin/uv"
-    python = root / "envs" / image / "bin/python"
+    spec = IMAGES[image]
+    uv = uv_path(root)
+    python = venv_python(root, image)
     evidence = root / "install-records"
     evidence.mkdir(exist_ok=True)
     with (evidence / f"{image}.freeze.txt").open("w") as output:
@@ -247,13 +312,7 @@ def verify_installation(root, image):
     check = subprocess.run([str(uv), "pip", "check", "--python", str(python)],
                            check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     (evidence / f"{image}.check.txt").write_text(check.stdout)
-    expected = ({"torch": "2.8.0+cu128", "torchvision": "0.23.0+cu128", "lerobot": "0.6.1"}
-                if image == "train" else
-                {"isaacsim": "5.1.0", "torch": "2.7.0+cu128", "torchvision": "0.22.0+cu128",
-                 "torchaudio": "2.7.0+cu128", "qpsolvers": "4.8.1" if image == "isaaclab-soft" else "4.3.1"})
-    if image != "train":
-        expected.update(packaging="23.0", click="8.1.7", idna="3.10", psutil="5.9.8",
-                        pillow="11.3.0")
+    expected = dict(spec.expected)
     actual = json.loads(subprocess.check_output([
         str(python), "-c", ("import sys,json,importlib.metadata as m; from packaging.version import Version; "
         "expected=json.loads(sys.argv[1]); actual={n:m.version(n) for n in expected}; "
@@ -261,8 +320,7 @@ def verify_installation(root, image):
         "'passed':all(Version(actual[n])==Version(v) for n,v in expected.items())}))"),
         json.dumps(expected)], text=True))
     actual["expected_packages"] = expected
-    actual["passed"] = (actual["passed"]
-                        and actual["python"][:2] == ([3, 12] if image == "train" else [3, 11]))
+    actual["passed"] = actual["passed"] and actual["python"][:2] == spec.python_tuple
     actual["pinned_versions_match"] = actual["passed"]
     actual["dependency_check_passed"] = check.returncode == 0
     actual["passed"] = actual["pinned_versions_match"] and actual["dependency_check_passed"]
@@ -283,8 +341,8 @@ def verify_installation(root, image):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("stage", choices=["tools", "graphics", "isaaclab-soft", "isaaclab-dex", "train", "verify"])
-    parser.add_argument("--image", choices=["isaaclab-soft", "isaaclab-dex", "train"])
+    parser.add_argument("stage", choices=["tools", "graphics", *IMAGES, "verify"])
+    parser.add_argument("--image", choices=list(IMAGES))
     args = parser.parse_args()
     root = Path(os.environ.get("TMG_NATIVE_ROOT") or "~/.local/share/tmg-native").expanduser().resolve()
     root.mkdir(parents=True, exist_ok=True)

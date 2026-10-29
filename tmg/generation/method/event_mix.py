@@ -11,33 +11,31 @@ from __future__ import annotations
 import numpy as np
 from scipy.spatial.transform import Rotation, Slerp
 
-
-class IncompatibleGripperEvents(ValueError):
-    """The two segments cannot be aligned on the same gripper events."""
-
-
-def gripper_states(commands) -> np.ndarray:
-    """Boolean closed/open per step, carrying state through zero commands."""
-    commands = np.asarray(commands, dtype=float).reshape(-1)
-    if commands.size == 0 or not np.isfinite(commands).all():
-        raise ValueError("gripper commands must be a finite non-empty sequence")
-    if commands[0] == 0:
-        raise IncompatibleGripperEvents("initial zero command has no known open/closed state")
-    state = commands[0] > 0
-    out = np.empty(len(commands), dtype=bool)
-    for i, value in enumerate(commands):
-        if value != 0:
-            state = value > 0
-        out[i] = state
-    return out
+from tmg.generation.method.grippers import (  # noqa: F401  IncompatibleGripperEvents and gripper_states are re-exported
+    IncompatibleGripperEvents,
+    change_indices,
+    gripper_states,
+)
 
 
 def events(commands) -> tuple[np.ndarray, np.ndarray, list[str]]:
     """(states, event step indices, labels 'close'/'open'). An event index is the first step of the new state."""
     states = gripper_states(commands)
-    change = np.flatnonzero(states[1:] != states[:-1]) + 1
+    change = change_indices(states)
     labels = ["close" if states[i] else "open" for i in change]
     return states, change, labels
+
+
+def _matching_events(gripper_a, gripper_b):
+    """Events of both command sequences when they share the initial state and the event order, else None.
+
+    Returns ``(states_a, events_a, states_b, events_b, labels)``; ``labels`` is the common 'close'/'open' sequence.
+    """
+    sa, ea, la = events(gripper_a)
+    sb, eb, lb = events(gripper_b)
+    if bool(sa[0]) != bool(sb[0]) or la != lb:
+        return None
+    return sa, ea, sb, eb, la
 
 
 def _check_poses(poses, n: int) -> np.ndarray:
@@ -98,10 +96,10 @@ def mix_segments(poses_a, gripper_a, poses_b, gripper_b, weight_a: float):
         raise ValueError("expected one gripper command per control step")
     pa = _check_poses(poses_a, len(ga))
     pb = _check_poses(poses_b, len(gb))
-    sa, ea, la = events(ga)
-    sb, eb, lb = events(gb)
-    if bool(sa[0]) != bool(sb[0]) or la != lb:
+    matched = _matching_events(ga, gb)
+    if matched is None:
         raise IncompatibleGripperEvents("open/close event order or initial commanded state differs")
+    sa, ea, sb, eb, la = matched
     ka = np.r_[0, ea, len(pa)].astype(float)
     kb = np.r_[0, eb, len(pb)].astype(float)
     desired = weight_a * ka + (1 - weight_a) * kb
@@ -130,10 +128,10 @@ def mix_segments(poses_a, gripper_a, poses_b, gripper_b, weight_a: float):
 def anchor_rotation_degrees(poses_a, gripper_a, poses_b, gripper_b) -> list[float] | None:
     """Rotation differences (deg) between the two segments at the anchors (start, every close event, end), or
     None when the gripper event structure differs."""
-    sa, ea, la = events(gripper_a)
-    sb, eb, lb = events(gripper_b)
-    if bool(sa[0]) != bool(sb[0]) or la != lb:
+    matched = _matching_events(gripper_a, gripper_b)
+    if matched is None:
         return None
+    _, ea, _, eb, la = matched
     a = np.asarray(poses_a, dtype=float)
     b = np.asarray(poses_b, dtype=float)
     pairs = [(0, 0), (len(a) - 1, len(b) - 1)] + [(int(i), int(j)) for i, j, label in zip(ea, eb, la)

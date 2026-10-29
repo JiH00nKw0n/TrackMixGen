@@ -17,17 +17,19 @@ from pathlib import Path
 
 import numpy as np
 
+from tmg.core.features import ACTION, ENV_STATE, OBSERVATION_PREFIX, is_image_key
+
 EPS = 1e-8
 MODES = ("identity", "mean_std", "min_max")
 
 
 def feature_type(key: str) -> str:
     """``VISUAL`` for images, ``ACTION`` for ``action``, ``ENV`` for the object state, ``STATE`` otherwise."""
-    if key.startswith("observation.images."):
+    if is_image_key(key):
         return "VISUAL"
-    if key == "action":
+    if key == ACTION:
         return "ACTION"
-    if key == "observation.environment_state":
+    if key == ENV_STATE:
         return "ENV"
     return "STATE"
 
@@ -66,11 +68,12 @@ class Normalizer:
         """Normalized copy of a batch (observation keys and ``action`` when present)."""
         out = {}
         for key, v in batch.items():
-            out[key] = self._apply(key, v, inverse=False) if (key.startswith("observation.") or key == "action") and not key.endswith("_is_pad") else v
+            normalized = (key.startswith(OBSERVATION_PREFIX) or key == ACTION) and not key.endswith("_is_pad")
+            out[key] = self._apply(key, v, inverse=False) if normalized else v
         return out
 
     def unnormalize_action(self, action):
-        return self._apply("action", action, inverse=True)
+        return self._apply(ACTION, action, inverse=True)
 
     def save(self, path: Path) -> Path:
         """Write ``{"modes": ..., "stats": {key: {name: list}}}`` as JSON."""

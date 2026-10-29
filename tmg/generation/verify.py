@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import subprocess
 from dataclasses import asdict
 from pathlib import Path
 
@@ -12,24 +11,27 @@ import h5py
 import numpy as np
 
 from tmg.config import resolved
-from tmg.core.chunks import CHUNK_SPEC, Chunk, write_json
+from tmg.core.chunks import Chunk, write_json
 from tmg.generation.generators import make_generator
+from tmg.generation.runner import launch_chunk
+
+IMPORTANT_STATS = "important_stats.json"
 
 
 def _run(generator, chunk: Chunk, folder: Path, *, disable_graft: bool, log: Path) -> dict:
-    """Run one chunk in a fresh folder, officially (``disable_graft``) or through the adapter, and locate its results."""
+    """Run one chunk in a fresh folder, officially (``disable_graft``) or through the adapter, and locate its results.
+
+    Unlike the pool runner, the folder is removed whole (finished or not) so both runs start from nothing, and the
+    process gets single-threaded OpenMP/MKL without a cluster config.
+    """
     if folder.exists():
         shutil.rmtree(folder)
-    spec = generator.prepare_chunk(chunk, folder)
-    spec.extra["disable_graft"] = bool(disable_graft)
-    spec_path = write_json(folder / CHUNK_SPEC, asdict(spec))
     env = dict(os.environ, OMP_NUM_THREADS="1", MKL_NUM_THREADS="1", PYTHONUNBUFFERED="1")
-    with open(log, "w") as lf:
-        code = subprocess.run(generator.chunk_command(spec, spec_path), stdout=lf, stderr=subprocess.STDOUT,
-                              stdin=subprocess.DEVNULL, env=env, cwd=str(folder)).returncode
-    stats = Path(spec.folder) / spec.extra["experiment"] / "important_stats.json"
+    launched = launch_chunk(generator, chunk, folder, env=env, log=log, extra={"disable_graft": bool(disable_graft)})
+    spec = launched.spec
+    stats = Path(spec.folder) / spec.extra["experiment"] / IMPORTANT_STATS
     if not stats.exists():
-        raise RuntimeError(f"chunk did not finish (exit {code}); see {log}")
+        raise RuntimeError(f"chunk did not finish (exit {launched.exit_code}); see {log}")
     return {"spec": spec, "stats": json.loads(stats.read_text()), "experiment": stats.parent}
 
 

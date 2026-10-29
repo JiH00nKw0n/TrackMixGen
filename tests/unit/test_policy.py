@@ -20,12 +20,14 @@ def test_wire_roundtrip_keeps_arrays_and_scalars():
 
 def test_wilson_and_summary():
     lo, hi = wilson(5, 10)
-    assert 0.2 < lo < 0.5 < hi < 0.8
+    assert (lo, hi) == pytest.approx((0.23658, 0.76342), abs=1e-4)      # z = 1.96: centre 0.5, half width 0.26342
     rows = [{"split": "val", "success": i % 2 == 0, "steps": 10 + i, "error": None} for i in range(10)]
     rows += [{"split": "test", "success": False, "steps": 400, "error": "boom"}]
     s = summarize(rows)
     assert s["by_split"]["val"]["n_success"] == 5 and s["by_split"]["test"]["errors"] == 1 and s["all"]["n"] == 11
-    assert episode_seed(7, 1, 3) == episode_seed(7, 1, 3) != episode_seed(7, 1, 4)
+    # the committed rule SeedSequence([evaluation.seed, training_seed, reset_index]), spelt out
+    assert episode_seed(7, 1, 3) == int(np.random.SeedSequence([7, 1, 3]).generate_state(1)[0]) != episode_seed(7, 1, 4)
+    assert episode_seed(202600, 5, 0) == 3655276531 and episode_seed(202600, 5, 2) == 2855745476
 
 
 def test_select_checkpoint_rules(tmp_path):
@@ -251,3 +253,44 @@ def test_crop_shape_auto_follows_the_image_side():
     assert resolve_crop({"crop_shape": "auto"}, {"image_shape": (3, 128, 128)})["crop_shape"] == [116, 116]
     assert resolve_crop({"crop_shape": "auto"}, {"image_shape": None})["crop_shape"] is None
     assert resolve_crop({"crop_shape": [70, 70]}, {"image_shape": (3, 84, 84)})["crop_shape"] == [70, 70]
+
+
+def test_policy_specs_keep_the_old_names_types_and_pipeline_rule():
+    """Read from the source text (the module imports lerobot): the table's names in the order of the old ``POLICIES``
+    tuple, the ``config.json`` types the old ``build_config`` branches wrote, and the pipeline flag only on pi0."""
+    import ast
+    import importlib.util
+    from pathlib import Path
+
+    tree = ast.parse(Path(importlib.util.find_spec("tmg.policy.lerobot_policies").origin).read_text())
+    def target(node):
+        return getattr(node, "target", None) or (node.targets[0] if isinstance(node, ast.Assign) else None)
+
+    table = next(node.value for node in tree.body if isinstance(node, (ast.Assign, ast.AnnAssign))
+                 and getattr(target(node), "id", None) == "POLICY_SPECS")
+    names = [k.value for k in table.keys]
+    assert names == ["bc_rnn", "diffusion_policy", "pi0"]
+    specs = {}
+    for key, call in zip(names, table.values):
+        args = [a.value for a in call.args]
+        kwargs = {kw.arg: ast.literal_eval(kw.value) for kw in call.keywords}
+        specs[key] = (args, kwargs)
+    assert specs["bc_rnn"] == (["bc_rnn", "tmg_bc_rnn", "tmg.policy.bc_rnn:BCRNNConfig", "tmg.policy.bc_rnn:BCRNNPolicy"], {})
+    assert specs["diffusion_policy"] == (["diffusion_policy", "diffusion", "lerobot.policies.diffusion.configuration_diffusion:DiffusionConfig",
+                                          "lerobot.policies.diffusion.modeling_diffusion:DiffusionPolicy"],
+                                         {"tuple_params": ("crop_shape", "down_dims")})
+    assert specs["pi0"] == (["pi0", "pi0", "lerobot.policies.pi0.configuration_pi0:PI0Config", "lerobot.policies.pi0.modeling_pi0:PI0Policy"],
+                            {"uses_pipeline": True})
+
+
+def test_uses_pipeline_only_for_pi0():
+    pytest.importorskip("lerobot")
+    from tmg.policy.io import NormalizerIO, PipelineIO, io_class, uses_pipeline
+    from tmg.policy.lerobot_policies import POLICIES, POLICY_SPECS, policy_spec
+
+    assert POLICIES == ("bc_rnn", "diffusion_policy", "pi0") == tuple(POLICY_SPECS)
+    assert [uses_pipeline(n) for n in POLICIES] == [False, False, True] and uses_pipeline("unknown") is False
+    assert io_class("pi0") is PipelineIO and io_class("bc_rnn") is NormalizerIO
+    assert [policy_spec(n).config_type for n in POLICIES] == ["tmg_bc_rnn", "diffusion", "pi0"]
+    with pytest.raises(ValueError):
+        policy_spec("unknown")

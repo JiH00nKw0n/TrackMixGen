@@ -93,7 +93,7 @@ MimicGen 계열 생성기는 사람이 시연한 원본 데모 몇 개(과제당
 3. 풀을 만든다. 기준 풀과 과제의 순위 파일이 먼저 있어야 한다(믹스업이 순위를 읽는다).
    `make generate TASK=square SCENE=ours METHOD=<이름> GENERATION=pool_robosuite_lowdim CLUSTER=a100 OVERRIDES="generation.attempts=5000"`.
 4. 시도 기록을 먼저 분석한다. `chunks/seed<N>/records/attempts.jsonl`에 시도별 성공, 선택된 원본, 하위작업별 혼합 기록
-   (`mixed`, `source_a`, `donor`, `identity_reason`)이 있다. 원본별 성공률, 혼합 발생 비율, 혼합하지 않은 이유의 분포를
+   (`mixed`, `source_a`, `source_b`, `identity_reason`)이 있다. 원본별 성공률, 혼합 발생 비율, 혼합하지 않은 이유의 분포를
    기준과 비교한다. 이 단계에서 4장의 기준 1을 판정한다.
 5. 데이터셋, 학습, 검증, 시험을 같은 방법 이름으로 돈다.
    `make dataset ... METHOD=<이름> OBSERVATION=low_dim OVERRIDES="size=1000"`,

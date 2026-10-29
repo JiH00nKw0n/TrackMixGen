@@ -17,6 +17,8 @@ import json
 import h5py
 import numpy as np
 
+from tmg.core.layout import indexed_keys
+
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser()
@@ -34,17 +36,17 @@ def main(argv=None) -> int:
     env = make_env(args.env, observation, "Panda")
     successes, drifts, obs_errs = 0, [], []
     with h5py.File(args.src, "r") as f:
-        keys = sorted(f["data"].keys(), key=lambda k: int(k.split("_")[1]))[: args.demos]
+        keys = indexed_keys(f["data"].keys())[: args.demos]
         for key in keys:
             demo = f["data"][key]
-            states = np.asarray(demo["states"]); actions = np.asarray(demo["actions"])
+            states, actions = np.asarray(demo["states"]), np.asarray(demo["actions"])
             model = demo.attrs.get("model_file")
             model = model.decode() if isinstance(model, bytes) else model
             obs = env.reset_to({"states": states[0], "model": model})
             if not args.no_sync:
                 sync_controllers(env)
             obs = env.get_observation()
-            rec_obj = np.asarray(demo["obs"]["object"][0]); rec_eef = np.asarray(demo["obs"]["robot0_eef_pos"][0])
+            rec_obj, rec_eef = np.asarray(demo["obs"]["object"][0]), np.asarray(demo["obs"]["robot0_eef_pos"][0])
             obs_errs.append((float(np.abs(np.asarray(obs["object"]) - rec_obj).max()), float(np.abs(np.asarray(obs["robot0_eef_pos"]) - rec_eef).max())))
             n = len(actions) if args.steps <= 0 else min(args.steps, len(actions))
             eef_rec = np.asarray(demo["obs"]["robot0_eef_pos"])

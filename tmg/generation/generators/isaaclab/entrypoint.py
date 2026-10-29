@@ -8,14 +8,17 @@ therefore reads the script's source, inserts one statement, ``_tmg_install(globa
 ``if __name__ == "__main__":`` block, and executes the result with ``_tmg_install`` bound to :func:`install`.
 That function runs after the script's imports and before its ``main()``:
 
-1. imports the task's ``register_modules`` and camera module (environment registration, a camera-enabled environment);
-2. wraps the script's ``setup_env_config`` so that the scene ranges are written into the environment config
-   (``simulators.isaaclab.apply_scene``), the task's low-dim observation terms are added to the policy group
-   (``simulators.isaaclab_lowdim.add_lowdim_terms``), the chunk seed is written into ``datagen_config.seed`` (the official
-   scripts take no ``--seed``; they seed random, numpy and torch with that config value), ``generation_guarantee`` is
-   set from ``generation.protocol.guarantee`` (true: ``--generation_num_trials`` counts successes, the official value;
+1. imports the task's ``register_modules`` and camera module (environment registration, a camera-enabled environment;
+   :func:`import_task_modules`);
+2. wraps the script's ``setup_env_config`` (:func:`wrap_setup_env_config`) so that the scene ranges are written into the
+   environment config (``simulators.isaaclab.apply_scene``), the task's low-dim observation terms are added to the policy
+   group (``simulators.isaaclab_lowdim.add_lowdim_terms``), the chunk seed is written into ``datagen_config.seed`` (the
+   official scripts take no ``--seed``; they seed random, numpy and torch with that config value), ``generation_guarantee``
+   is set from ``generation.protocol.guarantee`` (true: ``--generation_num_trials`` counts successes, the official value;
    false: it counts attempts, for the test pilots and the ranking pools) and the overrides are logged;
-3. installs the grafts (``runtime.install``) and, when tracking is on, the shared-path ``generate``.
+3. installs the grafts (:func:`install_runtime`): the ``install_from_spec`` of ``spec["extra"]["runtime_module"]`` (AutoData's
+   runtime for DexMimicGen) or, when the spec names none, of ``isaaclab.runtime``; both also install the shared-path
+   ``generate`` when tracking is on.
 
 The official script file is never modified; only the in-memory copy run by this process is.
 """
@@ -24,24 +27,36 @@ from __future__ import annotations
 import argparse
 import ast
 import functools
+import importlib
 import json
 import sys
 from pathlib import Path
 
+DEFAULT_RUNTIME = "tmg.generation.generators.isaaclab.runtime"
+
 
 def install(namespace: dict, spec: dict) -> None:
     """Called from inside the official script after its imports (see the module docstring)."""
-    import tmg.generation.generators.isaaclab.runtime as rt
-    from tmg.generation.method import build_method
-    from tmg.generation.simulators.isaaclab import apply_scene, isolate_controller_scratch
-    from tmg.generation.simulators.isaaclab_lowdim import add_lowdim_terms
+    import_task_modules(spec)
+    wrap_setup_env_config(namespace, spec)
+    install_runtime(spec, namespace)
 
+
+def import_task_modules(spec: dict) -> None:
+    """Import the task's environment-registration modules and its camera environment module."""
     for module in list(spec["extra"].get("register_modules") or []):      # e.g. isaaclab_mimic.envs registers the GR1 tasks
         __import__(str(module))
         print(f"[tmg] module imported (environment registration): {module}", flush=True)
     if spec["extra"].get("camera_module"):
         __import__(spec["extra"]["camera_module"])
         print(f"[tmg] camera task module imported: {spec['extra']['camera_module']}", flush=True)
+
+
+def wrap_setup_env_config(namespace: dict, spec: dict) -> None:
+    """Replace the script's ``setup_env_config`` with one that applies the chunk's scene, seed and protocol to the config."""
+    from tmg.generation.simulators.isaaclab import apply_scene, isolate_controller_scratch
+    from tmg.generation.simulators.isaaclab_lowdim import add_lowdim_terms
+
     scene, task_name = spec["scene"], str(spec["task"]["name"])
     chunk_seed = int(spec["chunk"]["seed"])
     guarantee = bool((spec.get("protocol") or {}).get("guarantee", True))
@@ -70,28 +85,16 @@ def install(namespace: dict, spec: dict) -> None:
         return (env_cfg, *rest) if rest else env_cfg
 
     namespace["setup_env_config"] = setup_env_config
+
+
+def install_runtime(spec: dict, namespace: dict) -> None:
+    """Install the grafts through the runtime module the spec names (default: the Isaac Lab runtime), unless disabled."""
     if spec["extra"].get("disable_graft"):
         print("[tmg] grafts DISABLED (identity check)", flush=True)
         return
-    if spec["extra"].get("runtime_module"):      # another generator family (AutoData) installs its own grafts
-        import importlib
-
-        info = importlib.import_module(str(spec["extra"]["runtime_module"])).install_from_spec(spec, namespace)
-        print(f"[tmg] grafts installed ({spec['extra']['runtime_module']}): {json.dumps(info, indent=1)}", flush=True)
-        return
-    layout = rt.IsaacLabLayout(**{k: (tuple(v) if k == "noise_draw_shapes" else v) for k, v in spec["extra"]["layout"].items()},
-                               soft_object_subtasks={})
-    layout.arm_action_dims = {k: tuple(v) for k, v in layout.arm_action_dims.items()}
-    method = build_method(spec["method"], chunk_seed=int(spec["chunk"]["seed"]))
-    runtime = rt.IsaacLabRuntime(method, layout, chunk_seed=int(spec["chunk"]["seed"]), records_dir=Path(spec["records_dir"]))
-    info = rt.install(spec["extra"]["package"], runtime, dict(spec["extra"].get("graft_hashes") or {}), soft=bool(spec["extra"]["soft"]))
-    print(f"[tmg] grafts installed: {json.dumps(info, indent=1)}", flush=True)
-    if method.follower_factory is not None:
-        import importlib
-
-        dg = importlib.import_module(f"{spec['extra']['package']}.data_generator")
-        dg.DataGenerator.generate = rt.make_tracking_generate(runtime, method.follower_factory, private_seed=int(spec["chunk"]["seed"]) + 7919)
-        print("[tmg] tracking: shared-path generate installed", flush=True)
+    module = str(spec["extra"].get("runtime_module") or DEFAULT_RUNTIME)
+    info = importlib.import_module(module).install_from_spec(spec, namespace)
+    print(f"[tmg] grafts installed ({module}): {json.dumps(info, indent=1)}", flush=True)
 
 
 def _as_tuple(value):

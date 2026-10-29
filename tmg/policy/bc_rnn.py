@@ -27,6 +27,7 @@ from lerobot.optim import AdamConfig
 from lerobot.policies.pretrained import PreTrainedPolicy
 from torch import Tensor
 
+from tmg.core.features import ACTION, ENV_STATE, STATE, camera_of, image_feature
 from tmg.policy.nets import BCRNNNet, BCRNNNetConfig
 
 POLICY_TYPE = "tmg_bc_rnn"
@@ -93,7 +94,7 @@ class BCRNNPolicy(PreTrainedPolicy):
     def __init__(self, config: BCRNNConfig, **kwargs):
         super().__init__(config)
         config.validate_features()
-        cameras = tuple(k.split("observation.images.", 1)[1] for k in config.image_features)
+        cameras = tuple(camera_of(k) for k in config.image_features)
         shape = next(iter(config.image_features.values())).shape if config.image_features else None
         env_dim = int(config.env_state_feature.shape[0]) if config.env_state_feature is not None else 0
         self.net = BCRNNNet(BCRNNNetConfig(
@@ -127,18 +128,18 @@ class BCRNNPolicy(PreTrainedPolicy):
         self._counter = 0
 
     def _images(self, batch: dict[str, Tensor]) -> dict[str, Tensor]:
-        return {cam: batch[f"observation.images.{cam}"] for cam in self.net.cfg.cameras}
+        return {cam: batch[image_feature(cam)] for cam in self.net.cfg.cameras}
 
     def _state(self, batch: dict[str, Tensor]) -> Tensor:
         """Robot state, with the object state appended on the last axis in the low-dim form."""
-        state = batch["observation.state"]
+        state = batch[STATE]
         if self.config.env_state_feature is not None:
-            state = torch.cat([state, batch["observation.environment_state"]], dim=-1)
+            state = torch.cat([state, batch[ENV_STATE]], dim=-1)
         return state
 
     def forward(self, batch: dict[str, Tensor]) -> tuple[Tensor, dict]:
         """Negative log-likelihood of the action sequence; ``info`` carries the loss as a float."""
-        loss = self.net.loss(self._images(batch), self._state(batch), batch["action"])
+        loss = self.net.loss(self._images(batch), self._state(batch), batch[ACTION])
         return loss, {"nll": float(loss.detach())}
 
     @torch.no_grad()

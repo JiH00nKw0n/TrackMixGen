@@ -30,7 +30,7 @@ if [ "${MINI:-0}" = 1 ]; then
   GENERATION=test/pilot50; SIZE=10; VAL_PARALLEL=1; TEST_SHARDS=2; POLICY_PARALLEL=1
   GEN_OVERRIDES="generation.attempts=200 generation.chunk=50 $GEN_OVERRIDES"
   for t in $TASKS; do ATTEMPTS[$t]=200; done
-  TRAIN_OVERRIDES="training.by_policy.diffusion_policy.image.updates=200 training.by_policy.bc_rnn.image.updates=200 training.updates_per_epoch=100 training.checkpoint_every_epochs=2 $TRAIN_OVERRIDES"
+  TRAIN_OVERRIDES="training.by_policy.diffusion_policy.image.updates=200 training.by_policy.diffusion_policy.low_dim.updates=200 training.by_policy.bc_rnn.image.updates=200 training.by_policy.bc_rnn.low_dim.updates=200 training.updates_per_epoch=100 training.checkpoint_every_epochs=2 $TRAIN_OVERRIDES"
   EVAL_EXTRA="max_scenes=6 $EVAL_EXTRA"
   BUNDLE_NAME=${BUNDLE_NAME:-mimicgen_mini_$(date +%Y%m%d)}
 fi

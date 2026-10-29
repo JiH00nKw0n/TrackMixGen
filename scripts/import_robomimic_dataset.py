@@ -20,6 +20,8 @@ from pathlib import Path
 import h5py
 import numpy as np
 
+from tmg.core.layout import indexed_keys
+
 ROBOT_STATE = ["robot0_eef_pos", "robot0_eef_quat", "robot0_gripper_qpos"]
 OBJECT_STATE = ["object"]
 
@@ -42,7 +44,7 @@ def main(argv=None) -> int:
     part = dst.with_suffix(dst.suffix + ".part")
     total = 0
     with h5py.File(args.src, "r") as src, h5py.File(part, "w") as out:
-        demos = sorted(src["data"].keys(), key=lambda k: int(k.split("_")[1]))
+        demos = indexed_keys(src["data"].keys())
         if args.size is not None and args.size < len(demos):
             demos = [demos[i] for i in sorted(np.random.default_rng(args.seed).choice(len(demos), args.size, replace=False))]
         data = out.create_group("data")

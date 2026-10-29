@@ -1,4 +1,9 @@
-"""Evaluation environments built from a dataset's stored environment description (``env_args``).
+"""Which simulator a condition evaluates in, and the robosuite environment settings shared by the evaluators.
+
+``is_isaaclab`` and ``isaaclab_task_id`` read the composed config: Isaac Lab generators (SoftMimicGen, DexMimicGen)
+have no stored scene states and play the task id of their camera environment. ``ROBOSUITE_EVAL_KWARGS`` are the
+robosuite settings every evaluation environment shares (``rollout.make_env``, ``resets.ENV_KWARGS``,
+``adjusted_env_meta`` below): object observations on, no episode termination by the environment, no reward shaping.
 
 The MimicGen path builds the robosuite environment itself (``rollout.make_env``: the registered scene class with
 MimicGen's data-collection settings, OSC delta actions). Generators that run on another robosuite version or
@@ -13,6 +18,19 @@ from __future__ import annotations
 import copy
 import json
 from pathlib import Path
+
+ROBOSUITE_EVAL_KWARGS = {"use_object_obs": True, "ignore_done": True, "control_freq": 20, "reward_shaping": False}
+
+
+def is_isaaclab(plain: dict) -> bool:
+    """Whether the composed config's generator simulates in Isaac Lab (scenes are seeds, not stored states)."""
+    return str(plain["generator"].get("simulator", "")) == "isaaclab"
+
+
+def isaaclab_task_id(task: dict) -> str:
+    """The Isaac Lab task id the evaluation plays: the camera environment ``task.camera_env`` when the official task
+    records no images, else ``task.env_name``."""
+    return str(task.get("camera_env") or task["env_name"])
 
 
 def env_meta_from_dataset(path: Path) -> dict:
@@ -41,9 +59,8 @@ def adjusted_env_meta(env_meta: dict, env_name: str, cameras: list[str], image_s
     kw["use_camera_obs"] = bool(cameras)
     kw["has_offscreen_renderer"] = bool(cameras)
     kw["has_renderer"] = False
-    kw["use_object_obs"] = True
-    kw["ignore_done"] = True
-    kw["reward_shaping"] = False
+    for key in ("use_object_obs", "ignore_done", "reward_shaping"):     # not control_freq: the generator's stays
+        kw[key] = ROBOSUITE_EVAL_KWARGS[key]
     if cameras:
         h, w = (int(v) for v in image_size)
         kw["camera_names"] = cameras

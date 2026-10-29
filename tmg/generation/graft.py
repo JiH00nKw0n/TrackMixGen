@@ -11,22 +11,28 @@ import ast
 import hashlib
 import inspect
 import textwrap
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from dataclasses import dataclass, field
 
 
 class GraftError(RuntimeError):
     """An anchor was not found, a hash did not match, or the source could not be edited."""
 
 
+def text_hash(source: str) -> str:
+    """sha256 hex digest of a function's source text."""
+    return hashlib.sha256(source.encode()).hexdigest()
+
+
 def source_hash(func: Callable) -> str:
     """sha256 of ``inspect.getsource(func)`` (the value pinned in the generator config)."""
-    return hashlib.sha256(inspect.getsource(func).encode()).hexdigest()
+    return text_hash(inspect.getsource(func))
 
 
 def _iter_bodies(node):
     """Yield every statement list (body, orelse, finalbody, handlers' bodies) under ``node``, recursively."""
-    for field in ("body", "orelse", "finalbody"):
-        stmts = getattr(node, field, None)
+    for attribute in ("body", "orelse", "finalbody"):
+        stmts = getattr(node, attribute, None)
         if isinstance(stmts, list) and stmts and isinstance(stmts[0], ast.stmt):
             yield stmts
             for child in stmts:
@@ -71,7 +77,7 @@ class Graft:
         self.func = func
         self.label = label
         source = inspect.getsource(func)
-        found = hashlib.sha256(source.encode()).hexdigest()
+        found = text_hash(source)
         if expected_hash is not None and found != expected_hash:
             raise GraftError(f"{label}: installed source hash {found} differs from the pinned {expected_hash}; "
                              "the official package changed, re-check the graft anchors before running")
@@ -85,27 +91,34 @@ class Graft:
         self.edits: list[str] = []
 
     # locating -------------------------------------------------------------------------------------
-    def _find_assign(self, name: str, occurrence: int = 0):
-        """``(statement list, index)`` of the ``occurrence``-th assignment to ``name`` in document order."""
-        hits = []
+    def _statements(self, predicate: Callable[[ast.stmt], bool]) -> Iterator[tuple[list, int]]:
+        """``(statement list, index)`` of every statement of the function for which ``predicate`` holds, in the
+        order ``_iter_bodies`` visits them (outer bodies before nested ones)."""
         for stmts in _iter_bodies(self.node):
             for i, stmt in enumerate(stmts):
-                if _assigns_name(stmt, name):
-                    hits.append((stmts, i))
+                if predicate(stmt):
+                    yield stmts, i
+
+    def _find_assign(self, name: str, occurrence: int = 0):
+        """``(statement list, index)`` of the ``occurrence``-th assignment to ``name`` in document order."""
+        hits = list(self._statements(lambda stmt: _assigns_name(stmt, name)))
         if len(hits) <= occurrence:
             raise GraftError(f"{self.label}: no assignment #{occurrence} to '{name}'")
         return hits[occurrence]
 
     def _find_for(self, target_name: str):
         """``(statement list, index)`` of the unique ``for <target_name> in ...`` loop."""
-        hits = []
-        for stmts in _iter_bodies(self.node):
-            for i, stmt in enumerate(stmts):
-                if isinstance(stmt, ast.For) and isinstance(stmt.target, ast.Name) and stmt.target.id == target_name:
-                    hits.append((stmts, i))
+        hits = list(self._statements(
+            lambda stmt: isinstance(stmt, ast.For) and isinstance(stmt.target, ast.Name) and stmt.target.id == target_name))
         if len(hits) != 1:
             raise GraftError(f"{self.label}: expected exactly one 'for {target_name} in ...', found {len(hits)}")
         return hits[0]
+
+    def _find_returns(self):
+        """``[(statement list, index)]`` of every ``return`` under the function in document order (source line, then
+        column), nested function bodies included since ``_iter_bodies`` visits them too."""
+        hits = list(self._statements(lambda stmt: isinstance(stmt, ast.Return)))
+        return sorted(hits, key=lambda h: (getattr(h[0][h[1]], "lineno", 0), getattr(h[0][h[1]], "col_offset", 0)))
 
     @staticmethod
     def _parse_stmt(code: str) -> ast.stmt:
@@ -153,16 +166,6 @@ class Graft:
         body.insert(len(body) - 1, self._parse_stmt(code))
         self.edits.append(f"before final return: {code.strip()}")
         return self
-
-    def _find_returns(self):
-        """``[(statement list, index)]`` of every ``return`` of the function in document order (nested functions excluded)."""
-        hits = []
-        for stmts in _iter_bodies(self.node):
-            for i, stmt in enumerate(stmts):
-                if isinstance(stmt, ast.Return):
-                    hits.append((stmts, i))
-        # _iter_bodies yields outer bodies before nested ones; document order is the source line order
-        return sorted(hits, key=lambda h: (getattr(h[0][h[1]], "lineno", 0), getattr(h[0][h[1]], "col_offset", 0)))
 
     def insert_before_return(self, code: str, occurrence: int, expected_returns: int | None = None) -> Graft:
         """Insert statement ``code`` before the ``occurrence``-th ``return`` (document order).
@@ -212,3 +215,41 @@ class Graft:
         new.__qualname__ = getattr(self.func, "__qualname__", self.node.name)
         new.__tmg_graft__ = {"label": self.label, "hash": self.hash, "edits": list(self.edits)}
         return new
+
+
+# installing -------------------------------------------------------------------------------------------
+@dataclass
+class Installed:
+    """Grafted functions swapped into their classes by :func:`install_grafts`, with what is needed to undo it.
+
+    ``info`` maps each attribute name to the compiled function's ``__tmg_graft__`` (label, hash, edits), the
+    description the entrypoints log; ``extra_globals`` is the namespace the grafts were compiled with (the runtime).
+    """
+    targets: list[tuple[object, str, Callable]] = field(default_factory=list)   # (owner, attribute, original function)
+    info: dict = field(default_factory=dict)
+    extra_globals: dict = field(default_factory=dict)
+
+    def restore(self) -> None:
+        """Put every original function back (tests and interactive use); safe to call twice."""
+        for owner, attribute, original in reversed(self.targets):
+            setattr(owner, attribute, original)
+        self.targets = []
+
+
+def install_grafts(edits: list[tuple[object, str, Graft]], extra_globals: dict) -> Installed:
+    """Compile every graft and swap it into its class.
+
+    Args:
+        edits: ``(owner, attribute, graft)`` triples; ``graft`` edits ``getattr(owner, attribute)``.
+        extra_globals: names the grafted statements use (``{"_tmg": runtime}``), added to each function's globals.
+
+    Returns:
+        The :class:`Installed` record whose ``restore`` undoes the swap.
+    """
+    installed = Installed(extra_globals=extra_globals)
+    for owner, attribute, graft in edits:
+        compiled = graft.compile(extra_globals)
+        installed.targets.append((owner, attribute, getattr(owner, attribute)))
+        setattr(owner, attribute, compiled)
+        installed.info[attribute] = compiled.__tmg_graft__
+    return installed
