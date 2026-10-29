@@ -64,14 +64,14 @@
 `rank_human_demos`, `pool_isaac`, `test/` 아래의 시험용 설정들)은 이 블록을 물려받는다. 지금 값은 하위작업마다 원본 시연을 독립적으로 고르고
 (`select_src_per_subtask: true`) 고르는 방식은 무작위다(`selection_strategy: random`). MimicGen 공식 설정 템플릿
 (`mimicgen/exps/templates/robosuite/*.json`)은 일곱 과제 모두 `select_src_per_subtask: false`(한 시도의 모든 하위작업이 같은 원본
-시연을 쓴다)이고, Square의 두 번째 하위작업과 Stack Three의 모든 하위작업은 `nearest_neighbor_object`(현재 물체 자세와 가장
+시연을 쓴다)이고, Square의 첫 하위작업(너트 잡기)과 Stack Three의 모든 하위작업은 `nearest_neighbor_object`(현재 물체 자세와 가장
 가까운 원본을 고른다)를 쓴다. 나머지 과제와 하위작업은 공식도 random이다.
 
 결정은 두 단계로 나뉜다.
 
 - 지금 진행 중인 재현 확인과 혼합 방법 탐색은 현재 값으로 계속한다. 이미 만든 기준 풀 일곱 개와 탐색 결과를 그대로 쓰기 위해서다.
 - 논문에 들어갈 최종 평가에서 MimicGen은 공식 템플릿 값을 그대로 써야 한다. 즉 모든 과제에서 한 시도의 하위작업들이 같은 원본
-  시연을 쓰고, Square의 두 번째 하위작업과 Stack Three의 모든 하위작업은 현재 물체 자세에 가장 가까운 원본을 고른다. 이를 위해
+  시연을 쓰고, Square의 첫 하위작업과 Stack Three의 모든 하위작업은 현재 물체 자세에 가장 가까운 원본을 고른다. 이를 위해
   필요한 작업은 두 가지다. 첫째, `tmg/generation/generators/mimicgen/config_builder.py`가 지금은 하나의 `selection_strategy`를 모든
   하위작업에 같이 넣으므로, 과제 템플릿의 하위작업별 값을 기본으로 쓰도록 바꿔야 한다(프로토콜에서 값을 주지 않으면 템플릿 값을
   남기는 방식). 둘째, 그 값으로 기준 풀 일곱 개를 다시 생성해야 한다. 최종 평가 전까지 이 두 가지가 끝나지 않으면 평가를 시작하지

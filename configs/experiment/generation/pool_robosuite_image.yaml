@@ -16,7 +16,7 @@ protocol:
   guarantee: false                # fixed attempt count (successes are selected at the dataset stage)
   select_src_per_subtask: null    # null = MimicGen's template values, the official source selection (decision 2026-10-27, docs/GENERATORS.md
   selection_strategy: null        # 1.4): one source demonstration per attempt, chosen at random, except nearest_neighbor_object (the source
-  selection_strategy_kwargs: null # whose object pose is nearest, nn_k 3) for Square's second subtask and all Stack Three subtasks. The
+  selection_strategy_kwargs: null # whose object pose is nearest, nn_k 3) for Square's first subtask (grasp the nut) and all Stack Three subtasks. The
                                   # exploration pools of 2026-10 used per-subtask random selection; pool_robosuite_lowdim and
                                   # rank_human_demos keep that value explicitly so their finished pools stay valid.
   action_noise: 0.05
