@@ -224,7 +224,7 @@ def install(root, image):
                 "osqp==0.6.7.post3", "qpsolvers==4.3.1")
         if image == "isaaclab-arena":
             checkout("https://github.com/isaac-sim/IsaacLab-Arena", src / "IsaacLab-Arena", ARENA_COMMIT)
-            pip("qpsolvers==4.8.1", "onnxruntime", "lightwheel-sdk", "vuer[all]", "tenacity", "trimesh", "rtree")
+            pip("qpsolvers==4.8.1", "onnxruntime", "lightwheel-sdk", "vuer[all]", "tenacity", "trimesh", "rtree", "pyzmq==26.4.0")
             pip("--no-deps", "-e", src / "IsaacLab-Arena")
             pip("--no-build-isolation", "-e", str(lab / "source/isaaclab_rl") + "[rsl-rl]", "msgpack-numpy")
         pip("--index-url", "https://download.pytorch.org/whl/cu128",
@@ -279,6 +279,8 @@ def verify_installation(root, image):
     if image != "train":
         expected.update(packaging="23.0", click="8.1.7", idna="3.10", psutil="5.9.8",
                         pillow="11.3.0")
+    if image == "isaaclab-arena":
+        expected["pyzmq"] = "26.4.0"
     actual = json.loads(subprocess.check_output([
         str(python), "-c", ("import sys,json,importlib.metadata as m; from packaging.version import Version; "
         "expected=json.loads(sys.argv[1]); actual={n:m.version(n) for n in expected}; "
