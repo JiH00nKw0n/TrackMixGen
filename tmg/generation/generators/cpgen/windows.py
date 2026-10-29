@@ -17,6 +17,13 @@ constraints verbatim. The derived windows were reviewed on video on 2026-10-29 (
 second interaction (needle into the tripod) starts earlier than the released window in every demonstration because the
 needle is near the tripod well before the insertion the annotator marked.
 
+The simulator is driven the way CP-Gen's own ``demo_aug.generate.reset_to`` drives it (that function replaces robomimic's
+``EnvRobosuite.reset_to`` when ``demo_aug.generate`` is imported, which this module does not do): the stored model xml of a
+demonstration is tried first and, when the installed robosuite cannot load it, the freshly reset model is kept and only the
+states are restored. The released sources were recorded with robosuite 1.4.1, whose xml names the ``mounts`` asset folder
+that robosuite 1.5 renamed to ``bases``, so in the CP-Gen image every demonstration takes that fall-back; the scene is the
+same because the object placement of a MimicGen D0 source lives in the state, not in the xml.
+
 Runs inside the CP-Gen image (robosuite 1.5, robomimic, CP-Gen's checkout on ``sys.path``); ``tmg sources`` calls
 :func:`annotate_source` for the CP-Gen tasks. The pure helpers (:func:`windowed_constraints`, :func:`best_threshold`) have
 unit tests; the segmentation needs the simulator.
@@ -111,6 +118,34 @@ def make_env(demo_path: str):
     return EnvUtils.create_env_from_metadata(env_meta=env_meta, use_image_obs=False, render_offscreen=False, render=False)
 
 
+def reset_model(env, model_xml: str) -> bool:
+    """Reset ``env`` (a robomimic ``EnvRobosuite``) and try to load the demonstration's model xml, as CP-Gen's ``reset_to``
+    does; returns False when the xml cannot be loaded by the installed robosuite and the freshly reset model is kept."""
+    env.reset()
+    try:
+        from robosuite.utils.binding_utils import MjSim
+        xml = env.env.edit_model_xml(model_xml)
+        MjSim.from_xml_string(xml)
+        env.env.reset_from_xml_string(xml)
+        ok = True
+    except Exception:      # noqa: BLE001  CP-Gen logs and continues with the reset model
+        ok = False
+    env.env.sim.reset()
+    return ok
+
+
+def set_state(env, state) -> None:
+    """Restore one flattened MuJoCo state without computing an observation."""
+    env.env.sim.set_state_from_flattened(state)
+    env.env.sim.forward()
+
+
+def close_env(env) -> None:
+    inner = getattr(env, "env", env)
+    if hasattr(inner, "close"):
+        inner.close()
+
+
 def segment(seg, env, states, model_file: str, interactions, thresholds, upto: int | None = None) -> list[tuple[int, int]]:
     """CP-Gen's sequential segmentation with a threshold per interaction: ``[start, end)`` per interaction found."""
     def ended(k, thr):
@@ -122,13 +157,13 @@ def segment(seg, env, states, model_file: str, interactions, thresholds, upto: i
             return seg.is_robot_object_interaction_end(env, e2, e1, next_interaction=nxt, interaction_threshold=thr)
         return seg.is_obj_obj_interaction_end(env, e1, e2, next_interaction=nxt, interaction_threshold=thr)
 
-    env.reset_to({"model": model_file})
+    reset_model(env, model_file)
     windows, k, active, start, last_end = [], 0, False, None, -GAP
     n = len(interactions) if upto is None else upto
     for t, state in enumerate(states):
         if k >= n:
             break
-        env.reset_to({"states": state}, no_return_obs=True)
+        set_state(env, state)
         thr = float(thresholds[k])
         if not active:
             if t < last_end + GAP:
@@ -166,7 +201,7 @@ def derive_windows(demo_path: str, constraints: Sequence[Mapping], *, source_roo
         for idx, states, model in demos:
             windows[idx] = [list(w) for w in segment(seg, env, states, model, interactions, thresholds)]
     finally:
-        env.close()
+        close_env(env)
     return {"interactions": interactions, "thresholds": thresholds, "calibration": calibration, "released_windows_demo0": released,
             "windows": windows}
 
