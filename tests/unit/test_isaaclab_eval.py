@@ -127,12 +127,12 @@ def test_task_policy_overrides_follow_the_official_configs(tmp_path, monkeypatch
     monkeypatch.setenv("TMG_DATA_ROOT", str(tmp_path))
     rope = resolved(compose("train", ["generator=softmimicgen", "task=rope", "scene=ours", "method=none", "generation=pool_isaac",
                                      "observation=image", "policy=diffusion_policy"]))
-    assert rope["task"]["horizon"] == 250
+    assert rope["task"]["horizon"] == 400
     assert task_policy_overrides(rope["task"], "diffusion_policy") == {"crop_shape": None}
     assert task_policy_overrides(rope["task"], "bc_rnn") == {"crop_shape": None}
     dex = resolved(compose("train", ["generator=dexmimicgen", "task=pick_place", "scene=ours", "method=none", "generation=pool_isaac",
                                     "observation=image", "policy=diffusion_policy"]))
-    assert dex["task"]["horizon"] == 400 and task_policy_overrides(dex["task"], "diffusion_policy") == {"crop_shape": None}
+    assert dex["task"]["horizon"] == 600 and task_policy_overrides(dex["task"], "diffusion_policy") == {"crop_shape": None}
     square = resolved(compose("train", ["generator=mimicgen", "task=square", "scene=ours", "method=none", "generation=pool",
                                        "observation=image", "policy=diffusion_policy"]))
     assert task_policy_overrides(square["task"], "diffusion_policy") == {} and square["policy"]["params"]["crop_shape"] == [76, 76]

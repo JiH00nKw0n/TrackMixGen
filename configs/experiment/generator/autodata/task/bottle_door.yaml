@@ -11,8 +11,8 @@ source_revision: arena_v0.2_lab_v3.0
 num_sources: 5
 subtasks: [right grasp the bottle, right place it on the shelf, right reach the door, right close the door; left support, left hold]
 reference_objects: [ranch_dressing_hope_robolab, refrigerator, refrigerator, refrigerator]
-horizon: 500                        # the task's own episode length: 10 s at 50 Hz
-eval_episode_length_s: 10.0
+horizon: 600                        # evaluation step limit (project decision 2026-10-26: DexMimicGen 600; the task's own episode length is 500 = 10 s at 50 Hz)
+eval_episode_length_s: 12.0         # 600 steps at 50 Hz; the evaluation raises episode_length_s to cover the horizon
 env_args: []
 cameras: [robot_pov_cam_rgb]
 image_size: [128, 128]

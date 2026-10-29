@@ -11,8 +11,8 @@ source_revision: arena_v0.2_lab_v3.0
 num_sources: 10
 subtasks: [right reach the door handle, right open the door; left hold still]
 reference_objects: [microwave, microwave]
-horizon: 250                        # the task's own episode length: 5 s at 50 Hz
-eval_episode_length_s: 5.0
+horizon: 600                        # evaluation step limit (project decision 2026-10-26: DexMimicGen 600; the task's own episode length is 250 = 5 s at 50 Hz)
+eval_episode_length_s: 12.0         # 600 steps at 50 Hz; the evaluation raises episode_length_s to cover the horizon
 env_args: []                        # extra Arena options after "--" (embodiment gr1_pink is the default)
 cameras: [robot_pov_cam_rgb]        # Arena head camera, recorded at 512x512 and resized to image_size by `tmg dataset`
 image_size: [128, 128]

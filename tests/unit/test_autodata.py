@@ -34,7 +34,7 @@ def test_autodata_chunk_spec(tmp_path, monkeypatch):
     monkeypatch.setenv("TMG_DATA_ROOT", str(tmp_path))
     monkeypatch.setenv("TMG_AUTODATA_SRC", str(src))
     cfg = resolved(compose("generate", ["generator=autodata", "task=microwave", "scene=ours", "method=none", "generation=pool_isaac", "cluster=ada"]))
-    assert cfg["task"]["horizon"] == 250 and cfg["task"]["source_revision"] == "arena_v0.2_lab_v3.0"
+    assert cfg["task"]["horizon"] == 600 and cfg["task"]["source_revision"] == "arena_v0.2_lab_v3.0"
     gen = make_generator(cfg)
     chunk = plan_chunks(1000, 250, 30000)[1]
     spec = gen.prepare_chunk(chunk, tmp_path / "c")
