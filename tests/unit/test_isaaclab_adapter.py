@@ -19,6 +19,22 @@ def test_soft_generator_uses_the_soft_builder(tmp_path, monkeypatch):
     assert spec.extra["soft"] is True and spec.extra["package"] == "softmimicgen.datagen" and "--task" not in spec.extra["script_args"]
 
 
+def test_partial_towel_pool_reuses_identical_seed_chunks(tmp_path, monkeypatch):
+    from tmg.generation.runner import _relocate_chunk_paths
+    monkeypatch.setenv('TMG_DATA_ROOT', str(tmp_path))
+    common=['generator=softmimicgen','task=towel','scene=ours','method=none','generation=pool_isaac','cluster=pod']
+    partial=make_generator(resolved(compose('generate',common+['generation.attempts=500','cluster.workers=2'])))
+    full=make_generator(resolved(compose('generate',common)))
+    for chunk in plan_chunks(500,250,30000):
+        target=tmp_path/'pool'/chunk.name; scratch=tmp_path/'scratch'/chunk.name
+        original=partial.prepare_chunk(chunk,target)
+        check=full.prepare_chunk(chunk,scratch)
+        check.extra=_relocate_chunk_paths(check.extra,scratch,target)
+        assert original.identity()==check.identity()
+        check.chunk['seed']+=1
+        assert original.identity()!=check.identity()
+
+
 def test_entrypoint_inserts_install_before_main_guard(tmp_path):
     script = tmp_path / "generate_dataset.py"
     script.write_text("import sys\nCALLS = []\ndef setup_env_config(a):\n    return a\ndef main():\n    CALLS.append(setup_env_config(1))\nif __name__ == '__main__':\n    main()\n")

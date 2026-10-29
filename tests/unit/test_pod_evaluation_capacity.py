@@ -65,3 +65,13 @@ def test_review_requires_real_overlap_speed_and_reserve(tmp_path):
     p=tmp_path/'concurrent_6/result.json';r=json.loads(p.read_text());r['peak_memory_working']=44*GIB;p.write_text(json.dumps(r))
     review(tmp_path)
     assert json.loads((tmp_path/'selected.json').read_text())['max_evaluations']==4
+
+
+def test_generation_slots_and_startup_memory_are_both_reserved():
+    job=dict(kind='generate',evaluations=0,ram_bytes=12*GIB,gpu_mib=10240)
+    starting=dict(job,observed_ram_bytes=0,observed_gpu_mib=0)
+    assert permits(baseline(),[starting,starting],job,4,3)
+    assert not permits(baseline(),[starting,starting],job,4,2)
+    assert not permits(baseline(),[starting,starting,starting],job,4,3)
+    busy=dict(baseline(),memory_working=20*GIB)
+    assert not permits(busy,[starting],job,4,3)

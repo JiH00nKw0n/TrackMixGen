@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
@@ -41,6 +42,17 @@ def _free_gib(path: Path) -> float:
     while not path.exists():
         path = path.parent
     return shutil.disk_usage(path).free / 1024**3
+
+
+def _relocate_chunk_paths(value, old: Path, new: Path):
+    """Rebase scratch output paths before comparing a completed chunk's spec."""
+    if isinstance(value, dict):
+        return {k: _relocate_chunk_paths(v, old, new) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_relocate_chunk_paths(v, old, new) for v in value]
+    if isinstance(value, str) and (value == str(old) or value.startswith(str(old) + '/')):
+        return str(new) + value[len(str(old)):]
+    return value
 
 
 def _chunk_state(generator, chunk: Chunk, folder: Path, spec: ChunkSpec) -> tuple[str, list[str]]:
@@ -82,10 +94,6 @@ def run_pool(cfg) -> dict:
     problems = generator.check_sources()
     if problems:
         raise PoolError("; ".join(problems))
-    free = _free_gib(output)
-    if free < float(cluster.get("min_free_disk_gib", 0)):
-        raise PoolError(f"only {free:.1f} GiB free under {output}; cluster.min_free_disk_gib is {cluster['min_free_disk_gib']}")
-
     output.mkdir(parents=True, exist_ok=True)
     (output / LOGS_DIR).mkdir(exist_ok=True)
     if (output / POOL_DONE).exists():
@@ -93,6 +101,10 @@ def run_pool(cfg) -> dict:
         if done.get("plan") == plan_as_dict(chunks):
             print(f"[tmg] pool already complete: {output}", flush=True)
             return done
+
+    free = _free_gib(output)
+    if free < float(cluster.get("min_free_disk_gib", 0)):
+        raise PoolError(f"only {free:.1f} GiB free under {output}; cluster.min_free_disk_gib is {cluster['min_free_disk_gib']}")
 
     # inspect every chunk before anything runs
     specs: dict[int, ChunkSpec] = {}
@@ -111,6 +123,7 @@ def run_pool(cfg) -> dict:
                 spec.records_dir = str(folder / "records")
                 spec.generator_config = str(folder / Path(spec.generator_config).name)
                 spec.expected_outputs = [str(folder / Path(p).relative_to(Path(tmp) / chunk.name)) for p in spec.expected_outputs]
+                spec.extra = _relocate_chunk_paths(spec.extra, Path(tmp) / chunk.name, folder)
         state, reasons = _chunk_state(generator, chunk, folder, spec)
         specs[chunk.index] = spec
         states[chunk.index] = state
@@ -143,6 +156,12 @@ def run_pool(cfg) -> dict:
         spec = generator.prepare_chunk(chunk, folder)
         spec_path = write_json(folder / CHUNK_SPEC, asdict(spec))
         cmd = generator.chunk_command(spec, spec_path)
+        # Scheduling only: leave the generator command, seed and physics unchanged.
+        if cluster.get('name') == 'pod' and cluster.get('runtime') == 'native':
+            guard = Path(__file__).resolve().parents[2] / 'scripts/pod_resource_guard.py'
+            capacity = Path(os.environ.get('TMG_RESULTS_ROOT', str(output))) / 'reports/evaluation_capacity/selected.json'
+            if capacity.exists():
+                cmd = [sys.executable, str(guard), '--kind', 'generate', '--task', plain['task']['name'], '--', *cmd]
         log = output / LOGS_DIR / f"{chunk.name}.log"
         start = time.time()
         with open(log, "w") as lf:

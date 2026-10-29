@@ -13,8 +13,11 @@ from native_runtime import process_identity
 from profile_pod_evaluation import GIB, resources, write
 
 
-def permits(sample, leases, request, max_evaluations):
+def permits(sample, leases, request, max_evaluations, max_generations=3):
     if sum(x['evaluations'] for x in leases)+request['evaluations'] > max_evaluations:
+        return False
+    if (sum(x.get('kind') == 'generate' for x in leases)
+            + (request.get('kind') == 'generate') > max_generations):
         return False
     # Reserve the part of each admitted job's peak that it has not allocated yet.
     pending_ram=sum(max(0,x['ram_bytes']-x['observed_ram_bytes']) for x in leases)
@@ -64,7 +67,7 @@ def usage(records, data):
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--kind',choices=['train','eval'],required=True)
+    parser.add_argument('--kind',choices=['train','eval','generate'],required=True)
     parser.add_argument('--evaluations',type=int,default=0)
     parser.add_argument('--task',required=True)
     args,command=parser.parse_known_args()
@@ -76,7 +79,13 @@ def main():
     assert config['verified']
     selected=config['six'] if config['max_evaluations']==6 else config['four']
     n=selected['concurrent'];base=selected['baseline']
-    if args.kind=='train':
+    if args.kind=='generate':
+        # Separate processes, each with one unchanged simulator environment.
+        # Admit gradually from actual usage; three is a cap, not a guarantee.
+        ram=(12 if args.task in ('rope','towel') else 16)*GIB
+        gpu=10240 if args.task in ('rope','towel') else 14336
+        count=0
+    elif args.kind=='train':
         ram=12*GIB;gpu=12288;count=0
     else:
         count=args.evaluations;assert 1 <= count <= config['max_evaluations']
@@ -102,7 +111,7 @@ def main():
                 if not r.get('released_at') and alive:
                     active.append(r)
             sample=resources();active=usage(active,data)
-            if permits(sample,active,request,config['max_evaluations']):
+            if permits(sample,active,request,config['max_evaluations'],config.get('max_generations',3)):
                 request['admitted_at']=time.time();request['admission_sample']=sample
                 write(record,request)
                 break
@@ -110,7 +119,8 @@ def main():
             print(f'[capacity] waiting for memory or evaluation slots: {args.kind} {args.task}',flush=True)
             last_report=time.time()
         time.sleep(5)
-    env=dict(os.environ,TMG_RESOURCE_OWNER=str(pid),OMP_NUM_THREADS='1',MKL_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1')
+    threads='2' if args.kind=='generate' else '1'
+    env=dict(os.environ,TMG_RESOURCE_OWNER=str(pid),OMP_NUM_THREADS=threads,MKL_NUM_THREADS=threads,OPENBLAS_NUM_THREADS=threads)
     child=subprocess.Popen(command,env=env)
     request.update(child_pid=child.pid,child_start_ticks=process_identity(child.pid))
     write(record,request)
