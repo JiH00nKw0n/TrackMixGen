@@ -38,9 +38,9 @@ measure_links: {left: left_hand_pitch_link, right: right_hand_pitch_link}
 noise_draw_shapes: [3, 4, 3, 4]
 method_overrides:
   trackmix:
-    mixing: {max_anchor_rotation_deg: 40.0}
-    tracking: {gripper_events: {type: closure, columns: [0, 1, 2, 3]}}   # a hand's 11 commands: proximal index, middle, pinky, ring first
-  mixup_only:
-    mixing: {max_anchor_rotation_deg: 40.0}
+    mixing: {max_anchor_rotation_deg: 40.0, gripper_events: {type: closure, columns: [0, 1, 2, 3]}}   # the mixer aligns segments by the
+    tracking: {gripper_events: {type: closure, columns: [0, 1, 2, 3]}}   # same hand-closure events as the follower (a hand's 11
+  mixup_only:                                                             # commands: proximal index, middle, pinky, ring first)
+    mixing: {max_anchor_rotation_deg: 40.0, gripper_events: {type: closure, columns: [0, 1, 2, 3]}}
   tracking_only:
     tracking: {gripper_events: {type: closure, columns: [0, 1, 2, 3]}}

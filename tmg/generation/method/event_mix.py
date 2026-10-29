@@ -123,7 +123,7 @@ def mix_segments(poses_a, gripper_a, poses_b, gripper_b, weight_a: float):
     meta = dict(weight_a=float(weight_a), samples=n, source_a_samples=len(pa), source_b_samples=len(pb),
                 event_labels=la, source_a_event_steps=ea.tolist(), source_b_event_steps=eb.tolist(),
                 desired_event_steps=desired[1:-1].tolist(), actual_event_steps=knots[1:-1].tolist(),
-                initial_commanded_closed=bool(sa[0]))
+                initial_commanded_closed=bool(sa[0]), source_a_index=ia.tolist(), source_b_index=ib.tolist())
     return mixed, grip, meta
 
 
