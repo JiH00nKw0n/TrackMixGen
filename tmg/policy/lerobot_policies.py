@@ -129,9 +129,26 @@ def build_policy(policy_cfg: dict, features: dict, device: str, observation: str
     config = build_config(policy_cfg, features, device, observation, overrides)
     cls = policy_class(name)
     pretrained = (policy_cfg.get("pretrained_path") or None)
-    if pretrained:
-        return cls.from_pretrained(pretrained, config=config).to(device)
-    return cls(config).to(device)
+    policy = cls.from_pretrained(pretrained, config=config) if pretrained else cls(config)
+    if name == "diffusion_policy":
+        from tmg.policy.augment import use_per_sample_crop
+
+        use_per_sample_crop(policy)
+    return policy.to(device)
+
+
+def build_optimizer(name: str, config, policy):
+    """Use AdamW for Diffusion Policy with the preset's values; keep other policies' presets.
+
+    Backported from main 4d7926d (published as 6917f3e) without the unrelated registry refactor.
+    """
+    preset = config.get_optimizer_preset()
+    if name != "diffusion_policy":
+        return preset.build(policy.get_optim_params())
+    import torch
+
+    return torch.optim.AdamW(policy.get_optim_params(), lr=preset.lr, betas=tuple(preset.betas), eps=preset.eps,
+                             weight_decay=preset.weight_decay)
 
 
 def normalization_modes(config: PreTrainedConfig) -> dict[str, str]:

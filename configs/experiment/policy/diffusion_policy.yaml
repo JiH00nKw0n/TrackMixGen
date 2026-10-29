@@ -1,8 +1,11 @@
 # Diffusion Policy: LeRobot 0.6.1 DiffusionPolicy with the official image U-Net values (real-stanford/diffusion_policy,
 # robomimic image config). Only fields that differ from LeRobot's defaults are listed; the rest are LeRobot's
 # defaults, which already equal the official values (down_dims 512/1024/2048, kernel 5, 8 groups, step embed 128,
-# DDPM 100 steps squaredcos_cap_v2, epsilon prediction, clip_sample, spatial softmax 32, Adam 1e-4 betas .95/.999
-# wd 1e-6, cosine schedule with 500 warmup steps).
+# DDPM 100 steps squaredcos_cap_v2, epsilon prediction, clip_sample, spatial softmax 32,
+# cosine schedule with 500 warmup steps). tmg builds AdamW with the preset values (lr 1e-4,
+# betas .95/.999, weight decay 1e-6, eps 1e-8) and replaces batch-wide random cropping with
+# per-image random cropping in training. Evaluation keeps the existing center crop.
+# Task overrides can disable cropping entirely, as in the five-task Isaac Lab Pod campaign.
 name: diffusion_policy
 pretrained_path: null
 params:

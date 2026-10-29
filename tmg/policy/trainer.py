@@ -44,7 +44,7 @@ from tmg.data.loader import FrameDataset, TrajectoryStore, collate, compute_stat
 from tmg.policy.ema import EMA
 from tmg.policy.storage import prune_training_states
 from tmg.policy.io import make_io
-from tmg.policy.lerobot_policies import build_policy, task_policy_overrides
+from tmg.policy.lerobot_policies import build_optimizer, build_policy, task_policy_overrides
 
 CHECKPOINTS_DIR = "checkpoints"
 PRETRAINED_DIR = "pretrained_model"
@@ -179,7 +179,7 @@ def train(cfg) -> dict:
                            drop_n_last_frames=int(getattr(config, "drop_n_last_frames", 0) or 0),
                            task=str(plain["task"].get("instruction")) if plain["task"].get("instruction") else None)
     batch_size, updates = policy_budget(training, str(policy_cfg["name"]), observation, plain.get("updates"))
-    optimizer = config.get_optimizer_preset().build(policy.get_optim_params())
+    optimizer = build_optimizer(str(policy_cfg["name"]), config, policy)
     scheduler_preset = config.get_scheduler_preset()
     scheduler = scheduler_preset.build(optimizer, updates) if scheduler_preset is not None else None
     ema = EMA(policy) if policy_cfg.get("ema", False) else None
