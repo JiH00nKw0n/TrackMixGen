@@ -1,0 +1,10 @@
+defaults:
+  - /generation/pool_robosuite_image@_here_
+  - _self_
+# Smoke test of a robosuite generator end to end (scripts/smoke_robosuite.sh): 200 attempts in chunks of 50 with the
+# task's cameras stored, chunk seeds 9701..9704; a 10-demonstration dataset, a 200-update policy and 6 evaluation scenes
+# follow. Any scene and selection rule can be combined with it.
+name: smoke200
+attempts: 200
+chunk: 50
+seed_offset: 9700
