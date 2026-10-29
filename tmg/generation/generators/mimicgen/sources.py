@@ -35,6 +35,7 @@ def download(repo_id: str, filename: str, dest: Path, revision: str | None = Non
         got = hf_hub_download(repo_id=repo_id, filename=filename, repo_type="dataset", cache_dir=tmp, revision=revision)
         partial = dest.with_suffix(dest.suffix + ".partial")
         shutil.move(str(Path(got).resolve()), str(partial))
+        partial.chmod(0o644)      # the Hugging Face cache keeps its files read-only; the CP-Gen step appends constraint windows
         partial.replace(dest)
     return dest
 
