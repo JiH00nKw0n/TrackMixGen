@@ -1,7 +1,10 @@
 # BC-RNN (robomimic BC_RNN_GMM with MimicGen's official image settings, ported in tmg/policy/bc_rnn.py).
 # `params` go into BCRNNConfig, then the block of the chosen observation (`by_observation`) overrides them; batch
-# size and update budget are in the training config. Low-dim values are robomimic's bc_rnn low-dim template
-# (LSTM hidden 400); the image values are MimicGen's image template (hidden 1000, crop 76, spatial softmax 32).
+# size and update budget are in the training config. Values per observation follow MimicGen's
+# utils/config_utils.py set_learning_settings_for_bc_rnn (and paper App. O): image LSTM 1000, lr 1e-4, crop 76, spatial
+# softmax 32; low-dim LSTM 400 and lr 1e-3 ("an increased learning rate (1e-3 instead of 1e-4) for policies trained on
+# low-dim observations"). The official budgets (image 600 x 500 = 300k updates, low-dim 2000 x 100 = 200k) are NOT used:
+# training.by_policy gives every policy 100k updates (compute; decision 2026-10-30).
 name: bc_rnn
 pretrained_path: null
 params:
@@ -18,5 +21,5 @@ params:
   optimizer_lr: 0.0001
 by_observation:
   image: {}
-  low_dim: {rnn_hidden_dim: 400}
+  low_dim: {rnn_hidden_dim: 400, optimizer_lr: 0.001}
 ema: false

@@ -35,9 +35,12 @@ def main(argv=None):
 
         config = dict(extra["cpgen_config"])
         config["save_dir"] = Path(config["save_dir"])
+        if isinstance(config.get("initialization"), dict):          # nested dataclass of CP-Gen's Config
+            config["initialization"] = official.InitializationConfig(**config["initialization"])
         cfg = official.Config(**config)
         print(f"[tmg] CP-Gen main: seed {cfg.seed}, {cfg.n_demos} attempts, env {cfg.env_name}, source {cfg.demo_path} "
-              f"[{cfg.load_demos_start_idx}, {cfg.load_demos_end_idx})", flush=True)
+              f"[{cfg.load_demos_start_idx}, {cfg.load_demos_end_idx}), start-pose noise "
+              f"{cfg.initialization.initialization_noise_type} {cfg.initialization.initialization_noise_magnitude}", flush=True)
         try:
             official.main(cfg)
         except Exception:

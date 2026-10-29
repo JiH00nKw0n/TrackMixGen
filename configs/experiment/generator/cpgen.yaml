@@ -11,7 +11,12 @@ source_root: ${oc.env:TMG_CPGEN_SRC,/opt/src/cpgen}   # checkout: working direct
 # Source text hash (sha256 of inspect.getsource) of the grafted DemoGenerator.generate_demo at the pinned commit
 # (tests/unit/fixtures/cpgen_generate_demo.py holds that text); a changed package refuses to run.
 graft_hashes: {generate_demo: a497e9da6ef4f84624c9646fd49ee55fae1dedaa93e428c90f8fa312972b40e2}
-config: {}                             # demo_aug.generate.Config fields applied to every task (after the task's)
+# demo_aug.generate.Config fields applied to every task (after the task's). The authors' launcher
+# (scripts/pipeline/run_datagen_and_training.sh) sets the robot start-pose noise to Gaussian 0.06; the Config default is 0.02.
+# Its other generation flags equal the Config defaults. Its optional add-noise step (noisy replay of the successes, "meant
+# for latter project" per its comment) is not part of the generation we reproduce.
+config:
+  initialization: {initialization_noise_type: gaussian, initialization_noise_magnitude: 0.06}
 # CP-Gen replays no source segment (it re-solves constraints), so source mixing has no counterpart: the mixing
 # part of every method is off. Its saved actions are already noise-free, so labels are pre_noise for every method.
 method_overrides:
