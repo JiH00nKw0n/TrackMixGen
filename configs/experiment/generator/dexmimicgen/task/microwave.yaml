@@ -3,8 +3,10 @@ display_name: GR1 Microwave Opening
 env_name: gr1_open_microwave                 # Arena environment name = gym id registered by the external callback
 camera_env: null
 camera_module: null
+register_modules: []
+external_callback: isaaclab_arena.environments.isaaclab_interop.environment_registration_callback   # Arena registers the environment
 task_descriptor: autodata_examples/tasks/gr1_open_microwave.yaml   # in the AutoData checkout; the chunk gets a copy with its seed
-source: ${paths.sources}/autodata/microwave/source.hdf5
+source: ${paths.sources}/dexmimicgen/microwave/source.hdf5
 source_repo: nvidia/Arena-GR1-Manipulation-Task                   # Hugging Face dataset repo
 source_file: arena_gr1_manipulation_dataset_annotated.hdf5
 source_revision: arena_v0.2_lab_v3.0

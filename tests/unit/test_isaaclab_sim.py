@@ -88,13 +88,13 @@ def test_shipped_isaaclab_scene_files_validate():
     from tmg.generation.simulators.isaaclab import validate_isaaclab_scene
 
     root = pathlib.Path(__file__).resolve().parents[2] / "configs" / "experiment" / "generator"
-    for gen in ("softmimicgen", "dexmimicgen", "autodata"):
+    for gen in ("softmimicgen", "dexmimicgen"):
         for f in (root / gen / "scene").glob("*.yaml"):
             validate_isaaclab_scene(yaml.safe_load(f.read_text()))
     ours = yaml.safe_load((root / "softmimicgen" / "scene" / "ours.yaml").read_text())
     assert ours["override_bounds"] is True and set(ours["bounds"]) == {"rope", "towel"}
     assert set(ours["bounds"]["rope"]["reset_object_position"]) == {"pose_range", "partial_pose_range"}
-    auto = yaml.safe_load((root / "autodata" / "scene" / "ours.yaml").read_text())
+    auto = yaml.safe_load((root / "dexmimicgen" / "scene" / "ours.yaml").read_text())
     assert all(e["add"] for e in auto["bounds"]["microwave"].values())
 
 

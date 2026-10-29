@@ -11,22 +11,6 @@ from tmg.generation.generators import make_generator
 from tmg.generation.generators.isaaclab.runtime import IsaacLabLayout, _cut_interval
 
 
-def test_dex_chunk_spec_carries_layout_script_and_overrides(tmp_path, monkeypatch):
-    monkeypatch.setenv("TMG_DATA_ROOT", str(tmp_path))
-    cfg = resolved(compose("generate", ["generator=dexmimicgen", "task=pick_place", "scene=ours", "method=trackmix", "generation=test/pilot20"]))
-    gen = make_generator(cfg)
-    chunk = plan_chunks(20, 20, 9000)[0]
-    spec = gen.prepare_chunk(chunk, tmp_path / "chunk")
-    assert spec.extra["package"] == "isaaclab_mimic.datagen" and spec.extra["soft"] is False
-    assert spec.extra["layout"]["hand_prefixes"] == {"left": "L_", "right": "R_"} and spec.extra["layout"]["noise_draw_shapes"] == [3, 3, 4, 4]
-    args = spec.extra["script_args"]
-    assert "--enable_pinocchio" in args and args[args.index("--generation_num_trials") + 1] == "20"
-    assert args[args.index("--task") + 1] == "TMG-PickPlace-GR1T2-Images-Mimic-v0"
-    assert spec.method["mixing"]["max_anchor_rotation_deg"] == 40.0 and spec.scene["override_bounds"] is False
-    assert gen.chunk_command(spec, tmp_path / "chunk" / "spec.json")[-2:] == ["--spec", str(tmp_path / "chunk" / "spec.json")]
-    assert gen.demo_layout()["labels_from_records"] is True
-
-
 def test_soft_generator_uses_the_soft_builder(tmp_path, monkeypatch):
     monkeypatch.setenv("TMG_DATA_ROOT", str(tmp_path))
     cfg = resolved(compose("generate", ["generator=softmimicgen", "task=rope", "scene=official", "method=none", "generation=test/pilot20"]))

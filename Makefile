@@ -105,7 +105,7 @@ help:  ## this help
 	@awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' $(firstword $(MAKEFILE_LIST))
 	@echo; grep -E '^[a-zA-Z0-9_-]+:.*## ' $(firstword $(MAKEFILE_LIST)) | sed -E 's/^([a-zA-Z0-9_-]+):.*## /  \1|/' | awk -F '|' '{ printf "%-16s %s\n", $$1, $$2 }'
 
-build:  ## build the docker image IMAGE (robosuite | cpgen | isaaclab-soft | isaaclab-dex | train)
+build:  ## build the docker image IMAGE (robosuite | cpgen | isaaclab-soft | isaaclab-dex (AutoData stack) | train)
 	DOCKER_BUILDKIT=1 docker build -f $(REPO)/docker/$(IMAGE).Dockerfile --build-arg TMG_REVISION=$(REVISION) -t tmg/$(IMAGE):$(TAG) $(REPO)
 
 sif:  ## build the singularity image SIF from a docker archive ARCHIVE (made with `docker save tmg/robosuite:latest -o ...`)

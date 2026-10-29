@@ -1,11 +1,18 @@
-"""GR1 pick-and-place mimic environment with two recorded cameras (``TMG-PickPlace-GR1T2-Images-Mimic-v0``).
+"""GR1 pick-and-place mimic environment with two recorded cameras (``TMG-PickPlace-GR1T2-Images-Mimic-v0``), Isaac Lab 3.0.
 
 Same task, physics, controller, subtasks and success condition as ``Isaac-PickPlace-GR1T2-Abs-Mimic-v0``
-(``isaaclab_mimic.envs.pinocchio_envs.pickplace_gr1t2_mimic_env_cfg.PickPlaceGR1T2MimicEnvCfg``); only the
-scene gains two pinhole cameras and the policy observations gain their RGB images, which the recorder then
-stores as ``obs/front_image`` and ``obs/side_image`` (128x128x3 uint8). Camera placement follows the
-2026-10 reproduction (front camera at (0.15, 1.8, 1.9) m looking at the table centre, side camera at
-(-1.4, 1.5, 1.8) m). ``rerender_on_reset`` makes the first frame of an episode valid.
+(``isaaclab_mimic.envs.pickplace_gr1t2_mimic_env_cfg.PickPlaceGR1T2MimicEnvCfg`` of the Isaac Lab 3.0 nested in
+Isaac Lab-Arena, task config ``isaaclab_tasks.contrib.pick_place.pickplace_gr1t2_env_cfg``). Two changes:
+
+- the official scene's teleoperation head camera (``robot_pov_cam``, 450x720, listed in ``image_obs_list``) is removed and
+  two 128x128 pinhole cameras are added; their RGB images form an observation group ``camera_obs`` (``front_image``,
+  ``side_image``), which Isaac Lab's recorder does not store (it keeps the ``policy`` group only), so the generated hdf5
+  stays small and the AutoData runtime captures the frames per step, as it does for Arena's head camera;
+- ``rerender_on_reset`` makes the first frame of an episode valid.
+
+Camera placement follows the 2026-10 reproduction (front camera at (0.15, 1.8, 1.9) m looking at the table centre, side
+camera at (-1.4, 1.5, 1.8) m). Until 2026-10-29 the same cameras lived in the ``policy`` group of an Isaac Lab 2.x
+environment and were recorded by the official recorder.
 """
 from __future__ import annotations
 
@@ -17,6 +24,7 @@ ENV_ID = "TMG-PickPlace-GR1T2-Images-Mimic-v0"
 IMAGE_SIZE = (128, 128)
 FRONT = ((0.15, 1.8, 1.9), (0.15, 0.5, 1.05))
 SIDE = ((-1.4, 1.5, 1.8), (0.15, 0.5, 1.05))
+CAMERA_GROUP = "camera_obs"
 
 
 def look_at_quat_wxyz(eye, target) -> tuple[float, float, float, float]:
@@ -35,14 +43,11 @@ def register() -> str:
     """Build the camera-enabled config class and register the gym id; returns the id."""
     import isaaclab.sim as sim_utils
     from isaaclab.envs import mdp
-    from isaaclab.managers import ObservationTermCfg, SceneEntityCfg
+    from isaaclab.managers import ObservationGroupCfg, ObservationTermCfg, SceneEntityCfg
     from isaaclab.sensors import CameraCfg
     from isaaclab.utils import configclass
-    from isaaclab_mimic.envs.pinocchio_envs.pickplace_gr1t2_mimic_env_cfg import PickPlaceGR1T2MimicEnvCfg
-    from isaaclab_tasks.manager_based.manipulation.pick_place.pickplace_gr1t2_env_cfg import (
-        ObjectTableSceneCfg,
-        ObservationsCfg,
-    )
+    from isaaclab_mimic.envs.pickplace_gr1t2_mimic_env_cfg import PickPlaceGR1T2MimicEnvCfg
+    from isaaclab_tasks.contrib.pick_place.pickplace_gr1t2_env_cfg import ObservationsCfg, PickPlaceGR1T2SceneCfg
 
     def camera(name: str, eye, target) -> CameraCfg:
         return CameraCfg(prim_path="{ENV_REGEX_NS}/" + name, update_period=0.0, height=IMAGE_SIZE[0], width=IMAGE_SIZE[1],
@@ -50,28 +55,36 @@ def register() -> str:
                          offset=CameraCfg.OffsetCfg(pos=eye, rot=look_at_quat_wxyz(eye, target), convention="ros"))
 
     @configclass
-    class ImageSceneCfg(ObjectTableSceneCfg):
+    class ImageSceneCfg(PickPlaceGR1T2SceneCfg):
+        robot_pov_cam = None                      # the 450x720 teleoperation camera is not rendered
         front_camera = camera("FrontCamera", *FRONT)
         side_camera = camera("SideCamera", *SIDE)
 
     @configclass
-    class ImageObservationsCfg(ObservationsCfg):
-        @configclass
-        class ImagePolicyCfg(ObservationsCfg.PolicyCfg):
-            front_image = ObservationTermCfg(func=mdp.image, params={"sensor_cfg": SceneEntityCfg("front_camera"), "normalize": False})
-            side_image = ObservationTermCfg(func=mdp.image, params={"sensor_cfg": SceneEntityCfg("side_camera"), "normalize": False})
+    class CameraObsCfg(ObservationGroupCfg):
+        front_image = ObservationTermCfg(func=mdp.image, params={"sensor_cfg": SceneEntityCfg("front_camera"), "normalize": False})
+        side_image = ObservationTermCfg(func=mdp.image, params={"sensor_cfg": SceneEntityCfg("side_camera"), "normalize": False})
 
-        policy: ImagePolicyCfg = ImagePolicyCfg()
+        def __post_init__(self):
+            self.enable_corruption = False
+            self.concatenate_terms = False
+
+    @configclass
+    class ImageObservationsCfg(ObservationsCfg):      # the base policy group (no image term) plus the camera group
+        camera_obs: CameraObsCfg = CameraObsCfg()
 
     @configclass
     class PickPlaceGR1ImagesCfg(PickPlaceGR1T2MimicEnvCfg):
-        scene: ImageSceneCfg = ImageSceneCfg(num_envs=1, env_spacing=2.5)
+        scene: ImageSceneCfg = ImageSceneCfg(num_envs=1, env_spacing=2.5, replicate_physics=True)
         observations: ImageObservationsCfg = ImageObservationsCfg()
-        image_obs_list = ["front_image", "side_image"]
         rerender_on_reset = True
 
+        def __post_init__(self):
+            super().__post_init__()
+            self.image_obs_list = []              # nothing for AutoData's setup_env_config to strip from the policy group
+
     if ENV_ID not in gym.registry:
-        gym.register(id=ENV_ID, entry_point="isaaclab_mimic.envs.pinocchio_envs.pickplace_gr1t2_mimic_env:PickPlaceGR1T2MimicEnv",
+        gym.register(id=ENV_ID, entry_point="isaaclab_mimic.envs.pickplace_gr1t2_mimic_env:PickPlaceGR1T2MimicEnv",
                      kwargs={"env_cfg_entry_point": PickPlaceGR1ImagesCfg}, disable_env_checker=True)
     return ENV_ID
 

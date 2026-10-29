@@ -8,7 +8,7 @@ therefore reads the script's source, inserts one statement, ``_tmg_install(globa
 ``if __name__ == "__main__":`` block, and executes the result with ``_tmg_install`` bound to :func:`install`.
 That function runs after the script's imports and before its ``main()``:
 
-1. optionally imports the camera task module of the task (registers a camera-enabled environment);
+1. imports the task's ``register_modules`` and camera module (environment registration, a camera-enabled environment);
 2. wraps the script's ``setup_env_config`` so that the scene ranges are written into the environment config
    (``simulators.isaaclab.apply_scene``), the chunk seed is written into ``datagen_config.seed`` (the official
    scripts take no ``--seed``; they seed random, numpy and torch with that config value), ``generation_guarantee`` is
@@ -34,6 +34,9 @@ def install(namespace: dict, spec: dict) -> None:
     from tmg.generation.method import build_method
     from tmg.generation.simulators.isaaclab import apply_scene
 
+    for module in list(spec["extra"].get("register_modules") or []):      # e.g. isaaclab_mimic.envs registers the GR1 tasks
+        __import__(str(module))
+        print(f"[tmg] module imported (environment registration): {module}", flush=True)
     if spec["extra"].get("camera_module"):
         __import__(spec["extra"]["camera_module"])
         print(f"[tmg] camera task module imported: {spec['extra']['camera_module']}", flush=True)

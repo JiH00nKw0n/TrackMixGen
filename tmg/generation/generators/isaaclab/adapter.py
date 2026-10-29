@@ -1,4 +1,4 @@
-"""``SyntheticDataGenerator`` for the Isaac Lab mimic generators (SoftMimicGen, DexMimicGen).
+"""``SyntheticDataGenerator`` for the Isaac Lab mimic generator SoftMimicGen (and the base of the AutoData adapter).
 
 A chunk is one run of the official ``generate_dataset.py`` script of the generator's Isaac Lab checkout
 (``generator.script`` under ``generator.source_root``) with ``--generation_num_trials <attempts>`` and one
@@ -35,7 +35,7 @@ GENERATED = "generated.hdf5"
 
 
 class IsaacLabGenerator(SyntheticDataGenerator):
-    """Common part of the two Isaac Lab adapters (see the module docstring)."""
+    """Common part of the Isaac Lab adapters (SoftMimicGen here, the AutoData stack in ``..autodata.adapter``)."""
 
     simulator = "isaaclab"
     package = ""                       # official datagen package, e.g. "isaaclab_mimic.datagen"
@@ -130,10 +130,3 @@ class SoftMimicGenGenerator(IsaacLabGenerator):
     package = "softmimicgen.datagen"
     soft_objects = True
 
-
-class DexMimicGenGenerator(IsaacLabGenerator):
-    """DexMimicGen (isaaclab_mimic): GR1 humanoid with two dexterous hands."""
-
-    name = "dexmimicgen"
-    package = "isaaclab_mimic.datagen"
-    soft_objects = False

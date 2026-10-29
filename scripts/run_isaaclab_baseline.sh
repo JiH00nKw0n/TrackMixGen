@@ -1,5 +1,5 @@
 #!/bin/bash
-# Baseline experiment of the Isaac Lab generators (SoftMimicGen, DexMimicGen) on one GPU machine, end to end:
+# Baseline experiment of the Isaac Lab generators (SoftMimicGen on its Isaac Lab fork, DexMimicGen through AutoData) on one GPU machine, end to end:
 # for every task, the official source demonstrations, one generated pool of 1,000 successes with the official
 # generator settings (method none, generation pool_isaac), the fixed evaluation scenes, a 1,000-demonstration image
 # dataset, then three training seeds of the image Diffusion Policy, each validated on the 25 validation scenes at
@@ -10,8 +10,8 @@
 # pools, datasets, checkpoints, validations and evaluations are kept and skipped on a rerun.
 #
 #   CLUSTER=ada scripts/run_isaaclab_baseline.sh
-# Variables: CLUSTER (ada), GPU (0), SOFT_TASKS ("rope towel"; jenga is configured but not in the paper plan), DEX_TASKS ("pick_place"),
-#   AUTODATA_TASKS ("microwave bottle_door": the Arena GR1 tasks through NVIDIA AutoData, image isaaclab-autodata), SEEDS ("202601 202602 202603"),
+# Variables: CLUSTER (ada), GPU (0), SOFT_TASKS ("rope towel"; jenga is configured but not in the paper plan),
+#   DEX_TASKS ("pick_place microwave bottle_door": the GR1 tasks, all through NVIDIA AutoData in the image isaaclab-dex), SEEDS ("202601 202602 202603"),
 #   POLICY (diffusion_policy), SIZE (1000), VAL_PARALLEL (2: checkpoints validated at a time, each one Isaac Sim),
 #   TEST_SHARDS (3: parallel shards of the 300 test scenes), SEED_PARALLEL (1: training runs at a time),
 #   ONLY_GENERATION (1: stop after the datasets), BUNDLE_NAME (results folder name under <result root>/reports),
@@ -21,7 +21,7 @@
 #   scenes per split; same code path and files as the real run, finishes in about two hours per task).
 set -uo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-CLUSTER=${CLUSTER:-ada}; GPU=${GPU:-0}; SOFT_TASKS=${SOFT_TASKS-"rope towel"}; DEX_TASKS=${DEX_TASKS-"pick_place"}
+CLUSTER=${CLUSTER:-ada}; GPU=${GPU:-0}; SOFT_TASKS=${SOFT_TASKS-"rope towel"}; DEX_TASKS=${DEX_TASKS-"pick_place microwave bottle_door"}
 SEEDS=${SEEDS:-"202601 202602 202603"}; POLICY=${POLICY:-diffusion_policy}; SIZE=${SIZE:-1000}
 VAL_PARALLEL=${VAL_PARALLEL:-2}; TEST_SHARDS=${TEST_SHARDS:-3}; SEED_PARALLEL=${SEED_PARALLEL:-1}
 SEQUENTIAL_TASKS=${SEQUENTIAL_TASKS:-0}
@@ -44,8 +44,6 @@ fail() { log "$1 FAILED (see $2)"; echo "$1" >> "$LOG/FAILURES"; }
 JOBS=""
 for t in $SOFT_TASKS; do JOBS="$JOBS softmimicgen:isaaclab-soft:$t"; done
 for t in $DEX_TASKS; do JOBS="$JOBS dexmimicgen:isaaclab-dex:$t"; done
-AUTODATA_TASKS=${AUTODATA_TASKS-"microwave bottle_door"}      # assign first: a quoted default inside ${...} is one word
-for t in $AUTODATA_TASKS; do JOBS="$JOBS autodata:isaaclab-autodata:$t"; done
 ALL_JOBS=$JOBS
 dataset_of() { echo "$DATA_ROOT/datasets/$1/$2/$SCENE/$METHOD/$GEN_NAME/$OBSERVATION/n${SIZE}_seed0.hdf5"; }
 resets_of() { echo "$DATA_ROOT/resets/$1/$2/$SCENE/val25_test300_seed202600.json"; }

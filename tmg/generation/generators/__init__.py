@@ -15,16 +15,12 @@ def make_generator(cfg: dict) -> SyntheticDataGenerator:
         from tmg.generation.generators.isaaclab.adapter import SoftMimicGenGenerator
 
         return SoftMimicGenGenerator(cfg)
-    if name == "dexmimicgen":
-        from tmg.generation.generators.isaaclab.adapter import DexMimicGenGenerator
+    if name == "dexmimicgen":      # the AutoData stack (autodata_core on Isaac Lab-Arena) runs every GR1 task
+        from tmg.generation.generators.autodata.adapter import DexMimicGenGenerator
 
         return DexMimicGenGenerator(cfg)
     if name == "cpgen":
         from tmg.generation.generators.cpgen.adapter import CPGenGenerator
 
         return CPGenGenerator(cfg)
-    if name == "autodata":
-        from tmg.generation.generators.autodata.adapter import AutoDataGenerator
-
-        return AutoDataGenerator(cfg)
-    raise KeyError(f"no generator adapter named {name!r} (available: mimicgen, softmimicgen, dexmimicgen, cpgen, autodata)")
+    raise KeyError(f"no generator adapter named {name!r} (available: mimicgen, softmimicgen, dexmimicgen, cpgen)")

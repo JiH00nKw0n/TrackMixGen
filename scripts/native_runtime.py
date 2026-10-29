@@ -18,7 +18,10 @@ REPO = Path(__file__).resolve().parents[1]
 
 def runtime_environment(image: str, data_root: str) -> tuple[Path, dict[str, str]]:
     """Return an environment's interpreter and process-local paths, without changing the host."""
-    if image not in {"isaaclab-soft", "isaaclab-dex", "train"}:
+    if image == "isaaclab-dex":
+        raise ValueError("native runtime: 'isaaclab-dex' now means the AutoData stack (Isaac Lab 3.0 with Arena, see "
+                         "docker/isaaclab-dex.Dockerfile); scripts/bootstrap_native.py has no stage for it yet, run the docker image")
+    if image not in {"isaaclab-soft", "train"}:
         raise ValueError(f"native runtime does not support {image!r}")
     root = Path(os.environ.get("TMG_NATIVE_ROOT") or "~/.local/share/tmg-native").expanduser().resolve()
     venv = root / "envs" / image
