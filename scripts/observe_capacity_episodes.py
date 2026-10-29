@@ -3,9 +3,13 @@
 import json
 import os
 import time
+import argparse
 from pathlib import Path
 
-root=Path(os.environ['TMG_RESULTS_ROOT'])/'reports/evaluation_capacity'
+parser=argparse.ArgumentParser()
+parser.add_argument('--root',type=Path)
+args=parser.parse_args()
+root=args.root or Path(os.environ['TMG_RESULTS_ROOT'])/'reports/evaluation_capacity'
 output=root/'episode_completion_observations.jsonl'
 assert not output.exists(), 'observer already ran; preserve its evidence'
 seen=set()

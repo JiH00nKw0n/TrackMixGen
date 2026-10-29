@@ -190,6 +190,8 @@ def play_isaaclab(plain: dict, todo: list[dict], checkpoint: str, horizon: int, 
                 raise RuntimeError(f"policy cameras {info['cameras']} differ from observation={obs_cfg['name']} ({obs_cfg.get('cameras')})")
             if bool(info.get("env_state_dim", 0)) != bool(obs_cfg.get("object_state")):
                 raise RuntimeError(f"policy env_state_dim {info.get('env_state_dim', 0)} does not match observation={obs_cfg['name']}")
+            from tmg.evaluation.capacity_barrier import wait_for_capacity_workers
+            wait_for_capacity_workers()
             for s in todo:
                 seed = episode_seed(int(ev["seed"]), int(plain.get("training_seed", 0)), s["index"])
                 t0 = time.time()

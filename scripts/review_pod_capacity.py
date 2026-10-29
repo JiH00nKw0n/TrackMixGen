@@ -2,6 +2,7 @@
 """Review measured rollout overlap and throughput before releasing formal work."""
 import json
 import os
+import argparse
 from pathlib import Path
 from profile_pod_evaluation import GIB, POLICIES, write
 
@@ -54,4 +55,5 @@ def review(root):
 
 
 if __name__=='__main__':
-    review(Path(os.environ['TMG_RESULTS_ROOT'])/'reports/evaluation_capacity')
+    parser=argparse.ArgumentParser();parser.add_argument('--root',type=Path);args=parser.parse_args()
+    review(args.root or Path(os.environ['TMG_RESULTS_ROOT'])/'reports/evaluation_capacity')

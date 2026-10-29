@@ -71,8 +71,9 @@ class Profile:
             env.update(OMP_NUM_THREADS="1", MKL_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1")
             self.envs[image] = py, env
 
-    def launch(self, image, args, log):
+    def launch(self, image, args, log, extra_env=None):
         py, env = self.envs[image]
+        env = dict(env, **(extra_env or {}))
         log.parent.mkdir(parents=True, exist_ok=True)
         with log.open("xb") as f:
             p = subprocess.Popen([str(py), "-m", "tmg", *args], cwd=REPO, env=env,
@@ -155,7 +156,8 @@ class Profile:
                               "cluster=pod",f"checkpoint={checkpoints[policy]}","split=val","training_seed=202699",
                               f"evaluation.server.port={port}",f"max_scenes={scenes}",f"shard=[{rank},{shards}]",
                               f"output={folder/policy}"]
-                        p=self.launch("isaaclab-soft",args,folder/f"eval_{i}.log")
+                        p=self.launch("isaaclab-soft",args,folder/f"eval_{i}.log",dict(
+                            TMG_CAPACITY_BARRIER=str(folder/'ready'), TMG_CAPACITY_PARTIES=str(count)))
                         workers.append((i,p))
                 sample=resources(); sample["live_eval_processes"]=sum(p.poll() is None for _,p in workers)
                 sample["launched_eval_processes"]=len(workers); samples.append(sample)
@@ -197,23 +199,29 @@ class Profile:
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--scenes-per-policy",type=int,default=6)
+    parser.add_argument("--output-subdir")
+    parser.add_argument("--reuse-checkpoints",type=Path)
     args=parser.parse_args()
     data=Path(os.environ["TMG_DATA_ROOT"]).resolve()
     root=Path(os.environ["TMG_RESULTS_ROOT"])/"reports/evaluation_capacity"
     assert (root/"ACTIVE.json").exists(), "formal pipeline hold must be installed first"
+    if args.output_subdir:
+        assert Path(args.output_subdir).name == args.output_subdir
+        root=root/args.output_subdir
+        root.mkdir(exist_ok=True)
     assert not (root/"RUN.json").exists(), "do not automatically repeat a capacity attempt"
     write(root/"RUN.json",dict(pid=os.getpid(),start_ticks=process_identity(os.getpid()),started_at=time.time(),scenes_per_policy=args.scenes_per_policy))
     profile=Profile(root,data)
     try:
         # Arena preflight is allowed to finish normally; formal training is held by ACTIVE.json.
-        preflight=root.parent/"arena_preflight/SUMMARY.json"
+        preflight=Path(os.environ["TMG_RESULTS_ROOT"])/"reports/arena_preflight/SUMMARY.json"
         while not preflight.exists():
             write(root/"LIVE.json",dict(phase="waiting_for_arena_preflight",at=time.time()))
             time.sleep(10)
         summary=json.loads(preflight.read_text())
         write(root/"arena_preflight_state.json",summary)
         # Rope measurements remain useful when an unrelated Arena preflight failed.
-        checkpoints=profile.train()
+        checkpoints=json.loads(args.reuse_checkpoints.read_text()) if args.reuse_checkpoints else profile.train()
         write(root/"checkpoints.json",checkpoints)
         four=profile.stage(4,checkpoints,args.scenes_per_policy)
         fits,projection=six_fits(four)
