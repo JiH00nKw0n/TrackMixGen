@@ -74,7 +74,7 @@ generation_lane() {
     M sources $common > "$LOG/sources_${gen}_$task.log" 2>&1 || { fail "sources $gen/$task" "$LOG/sources_${gen}_$task.log"; continue; }
     log "[$gen/$task] pool ($GENERATION; chunk count and size from the generation config)"
     M generate $common SCENE=$SCENE METHOD=$METHOD GENERATION=$GENERATION \
-      OVERRIDES="output=$DATA_ROOT/pools/$gen/$task/$SCENE/$METHOD/$GEN_NAME cluster.max_workers=3 cluster.workers=3 cluster.threads_per_worker=2 task.object_state=[] task.lowdim_terms=null task.num_sources=null" > "$LOG/pool_${gen}_$task.log" 2>&1 \
+      OVERRIDES="output=$DATA_ROOT/pools/$gen/$task/$SCENE/$METHOD/$GEN_NAME cluster.max_workers=3 cluster.workers=3 cluster.threads_per_worker=2 task.object_state=[] task.lowdim_terms=null task.num_sources=null generation.protocol.keep_failed=true generation.protocol.select_src_per_subtask=true generation.protocol.selection_strategy=random" > "$LOG/pool_${gen}_$task.log" 2>&1 \
       || { fail "pool $gen/$task" "$LOG/pool_${gen}_$task.log"; continue; }
     log "[$gen/$task] pool done: $(grep -h 'pool complete' "$LOG/pool_${gen}_$task.log" | tail -1 | cut -c1-100)"
     M resets $common SCENE=$SCENE > "$LOG/resets_${gen}_$task.log" 2>&1 || { fail "resets $gen/$task" "$LOG/resets_${gen}_$task.log"; continue; }

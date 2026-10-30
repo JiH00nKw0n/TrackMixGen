@@ -16,7 +16,7 @@ def test_legacy_paths_are_explicit_overrides(tmp_path, monkeypatch):
         assert cfg['selection']['name'] == 'official'
         assert cfg['task']['policy_overrides']['bc_rnn']['crop_shape'] is None
         gen = resolved(compose('generate',common+[f'output={base}', 'task.object_state=[]',
-            'task.lowdim_terms=null', 'task.num_sources=null', 'cluster.max_workers=3', 'cluster.workers=3']))
+            'task.lowdim_terms=null', 'task.num_sources=null', 'generation.protocol.keep_failed=true', 'generation.protocol.select_src_per_subtask=true', 'generation.protocol.selection_strategy=random', 'cluster.max_workers=3', 'cluster.workers=3']))
         assert gen['output'] == base
         assert gen['task']['object_state'] == []
         assert gen['task']['lowdim_terms'] is None
