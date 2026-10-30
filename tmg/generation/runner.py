@@ -77,7 +77,21 @@ def _relocate_spec(spec: ChunkSpec, scratch: Path, folder: Path) -> ChunkSpec:
     spec.records_dir = str(folder / RECORDS_DIR)
     spec.generator_config = str(folder / Path(spec.generator_config).name)
     spec.expected_outputs = [str(folder / Path(p).relative_to(scratch)) for p in spec.expected_outputs]
+    # an adapter may keep chunk paths inside extra too (CP-Gen's cpgen_config save_dir and merge_demo_save_path); left as
+    # scratch paths they made every finished CP-Gen chunk look changed, so its pools could be neither resumed nor extended
+    spec.extra = _replace_prefix(spec.extra, str(scratch), str(folder))
     return spec
+
+
+def _replace_prefix(value, old: str, new: str):
+    """``value`` with every string that starts with the path ``old`` rewritten to start with ``new`` (dicts and lists walked)."""
+    if isinstance(value, dict):
+        return {k: _replace_prefix(v, old, new) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_replace_prefix(v, old, new) for v in value]
+    if isinstance(value, str) and (value == old or value.startswith(old + "/")):
+        return new + value[len(old):]
+    return value
 
 
 def _spec_of_finished_chunk(generator, chunk: Chunk, folder: Path) -> ChunkSpec:
