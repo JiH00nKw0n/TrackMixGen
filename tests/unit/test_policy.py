@@ -132,6 +132,26 @@ def test_bc_rnn_net_without_crop_sees_the_whole_image():
     assert a.shape == (2, 7)
 
 
+def test_bc_rnn_policy_with_the_config_crop_list_saves_and_reloads(tmp_path):
+    # the policy YAML gives crop_shape as a list ([76, 76]); the config keeps it as a tuple so that save_pretrained can
+    # write it (a list failed with "Couldn't encode 76") and the checkpoint loads back with the same crop
+    torch = pytest.importorskip("torch")
+    pytest.importorskip("lerobot")
+    from tmg.policy.lerobot_policies import build_policy, policy_class
+    from tmg.policy.nets import CropRandomizer
+
+    cfg = {"name": "bc_rnn", "params": {"crop_shape": [76, 76], "rnn_hidden_dim": 16, "seq_length": 3},
+           "by_observation": {"image": {}}}
+    features = {"cameras": ["agentview"], "image_shape": (3, 84, 84), "state_dim": 5, "env_state_dim": 0, "action_dim": 7}
+    policy = build_policy(cfg, features, "cpu", "image")
+    assert policy.config.crop_shape == (76, 76)
+    policy.save_pretrained(tmp_path / "ckpt")
+    loaded = policy_class("bc_rnn").from_pretrained(tmp_path / "ckpt")
+    assert tuple(loaded.config.crop_shape) == (76, 76) and isinstance(loaded.net.encoders["agentview"].crop, CropRandomizer)
+    for k, v in policy.state_dict().items():
+        assert torch.equal(v, loaded.state_dict()[k]), k
+
+
 def test_bc_rnn_policy_without_crop_builds_trains_and_reloads(tmp_path):
     # the task override crop_shape: null reaches BCRNNConfig as None; the policy trains one step and a saved checkpoint
     # loads back with the same config and tensors (LeRobot's from_pretrained)
