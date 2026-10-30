@@ -1,6 +1,6 @@
-# KHDP Soft execution based on main c364c75
+# KHDP Soft execution based on main 0625348
 
-The policy implementations and image task budgets are unchanged from main c364c75afc0e8275f3556ae8d0c839281ecd7af8, including the DP AdamW/per-sample crop update and BC-RNN None/tuple serialization fixes.
+The policy implementations and image task budgets are unchanged from main 0625348c88ffa3e7e5862a753774e88c0acaf635, including the DP AdamW/per-sample crop update and BC-RNN None/tuple serialization fixes.
 
 The KHDP-only driver explicitly retains the campaign's existing paths. The composed selection remains official. Image training reads exactly the same HDF5 frames on demand to fit the 46 GiB memory limit. Statistics keep main's dtype, sampled indices, order and reductions. Only old optimizer resume states are pruned after a newer checkpoint commits; all ten inference checkpoints remain until validation and test complete.
 
