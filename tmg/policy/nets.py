@@ -34,7 +34,7 @@ class BCRNNNetConfig:
     image_shape: tuple[int, int, int] | None # (3, H, W) of the dataset images; None without cameras
     state_dim: int                           # robot state (plus object state, low-dim) width
     action_dim: int
-    crop_shape: tuple[int, int] = (76, 76)
+    crop_shape: tuple[int, int] | None = (76, 76)
     num_keypoints: int = 32
     visual_feature_dim: int = 64
     rnn_hidden_dim: int = 1000
@@ -90,16 +90,17 @@ class SpatialSoftmax(nn.Module):
 class VisualCore(nn.Module):
     """Crop -> ResNet18 trunk -> spatial softmax -> flatten -> linear feature (robomimic ``VisualCore``)."""
 
-    def __init__(self, image_shape: tuple[int, int, int], crop_shape: tuple[int, int], num_kp: int, feature_dim: int):
+    def __init__(self, image_shape: tuple[int, int, int], crop_shape: tuple[int, int] | None, num_kp: int, feature_dim: int):
         super().__init__()
         from torchvision.models import resnet18
 
-        self.crop = CropRandomizer(crop_shape)
+        self.crop = CropRandomizer(crop_shape) if crop_shape is not None else nn.Identity()
+        encoded_shape = crop_shape if crop_shape is not None else image_shape[1:]
         trunk = resnet18(weights=None)
         self.trunk = nn.Sequential(*list(trunk.children())[:-2])
         with torch.no_grad():
             self.trunk.eval()                  # probe the output shape without touching BatchNorm statistics
-            c, h, w = self.trunk(torch.zeros(1, image_shape[0], *crop_shape)).shape[1:]
+            c, h, w = self.trunk(torch.zeros(1, image_shape[0], *encoded_shape)).shape[1:]
             self.trunk.train()
         self.pool = SpatialSoftmax(c, h, w, num_kp=num_kp)
         self.out = nn.Linear(num_kp * 2, feature_dim)
