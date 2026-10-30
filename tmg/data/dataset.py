@@ -29,7 +29,9 @@ Output layout (``<output>``, robomimic-compatible plus our extras)::
         attrs: chunk, attempt, num_samples, pool
     mask/train                  (N,)   bytes            every demo key (one split; validation is by rollout)
 
-Selection is uniform without replacement among all successes of the pool (``seed``). The sidecar
+Selection is uniform without replacement among all successes of the pool (``seed``). The generator may then
+replace the files the chosen demos are read from (``prepare_selection``: CP-Gen's noisy-state replay renders new
+images and states; actions and records stay those of the chunk). The sidecar
 ``<stem>.DATASET.json`` lists the chosen (chunk, demo, attempt) triples and the pool's ``DONE.json`` summary;
 ``<stem>.resolved_config.yaml`` and the folder's ``provenance.json`` record the configuration.
 """
@@ -322,17 +324,22 @@ def build_dataset(cfg) -> dict:
         raise DatasetError(f"pool {pool} is not finished (no {POOL_DONE}); finished chunks would be used only partially")
     from tmg.generation.generators import make_generator
 
-    layout = DemoLayout.from_mapping(make_generator(plain).demo_layout())
+    generator = make_generator(plain)
+    layout = DemoLayout.from_mapping(generator.demo_layout())
     cands = candidates(pool, layout)
     chosen = select(cands, int(plain["size"]), int(plain["seed"]))
+    # CP-Gen: the authors' noisy-state replay re-renders the chosen successes; the candidates then point at those files
+    to_write, prepared = generator.prepare_selection(chosen, pool=pool, output=output, observation=plain["observation"])
     meta = {"task": plain["task"]["name"], "generator": plain["generator"]["name"], "scene": plain["scene"]["name"],
             "method": plain["method"]["name"], "generation": plain["generation"]["name"],
             "observation": plain["observation"]["name"],
             "label": str(plain["method"].get("labels", "executed")), "seed": int(plain["seed"])}
-    stats = write_dataset(output, chosen, pool=pool, observation=plain["observation"], meta=meta, layout=layout)
+    stats = write_dataset(output, to_write, pool=pool, observation=plain["observation"], meta=meta, layout=layout)
     summary = {"path": str(output), "pool": str(pool), "candidates": len(cands), **stats, **meta,
                "chosen": [{k: c[k] for k in ("chunk", "demo_key", "attempt", "n_steps")} for c in chosen],
                "pool_done": read_json(pool / POOL_DONE)}
+    if prepared is not None:
+        summary["prepared"] = prepared
     write_json(summary_path, summary)
     dump_yaml(plain, sidecar(output, RESOLVED_CONFIG))
     write_provenance(output.parent, extra={"command": "dataset", "output": str(output)})
