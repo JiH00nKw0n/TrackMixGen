@@ -66,6 +66,10 @@ def _chunk_state(folder: Path, spec: ChunkSpec) -> tuple[str, list[str]]:
     if not old_path.exists():
         return "changed", [f"finished chunk has no {CHUNK_SPEC}"]
     old, new = ChunkSpec(**read_json(old_path)).identity(), spec.identity()
+    # Missing and explicitly disabled optional observation terms have the same behavior.
+    for identity in (old, new):
+        if not identity["task"].get("lowdim_terms"):
+            identity["task"].pop("lowdim_terms", None)
     if old != new:
         diffs = [k for k in new if old.get(k) != new[k]]
         return "changed", [f"finished chunk was made under another configuration: {diffs}"]
