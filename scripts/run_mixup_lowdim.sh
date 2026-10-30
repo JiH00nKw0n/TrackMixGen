@@ -19,7 +19,8 @@
 # Variables: CLUSTER (a100), GENERATOR (mimicgen), GPU (CUDA device of CP-Gen's planner; unset: the cluster default), TASKS
 #   (MimicGen: hammer_cleanup mug_cleanup three_piece_assembly coffee threading square stack_three; CP-Gen: coffee threading
 #   mug_cleanup hammer_cleanup three_piece_assembly), RANK_TASKS (MimicGen: coffee threading square stack_three; CP-Gen: all
-#   its tasks), RANK_WAIT (0), CONDITIONS (the ten mx_* files), SIZE (1000), RANK_WORKERS (12 per ranking pool), CPGEN_WORKERS
+#   its tasks), RANK_WAIT (0), CONDITIONS (the six conditions of the 2026-10-30 decision: mx_none mx_top1 mx_top5
+#   mx_success_a40 mx_transform mx_junction; the other mx_* files stay for the pools already made), SIZE (1000), RANK_WORKERS (12 per ranking pool), CPGEN_WORKERS
 #   (24), SKIP_DATASET (1: pools only), MINI (1: toy scale for an end-to-end check: a MINI_ATTEMPTS-attempt pool (200) in
 #   chunks of MINI_CHUNK (50) in the folder pilot50 without images, MINI_SIZE-demonstration datasets (10), never extended;
 #   any committed or hand-made ranking file is accepted).
@@ -27,7 +28,7 @@
 set -uo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 CLUSTER=${CLUSTER:-a100}; SIZE=${SIZE:-1000}; GENERATOR=${GENERATOR:-mimicgen}
-CONDITIONS=${CONDITIONS:-"mx_none mx_top1 mx_top3 mx_top5 mx_success_a20 mx_success_a40 mx_success_a90 mx_success_anone mx_transform mx_junction"}
+CONDITIONS=${CONDITIONS:-"mx_none mx_top1 mx_top5 mx_success_a40 mx_transform mx_junction"}
 RANK_WORKERS=${RANK_WORKERS:-12}; RANK_WAIT=${RANK_WAIT:-0}
 SCENE=ours; SELECTION=ours; GENERATION=pool_robosuite_lowdim; POOL_OVERRIDES=""
 if [ "$GENERATOR" = cpgen ]; then

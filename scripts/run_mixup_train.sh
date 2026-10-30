@@ -12,14 +12,15 @@
 # already exists, for example from the baseline driver, is used as it is.
 #
 #   CLUSTER=a100 GPU=6 scripts/run_mixup_train.sh
-# Variables: CLUSTER (a100), GPU (0), GENERATORS ("mimicgen cpgen"), CONDITIONS (the ten mx_* files), SEEDS ("202601 202602
+# Variables: CLUSTER (a100), GPU (0), GENERATORS ("mimicgen cpgen"), CONDITIONS (the six conditions of the 2026-10-30 decision: mx_none mx_top1 mx_top5
+#   mx_success_a40 mx_transform mx_junction; the other mx_* files stay for the pools already made), SEEDS ("202601 202602
 #   202603"), SIZE (1000), POLICY_PARALLEL (2), VAL_PARALLEL (4), TEST_SHARDS (6), PORT_BASE (12000), MINI (1: the toy scale
 #   of run_mixup_lowdim.sh MINI: pilot50 datasets of MINI_SIZE (10) demonstrations, 200 updates, 6 evaluation scenes per split).
 set -uo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 CLUSTER=${CLUSTER:-a100}; GPU=${GPU:-0}; SIZE=${SIZE:-1000}
 GENERATORS=${GENERATORS:-"mimicgen cpgen"}
-CONDITIONS=${CONDITIONS:-"mx_none mx_top1 mx_top3 mx_top5 mx_success_a20 mx_success_a40 mx_success_a90 mx_success_anone mx_transform mx_junction"}
+CONDITIONS=${CONDITIONS:-"mx_none mx_top1 mx_top5 mx_success_a40 mx_transform mx_junction"}
 SEEDS=${SEEDS:-"202601 202602 202603"}
 POLICY=diffusion_policy; OBSERVATION=low_dim; SCENE=ours; SELECTION=ours; GENERATION=pool_robosuite_lowdim
 POLICY_PARALLEL=${POLICY_PARALLEL:-2}; VAL_PARALLEL=${VAL_PARALLEL:-4}; TEST_SHARDS=${TEST_SHARDS:-6}; PORT_BASE=${PORT_BASE:-12000}
