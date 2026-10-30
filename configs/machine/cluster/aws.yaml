@@ -1,0 +1,12 @@
+# AWS g4dn.12xlarge (4x T4 16 GB, 48 vCPU, 186 GB RAM; ssh ubuntu@<public address>, the address changes on restart):
+# docker, data on the instance-store NVMe. /opt/dlami/nvme is wiped when the instance stops, Docker's and containerd's
+# storage included (both were moved there on 2026-10-30), so results worth keeping are copied off it.
+name: aws
+runtime: docker
+image: tmg/robosuite:latest
+sif: null
+data_root: /opt/dlami/nvme/tmg_data
+workers: auto
+max_workers: 8
+threads_per_worker: 1
+min_free_disk_gib: 50

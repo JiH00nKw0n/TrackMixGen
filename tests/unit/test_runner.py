@@ -304,3 +304,23 @@ def test_relocate_spec_rewrites_every_path_field_and_nothing_else():
     assert out.expected_outputs == ["/pool/chunks/seed7/out/demo.hdf5", "/pool/chunks/seed7/out/stats.json"]
     assert out.identity() == before                                        # non-path fields untouched
     assert out.task == {"name": "square", "source": "/data/src.hdf5"} and out.extra == {"experiment": "out"}
+
+
+def test_run_pool_shards_split_the_chunks_and_the_last_one_writes_done(pool, tmp_path):
+    # two runners on one pool (one container per GPU): each runs the chunks of its index modulo 2, does not prepare the
+    # other shard's unfinished chunks, and only the runner that finds every chunk done writes DONE.json
+    output = tmp_path / "pool"
+    first, launch = pool(_cfg(tmp_path, shard=[1, 2]))
+    assert [c["seed"] for c in launch.calls] == [102]
+    assert first["partial"] is True and sorted(first["waiting"]) == ["seed101", "seed103"]
+    assert not (output / POOL_DONE).exists()
+    assert {Path(f).name for f in pool.state["generator"].prepared} == {"seed102"}
+    second, launch = pool(_cfg(tmp_path, shard=[0, 2]))
+    assert sorted(c["seed"] for c in launch.calls) == [101, 103]
+    assert second["attempts"] == 5 and [c["chunk"] for c in second["chunks"]] == ["seed101", "seed102", "seed103"]
+    assert read_json(output / POOL_DONE) == second
+
+
+def test_run_pool_refuses_a_bad_shard(pool, tmp_path):
+    with pytest.raises(runner.PoolError, match="shard"):
+        pool(_cfg(tmp_path, shard=[2, 2]))
