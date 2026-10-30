@@ -22,7 +22,8 @@ def permits(sample, leases, request, max_evaluations, max_generations=3):
     # Reserve the part of each admitted job's peak that it has not allocated yet.
     pending_ram=sum(max(0,x['ram_bytes']-x['observed_ram_bytes']) for x in leases)
     pending_gpu=sum(max(0,x['gpu_mib']-x['observed_gpu_mib']) for x in leases)
-    return (sample['memory_working']+pending_ram+request['ram_bytes']+4*GIB <= sample['memory_limit']
+    memory = sample.get('memory_admission', sample['memory_working'])
+    return (memory+pending_ram+request['ram_bytes']+4*GIB <= sample['memory_limit']
             and sample['gpu_used_mib']+pending_gpu+request['gpu_mib']+4096 <= sample['gpu_total_mib'])
 
 
