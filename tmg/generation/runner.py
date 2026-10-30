@@ -88,12 +88,16 @@ def _spec_of_finished_chunk(generator, chunk: Chunk, folder: Path) -> ChunkSpec:
         return _relocate_spec(generator.prepare_chunk(chunk, scratch), scratch, folder)
 
 
-def _inspect_chunks(generator, chunks: list[Chunk], output: Path) -> tuple[dict[int, str], list[str]]:
+def _inspect_chunks(generator, chunks: list[Chunk], output: Path, own: set[int] | None = None) -> tuple[dict[int, str], list[str]]:
     """State of every chunk before anything runs (see :func:`_chunk_state`).
 
+    Args:
+        own: indices of the chunks this runner may run (a shard); None for all. Unfinished chunks of other shards are
+            only reported (absent or partial), since another runner may be writing them.
+
     Returns:
-        ``({chunk index: state}, [reasons of the changed chunks])``. Unfinished chunks are prepared in place, which
-        writes the generator's config into their folder.
+        ``({chunk index: state}, [reasons of the changed chunks])``. Unfinished chunks of this runner are prepared in
+        place, which writes the generator's config into their folder.
     """
     states: dict[int, str] = {}
     changed: list[str] = []
@@ -101,6 +105,9 @@ def _inspect_chunks(generator, chunks: list[Chunk], output: Path) -> tuple[dict[
         folder = chunk.folder(output)
         if chunk_is_done(folder):
             spec = _spec_of_finished_chunk(generator, chunk, folder)
+        elif own is not None and chunk.index not in own:
+            states[chunk.index] = "partial" if folder.exists() else "absent"
+            continue
         else:
             spec = generator.prepare_chunk(chunk, folder)
         state, reasons = _chunk_state(folder, spec)
@@ -214,6 +221,15 @@ def run_pool(cfg) -> dict:
     cluster = dict(plain["cluster"])
     generation = dict(plain["generation"])
     chunks = plan_chunks(int(generation["attempts"]), int(generation["chunk"]), int(generation["seed_offset"]))
+    # generation.shard [i, n]: this runner runs the chunks whose index is i modulo n, so n runners (e.g. one container per
+    # GPU) share one pool; the runner that finds every chunk done writes DONE.json
+    shard = generation.get("shard")
+    own = None
+    if shard:
+        i, n = (int(v) for v in shard)
+        if not 0 <= i < n:
+            raise PoolError(f"generation.shard {shard}: expected [index, count] with 0 <= index < count")
+        own = {c.index for c in chunks if c.index % n == i}
 
     problems = generator.check_sources()
     if problems:
@@ -230,13 +246,13 @@ def run_pool(cfg) -> dict:
             print(f"[tmg] pool already complete: {output}", flush=True)
             return done
 
-    states, changed = _inspect_chunks(generator, chunks, output)      # inspect every chunk before anything runs
+    states, changed = _inspect_chunks(generator, chunks, output, own)  # inspect every chunk before anything runs
     if changed:
         if str(generation.get("on_config_change", "error")) != "rebuild":
             raise PoolError("finished chunks differ from the requested configuration (set generation.on_config_change="
                             "rebuild to regenerate them):\n  " + "\n  ".join(changed))
         for chunk in chunks:
-            if states[chunk.index] == "changed":
+            if states[chunk.index] == "changed" and (own is None or chunk.index in own):
                 shutil.rmtree(chunk.folder(output))
                 states[chunk.index] = "absent"
 
@@ -244,7 +260,7 @@ def run_pool(cfg) -> dict:
     write_json(output / POOL_PLAN, {"chunks": plan_as_dict(chunks), "generator": generator.name})
     write_provenance(output, {"command": "generate", "output": str(output)})
 
-    pending = [c for c in chunks if states[c.index] != "done"]
+    pending = [c for c in chunks if states[c.index] != "done" and (own is None or c.index in own)]
     workers, explained = resolve_workers(cluster.get("workers", "auto"), int(cluster.get("max_workers", 16)))
     print(f"[tmg] pool {output}: {len(chunks)} chunks, {len(chunks) - len(pending)} done, {len(pending)} to run; "
           f"workers {explained}", flush=True)
@@ -252,4 +268,10 @@ def run_pool(cfg) -> dict:
     failed = [r for r in results if not r["ok"]]
     if failed:
         raise PoolError(f"{len(failed)} chunk(s) failed; see " + ", ".join(r["log"] for r in failed))
+    if own is not None:
+        waiting = [c.name for c in chunks if not chunk_is_done(c.folder(output))]
+        if waiting:
+            print(f"[tmg] pool shard {shard[0]}/{shard[1]} done; {len(waiting)} chunk(s) of other shards still running, "
+                  f"DONE.json is written by the last runner", flush=True)
+            return {"partial": True, "shard": list(shard), "waiting": waiting}
     return _summarize(plain, generator, chunks, output)
