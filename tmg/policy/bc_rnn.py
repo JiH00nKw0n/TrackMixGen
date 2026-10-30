@@ -56,6 +56,10 @@ class BCRNNConfig(PreTrainedConfig):
         super().__post_init__()
         if self.seq_length < 1:
             raise ValueError("seq_length must be >= 1")
+        if self.crop_shape is not None:
+            # the policy YAML gives a list ([76, 76]); draccus cannot encode a list as the declared tuple-or-None field, so
+            # save_pretrained would fail at the first checkpoint
+            self.crop_shape = tuple(int(v) for v in self.crop_shape)
 
     def get_optimizer_preset(self) -> AdamConfig:
         """Adam, lr 1e-4, no weight decay (robomimic ``optim_params.policy``)."""
