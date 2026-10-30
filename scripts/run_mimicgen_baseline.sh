@@ -12,8 +12,7 @@
 #   with CPGEN_WORKERS chunk processes; the fixed scenes are drawn after the dataset, from its env_args)
 # Variables: CLUSTER (local), GPU (0: CUDA device of training, policy servers and CP-Gen's planner), GENERATOR (mimicgen), TASKS
 #   (the generator's tasks), CPGEN_WORKERS (16), POLICIES
-#   ("diffusion_policy bc_rnn"), SEEDS ("202601 202602 202603"), SIZE (500, decided 2026-10-30; the first attempt counts scale
-#   with it), POOL_LANES (2: pools generated at the same time),
+#   ("diffusion_policy bc_rnn"), SEEDS ("202601 202602 202603"), SIZE (1000), POOL_LANES (2: pools generated at the same time),
 #   POLICY_PARALLEL (2: policy pipelines on the GPU at the same time), VAL_PARALLEL (4: checkpoints validated at a time per run),
 #   TEST_SHARDS (6: parallel shards of the 300 test scenes), SELECTION (official: the generator's source selection rule; ours = a source
 #   chosen at random for every subtask), ONLY_GENERATION (1: stop after the datasets), BUNDLE_NAME,
@@ -26,12 +25,12 @@ GENERATOR=${GENERATOR:-mimicgen}
 if [ "$GENERATOR" = cpgen ]; then DEFAULT_TASKS="three_piece_assembly hammer_cleanup mug_cleanup threading coffee"; IMAGE=cpgen
 else DEFAULT_TASKS="three_piece_assembly square stack_three mug_cleanup hammer_cleanup threading coffee"; IMAGE=robosuite; fi
 TASKS=${TASKS:-$DEFAULT_TASKS}   # longest pools first
-POLICIES=${POLICIES:-"diffusion_policy bc_rnn"}; SEEDS=${SEEDS:-"202601 202602 202603"}; SIZE=${SIZE:-500}
+POLICIES=${POLICIES:-"diffusion_policy bc_rnn"}; SEEDS=${SEEDS:-"202601 202602 202603"}; SIZE=${SIZE:-1000}
 POOL_LANES=${POOL_LANES:-2}; POLICY_PARALLEL=${POLICY_PARALLEL:-2}; VAL_PARALLEL=${VAL_PARALLEL:-4}; TEST_SHARDS=${TEST_SHARDS:-6}
 SCENE=ours; METHOD=none; OBSERVATION=image; SELECTION=${SELECTION:-official}
 GENERATION=${GENERATION:-pool_robosuite_image}; GEN_OVERRIDES=${GEN_OVERRIDES:-}; TRAIN_OVERRIDES=${TRAIN_OVERRIDES:-}; EVAL_EXTRA=${EVAL_EXTRA:-}
-# attempts for 1,000 successes per task (scaled to SIZE below): about 1.1x the attempts that gave 1,000 successes in the 2026-10
-# low-dim pools (per-subtask random selection); the pool is extended by 25 % steps until it holds SIZE successes, so a lower success rate only costs time
+# first attempt counts per task: about 1.1x the attempts that gave 1,000 successes in the 2026-10 low-dim pools (per-subtask random
+# selection); the pool is extended by 25 % steps until it holds SIZE successes, so a lower success rate only costs time
 declare -A ATTEMPTS=( [coffee]=2500 [threading]=6250 [hammer_cleanup]=7000 [mug_cleanup]=8750 [stack_three]=9500 [square]=15000 [three_piece_assembly]=17000 )
 if [ "$GENERATOR" = cpgen ]; then
   # CP-Gen: Coffee gave 47/200 (23.5 %) in the 2026-10-29 smoke pool (scene ours, official selection); the other tasks start at
@@ -39,7 +38,6 @@ if [ "$GENERATOR" = cpgen ]; then
   ATTEMPTS=( [coffee]=4750 [threading]=5000 [hammer_cleanup]=5000 [mug_cleanup]=5000 [three_piece_assembly]=5000 )
   POOL_LANES=1; GEN_OVERRIDES="cluster.max_workers=${CPGEN_WORKERS:-16} $GEN_OVERRIDES"
 fi
-for task in "${!ATTEMPTS[@]}"; do ATTEMPTS[$task]=$(( (ATTEMPTS[$task] * SIZE / 1000 + 249) / 250 * 250 )); done   # whole chunks of 250
 if [ "${MINI:-0}" = 1 ]; then
   GENERATION=test/pilot50; SIZE=10; VAL_PARALLEL=1; TEST_SHARDS=2; POLICY_PARALLEL=1
   GEN_OVERRIDES="generation.attempts=200 generation.chunk=50 $GEN_OVERRIDES"
