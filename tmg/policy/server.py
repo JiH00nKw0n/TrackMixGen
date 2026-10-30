@@ -27,6 +27,7 @@ from tmg.core.features import ENV_STATE, STATE, TASK, camera_of, image_feature
 from tmg.core.layout import PRETRAINED_DIR
 from tmg.core.wire import MAX_MESSAGE, pack, unpack
 from tmg.policy.io import load_io
+from tmg.policy import rotation
 from tmg.policy.lerobot_policies import load_policy, policy_name_of
 
 
@@ -45,7 +46,9 @@ class PolicyRunner:
         self.cameras = [camera_of(k) for k in cfg.image_features]
         self.state_dim = int(cfg.robot_state_feature.shape[0])
         self.env_state_dim = int(cfg.env_state_feature.shape[0]) if cfg.env_state_feature is not None else 0
-        self.action_dim = int(cfg.action_feature.shape[0])
+        # a policy trained on 6D-rotation actions (CP-Gen, tmg.policy.rotation) answers in the environment's 7 numbers
+        self.action_rotation = rotation.load(self.checkpoint)
+        self.action_dim = int(cfg.action_feature.shape[0]) - (3 if self.action_rotation == rotation.ROTATION_6D else 0)
         self._lock = asyncio.Lock()
 
     def info(self) -> dict:
@@ -75,8 +78,8 @@ class PolicyRunner:
             batch[TASK] = [self.task]
         batch = self.io.prepare(batch)
         action = self.policy.select_action(batch)
-        action = self.io.postprocess(action)
-        return action[0].detach().cpu().numpy().astype(np.float32)
+        action = self.io.postprocess(action)[0].detach().cpu().numpy().astype(np.float32)
+        return rotation.decode(action) if self.action_rotation == rotation.ROTATION_6D else action
 
     async def handle(self, websocket):
         """Serve one connection until it closes."""

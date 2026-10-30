@@ -160,3 +160,11 @@ class SyntheticDataGenerator(ABC):
     def chunk_environment(self) -> dict:
         """Extra environment variables of a chunk process."""
         return {}
+
+    def prepare_selection(self, chosen: list[dict], *, pool: Path, output: Path, observation: dict) -> tuple[list[dict], dict | None]:
+        """Step of ``tmg dataset`` between the selection and the writing (CP-Gen: the noisy-state replay).
+
+        Returns:
+            The candidates to write (by default the chosen ones as they are) and a summary for the sidecar, or None.
+        """
+        return chosen, None

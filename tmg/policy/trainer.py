@@ -54,7 +54,9 @@ from tmg.core.layout import (  # noqa: F401  re-exported: server, tests and scri
 )
 from tmg.core.provenance import write_provenance
 from tmg.core.seeding import seed_all
+from tmg.core.features import ACTION
 from tmg.data.loader import FrameDataset, TrajectoryStore, collate, compute_stats
+from tmg.policy import rotation
 from tmg.policy.ema import EMA
 from tmg.policy.io import PolicyIO, make_io
 from tmg.policy.lerobot_policies import build_optimizer, build_policy, task_policy_overrides
@@ -102,7 +104,7 @@ def list_checkpoints(run_dir: Path) -> list[Path]:
 
 
 def save_checkpoint(run_dir: Path, *, update: int, epoch: int, policy, ema: EMA | None, io: PolicyIO,
-                    optimizer, scheduler, loss: float) -> Path:
+                    optimizer, scheduler, loss: float, action_rotation: str = rotation.AXIS_ANGLE) -> Path:
     """Write ``checkpoints/<update>/`` (layout in the module docstring) and return its folder."""
     folder = checkpoint_dir(run_dir, update)
     tmp = folder.with_name(folder.name + ".part")
@@ -112,6 +114,7 @@ def save_checkpoint(run_dir: Path, *, update: int, epoch: int, policy, ema: EMA 
     to_save = ema.model if ema is not None else policy
     to_save.save_pretrained(str(tmp / PRETRAINED_DIR))
     io.save(tmp)
+    rotation.save(tmp, action_rotation)
     torch.save({"update": update, "epoch": epoch, "model": policy.state_dict(), "optimizer": optimizer.state_dict(),
                 "scheduler": scheduler.state_dict() if scheduler is not None else None,
                 "ema": ema.state_dict() if ema is not None else None,
@@ -174,6 +177,7 @@ class TrainSetup:
     validation_cmd: str | None
     start: int                     # update count resumed from (0 for a fresh run)
     checkpoints: list[str] = field(default_factory=list)   # checkpoint folders so far (resumed ones included)
+    action_rotation: str = rotation.AXIS_ANGLE             # rotation encoding of the actions (tmg.policy.rotation)
 
 
 def _setup(cfg) -> TrainSetup:
@@ -192,6 +196,10 @@ def _setup(cfg) -> TrainSetup:
 
     observation = str(plain["observation"]["name"])
     store = TrajectoryStore.load(Path(plain["dataset"]["path"]), action_key=str(training.get("action_key", "actions")))
+    # absolute pose actions (CP-Gen): the authors' 6D rotation, normalized only in the position (tmg.policy.rotation)
+    action_rotation = rotation.check(str((plain.get("generator") or {}).get("action_rotation") or rotation.AXIS_ANGLE))
+    if action_rotation == rotation.ROTATION_6D:
+        store.actions = [rotation.encode(a) for a in store.actions]
     features = dataset_features(store, observation)
     overrides = task_policy_overrides(plain["task"], str(policy_cfg["name"]))
     if overrides:
@@ -199,7 +207,16 @@ def _setup(cfg) -> TrainSetup:
     policy = build_policy(policy_cfg, features, device, observation, overrides)
     policy.train()
     config = policy.config
-    io = make_io(str(policy_cfg["name"]), config, compute_stats(store), device)
+    stats = compute_stats(store)
+    if action_rotation == rotation.ROTATION_6D:
+        # as the authors: the position min-max to [-1, 1], the 6D rotation and the gripper unchanged. This also holds for
+        # BC-RNN, whose identity action mode suits MimicGen's delta actions but whose tanh means cannot reach CP-Gen's
+        # absolute positions (heights 0.83-1.17 m)
+        from lerobot.configs.types import NormalizationMode
+
+        config.normalization_mapping = {**config.normalization_mapping, "ACTION": NormalizationMode.MIN_MAX}
+        rotation.identity_dims(stats, ACTION)
+    io = make_io(str(policy_cfg["name"]), config, stats, device)
     dataset = FrameDataset(store, obs_delta=config.observation_delta_indices, action_delta=config.action_delta_indices or [0],
                            drop_n_last_frames=int(getattr(config, "drop_n_last_frames", 0) or 0),
                            task=str(plain["task"].get("instruction")) if plain["task"].get("instruction") else None)
@@ -226,7 +243,7 @@ def _setup(cfg) -> TrainSetup:
                       observation=observation, store=store, features=features, policy=policy, io=io, dataset=dataset,
                       batch_size=batch_size, updates=updates, optimizer=optimizer, scheduler=scheduler, ema=ema, clip=clip,
                       per_epoch=per_epoch, ckpt_every=ckpt_every, use_amp=use_amp, scaler=scaler, validation_cmd=validation_cmd,
-                      start=start, checkpoints=[str(p) for p in existing])
+                      start=start, checkpoints=[str(p) for p in existing], action_rotation=action_rotation)
 
 
 def _train_step(s: TrainSetup, batch: dict) -> tuple[float, float]:
@@ -302,7 +319,8 @@ def train(cfg) -> dict:
             epoch_log.reset()
             if update % s.ckpt_every == 0 or update == s.updates:
                 folder = save_checkpoint(s.run_dir, update=update, epoch=epoch, policy=s.policy, ema=s.ema, io=s.io,
-                                         optimizer=s.optimizer, scheduler=s.scheduler, loss=row["loss"])
+                                         optimizer=s.optimizer, scheduler=s.scheduler, loss=row["loss"],
+                                         action_rotation=s.action_rotation)
                 s.checkpoints.append(str(folder))
                 print(f"[tmg] checkpoint {folder}", flush=True)
                 if s.validation_cmd:

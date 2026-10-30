@@ -112,6 +112,16 @@ class CPGenGenerator(RobosuiteGenerator):
         return {"attempts": len(summary["lines"]), "successes": successes, "exported_episodes": exported,
                 "generated_hdf5": str(rendered) if rendered.exists() else None}
 
+    def prepare_selection(self, chosen, *, pool, output, observation):
+        """The authors' noisy-state replay and re-rendering of the chosen successes (``noisy_replay``), when the
+        generator config enables it (``noisy_state_replay.enabled``)."""
+        cfg = dict(self.generator_cfg.get("noisy_state_replay") or {})
+        if not cfg.get("enabled"):
+            return chosen, None
+        from tmg.generation.generators.cpgen.noisy_replay import replay_selection
+
+        return replay_selection(chosen, pool=Path(pool), output=Path(output), cfg=cfg, observation=observation)
+
     def demo_layout(self) -> dict:
         return {"demo_glob": GENERATED_OBS, "image_key": "{cam}_image", "actions_key": "actions", "states_key": "states",
                 "labels_from_records": False, "success_only_file": True}

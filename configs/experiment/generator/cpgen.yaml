@@ -13,10 +13,19 @@ source_root: ${oc.env:TMG_CPGEN_SRC,/opt/src/cpgen}   # checkout: working direct
 graft_hashes: {generate_demo: a497e9da6ef4f84624c9646fd49ee55fae1dedaa93e428c90f8fa312972b40e2}
 # demo_aug.generate.Config fields applied to every task (after the task's). The authors' launcher
 # (scripts/pipeline/run_datagen_and_training.sh) sets the robot start-pose noise to Gaussian 0.06; the Config default is 0.02.
-# Its other generation flags equal the Config defaults. Its optional add-noise step (noisy replay of the successes, "meant
-# for latter project" per its comment) is not part of the generation we reproduce.
+# Its other generation flags equal the Config defaults.
 config:
   initialization: {initialization_noise_type: gaussian, initialization_noise_magnitude: 0.06}
+# The launcher's add-noise and render-rgb steps, run by `tmg dataset` on the selected successes
+# (tmg/generation/generators/cpgen/noisy_replay.py): every released training dataset is their output
+# ("...-original-action-noisy-state-action-std-0.03-rgb-84-84.hdf5"), so the policies train on images rendered from
+# states replayed with action noise 0.03, labelled with the original actions. num_processes is the launcher's 12;
+# render_processes splits the rendering (it does not change the output).
+# Its actions are absolute end-effector poses (position, axis-angle, gripper). The authors' training turns the rotation
+# into the continuous 6D representation and normalizes only the position (tmg/policy/rotation.py); so does ours.
+action_rotation: rotation_6d
+noisy_state_replay: {enabled: true, num_retries: 6, action_noise_std: 0.03, num_processes: 12, render_processes: 12,
+                     done_mode: 2, compress: true}
 # CP-Gen replays no source segment (it re-solves constraints), so source mixing has no counterpart: the mixing
 # part of every method is off. Its saved actions are already noise-free, so labels are pre_noise for every method.
 method_overrides:
