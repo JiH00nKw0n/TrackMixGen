@@ -49,7 +49,7 @@ else
   # low-dim pools
   declare -A ATTEMPTS=( [coffee]=2500 [threading]=6250 [hammer_cleanup]=7000 [mug_cleanup]=8750 [stack_three]=9500 [square]=15000 [three_piece_assembly]=17000 )
 fi
-for t in "${!ATTEMPTS[@]}"; do ATTEMPTS[$t]=$(( (ATTEMPTS[$t] * SIZE / 1000 + 249) / 250 * 250 )); done   # whole chunks of 250
+for task in "${!ATTEMPTS[@]}"; do ATTEMPTS[$task]=$(( (ATTEMPTS[$task] * SIZE / 1000 + 249) / 250 * 250 )); done   # whole chunks of 250
 if [ "${MINI:-0}" = 1 ]; then
   GENERATION=test/pilot50; SIZE=${MINI_SIZE:-10}; LOG_NAME=${LOG_NAME}_mini
   POOL_OVERRIDES="generation.chunk=${MINI_CHUNK:-50} generation.protocol.camera_names=[] $POOL_OVERRIDES"
@@ -64,8 +64,7 @@ M() { make -s -C "$REPO" "$@"; }
 common() { echo "GENERATOR=$GENERATOR IMAGE=$IMAGE TASK=$1 SCENE=$SCENE SELECTION=$SELECTION CLUSTER=$CLUSTER"; }
 ranking_file() { echo "$REPO/configs/experiment/generator/$GENERATOR/ranking/$1.yaml"; }
 has_ranking() {   # a 3,000-attempt ranking file (MINI: any ranking file, so a check can run before the ranking pools end)
-  for t in "${!ATTEMPTS[@]}"; do ATTEMPTS[$t]=$(( (ATTEMPTS[$t] * SIZE / 1000 + 249) / 250 * 250 )); done   # whole chunks of 250
-if [ "${MINI:-0}" = 1 ]; then [ -f "$(ranking_file $1)" ]; else grep -q "3000 attempts" "$(ranking_file $1)" 2>/dev/null; fi
+  if [ "${MINI:-0}" = 1 ]; then [ -f "$(ranking_file $1)" ]; else grep -q "3000 attempts" "$(ranking_file $1)" 2>/dev/null; fi
 }
 rank_pool_done() { [ -f "$DATA_ROOT/pools/$GENERATOR/$1/$SCENE/$SELECTION/none/rank_human_demos/DONE.json" ]; }
 pool_successes() {   # successes recorded in the pool's DONE.json, 0 when unfinished
