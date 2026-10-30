@@ -58,6 +58,7 @@ from tmg.core.features import ACTION
 from tmg.data.loader import FrameDataset, TrajectoryStore, collate, compute_stats
 from tmg.policy import rotation
 from tmg.policy.ema import EMA
+from tmg.policy.storage import prune_training_states
 from tmg.policy.io import PolicyIO, make_io
 from tmg.policy.lerobot_policies import build_optimizer, build_policy, task_policy_overrides
 
@@ -195,7 +196,8 @@ def _setup(cfg) -> TrainSetup:
     seed_all(int(plain["seed"]))
 
     observation = str(plain["observation"]["name"])
-    store = TrajectoryStore.load(Path(plain["dataset"]["path"]), action_key=str(training.get("action_key", "actions")))
+    store = TrajectoryStore.load(Path(plain["dataset"]["path"]), action_key=str(training.get("action_key", "actions")),
+                                 image_cache=str(training.get("cache", "ram")))
     # absolute pose actions (CP-Gen): the authors' 6D rotation, normalized only in the position (tmg.policy.rotation)
     action_rotation = rotation.check(str((plain.get("generator") or {}).get("action_rotation") or rotation.AXIS_ANGLE))
     if action_rotation == rotation.ROTATION_6D:
@@ -321,6 +323,8 @@ def train(cfg) -> dict:
                 folder = save_checkpoint(s.run_dir, update=update, epoch=epoch, policy=s.policy, ema=s.ema, io=s.io,
                                          optimizer=s.optimizer, scheduler=s.scheduler, loss=row["loss"],
                                          action_rotation=s.action_rotation)
+                if s.training.get("keep_training_states", "all") == "last":
+                    prune_training_states(s.run_dir, folder)
                 s.checkpoints.append(str(folder))
                 print(f"[tmg] checkpoint {folder}", flush=True)
                 if s.validation_cmd:

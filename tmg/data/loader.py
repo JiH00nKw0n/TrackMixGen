@@ -37,6 +37,39 @@ from tmg.core.layout import indexed_keys
 from tmg.data.images import camera_obs_key
 
 
+class H5Frames:
+    """Read only the requested frames; share one read-only file handle per store."""
+
+    def __init__(self, owner, key, shape):
+        self.owner, self.key, self.shape = owner, key, tuple(shape)
+
+    def __len__(self):
+        return self.shape[0]
+
+    def __getitem__(self, indices):
+        if self.owner[1] is None:
+            self.owner[1] = h5py.File(self.owner[0], "r", rdcc_nbytes=8 * 1024**2)
+        ds = self.owner[1][self.key]
+        if isinstance(indices, (slice, int, np.integer)):
+            return np.asarray(ds[indices], dtype=np.uint8)
+        # h5py requires increasing, unique indices; edge padding requires duplicates.
+        indices = np.asarray(indices)
+        if indices.ndim != 1:
+            raise TypeError("frame indices must be one-dimensional")
+        indices = np.where(indices < 0, indices + len(self), indices)
+        if np.any(indices < 0) or np.any(indices >= len(self)):
+            raise IndexError("frame index out of range")
+        unique, inverse = np.unique(indices, return_inverse=True)
+        if not len(unique):
+            return np.empty((0, *self.shape[1:]), dtype=np.uint8)
+        # Image-sized HDF5 point selections are slow even for adjacent frames.
+        # Read the same frames as contiguous slices, then restore order and padding.
+        runs = np.split(unique, np.flatnonzero(np.diff(unique) != 1) + 1)
+        frames = np.concatenate([np.asarray(ds[int(run[0]):int(run[-1]) + 1], dtype=np.uint8)
+                                 for run in runs])
+        return frames[inverse]
+
+
 @dataclass
 class TrajectoryStore:
     """Every demo of a common hdf5 held in RAM."""
@@ -51,7 +84,7 @@ class TrajectoryStore:
 
     @classmethod
     def load(cls, path: Path, *, cameras: Sequence[str] | None = None, action_key: str = "actions",
-             demos: Iterable[str] | None = None) -> TrajectoryStore:
+             demos: Iterable[str] | None = None, image_cache: str = "ram") -> TrajectoryStore:
         """Read a dataset file.
 
         Args:
@@ -60,6 +93,9 @@ class TrajectoryStore:
             action_key: ``actions`` (the method's label), ``actions_executed`` or ``actions_pre_noise``.
             demos: demo keys to load (default: all, in index order).
         """
+        if image_cache not in {"ram", "hdf5"}:
+            raise ValueError(f"unsupported image cache: {image_cache}")
+        owner = [str(path), None]
         images: dict[str, list[np.ndarray]] = {}
         state, actions, lengths = [], [], []
         env_state: list[np.ndarray] | None = None
@@ -76,7 +112,9 @@ class TrajectoryStore:
                 g = data[key]
                 for cam in cams:
                     # the dataset stores a camera under the generator's own obs key: MimicGen "<cam>_image", Isaac Lab "<cam>"
-                    images[cam].append(np.asarray(g["obs"][camera_obs_key(g["obs"], cam)], dtype=np.uint8))
+                    ds = g["obs"][camera_obs_key(g["obs"], cam)]
+                    images[cam].append(H5Frames(owner, ds.name, ds.shape) if image_cache == "hdf5"
+                                       else np.asarray(ds, dtype=np.uint8))
                 state.append(np.asarray(g["obs"]["robot_state"], dtype=np.float32))
                 if env_state is not None:
                     env_state.append(np.asarray(g["obs"]["object_state"], dtype=np.float32))
@@ -242,11 +280,21 @@ def compute_stats(store: TrajectoryStore, *, max_image_frames: int = 20000, seed
         stats[ENV_STATE] = vec_stats(np.concatenate(store.env_state))
     rng = np.random.default_rng(seed)
     for cam in store.cameras:
-        frames = np.concatenate(store.images[cam])
-        if len(frames) > max_image_frames:
-            frames = frames[np.sort(rng.choice(len(frames), size=max_image_frames, replace=False))]
-        x = frames.astype(np.float32) / 255.0
+        total = sum(len(x) for x in store.images[cam])
+        indices = np.sort(rng.choice(total, size=max_image_frames, replace=False)) if total > max_image_frames else np.arange(total)
+        x = np.empty((len(indices), *store.image_shape), dtype=np.float32)
+        offset, filled = 0, 0
+        for frames in store.images[cam]:
+            local = indices[(indices >= offset) & (indices < offset + len(frames))] - offset
+            offset += len(frames)
+            for start in range(0, len(local), 64):
+                batch = frames[local[start:start + 64]].astype(np.float32) / 255.0
+                x[filled:filled + len(batch)] = batch
+                filled += len(batch)
+        assert filled == len(indices)
+        # Same dtype, shape, order and reductions as main's compute_stats.
         per_channel = {"min": x.min(axis=(0, 1, 2)), "max": x.max(axis=(0, 1, 2)), "mean": x.mean(axis=(0, 1, 2)),
                        "std": x.std(axis=(0, 1, 2))}
+        del x
         stats[image_feature(cam)] = {k: v.astype(np.float32).reshape(3, 1, 1) for k, v in per_channel.items()}
     return stats

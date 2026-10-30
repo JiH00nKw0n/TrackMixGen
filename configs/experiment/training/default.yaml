@@ -15,6 +15,7 @@ by_policy:
                                                 # checkpoint) is NOT implemented. π0 is aligned with openpi before it runs
 updates_per_epoch: 500            # one logging epoch
 checkpoint_every_epochs: 20       # write a checkpoint (and request validation) every 10,000 updates
+keep_training_states: all         # last retains all inference weights and only the latest optimizer state
 keep_checkpoints: all             # all | last (the selection needs all of them)
 grad_clip_norm: 1000.0            # L2 gradient-norm clip for every policy (BC-RNN pre-noise labels diverged without it).
                                   # robomimic and the official Diffusion Policy do not clip. openpi clips at 1.0, which

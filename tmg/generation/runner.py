@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 from collections.abc import Mapping
@@ -71,8 +72,19 @@ def _chunk_state(folder: Path, spec: ChunkSpec) -> tuple[str, list[str]]:
     return "done", []
 
 
+def _relocate_chunk_paths(value, old: Path, new: Path):
+    if isinstance(value, dict):
+        return {k: _relocate_chunk_paths(v, old, new) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_relocate_chunk_paths(v, old, new) for v in value]
+    if isinstance(value, str) and (value == str(old) or value.startswith(str(old) + '/')):
+        return str(new) + value[len(str(old)):]
+    return value
+
+
 def _relocate_spec(spec: ChunkSpec, scratch: Path, folder: Path) -> ChunkSpec:
     """Rewrite the paths of a spec prepared in ``scratch`` as if it had been prepared in ``folder``."""
+    spec.extra = _relocate_chunk_paths(spec.extra, scratch, folder)
     spec.folder = str(folder)
     spec.records_dir = str(folder / RECORDS_DIR)
     spec.generator_config = str(folder / Path(spec.generator_config).name)
@@ -147,6 +159,10 @@ def launch_chunk(generator, chunk: Chunk, folder: Path, *, env: Mapping[str, str
         spec.extra.update(extra)
     spec_path = write_json(folder / CHUNK_SPEC, asdict(spec))
     cmd = generator.chunk_command(spec, spec_path)
+    capacity = Path(os.environ.get('TMG_RESULTS_ROOT', '')) / 'reports/evaluation_capacity/selected.json'
+    if env.get('CLUSTER') == 'pod' and capacity.is_file():
+        guard = Path(__file__).resolve().parents[2] / 'scripts/pod_resource_guard.py'
+        cmd = [sys.executable, str(guard), '--kind', 'generate', '--task', spec.task['name'], '--', *cmd]
     start = time.time()
     with open(log, "w") as lf:
         code = subprocess.run(cmd, stdout=lf, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=env,
@@ -234,9 +250,7 @@ def run_pool(cfg) -> dict:
     problems = generator.check_sources()
     if problems:
         raise PoolError("; ".join(problems))
-    free = _free_gib(output)
-    if free < float(cluster.get("min_free_disk_gib", 0)):
-        raise PoolError(f"only {free:.1f} GiB free under {output}; cluster.min_free_disk_gib is {cluster['min_free_disk_gib']}")
+
 
     output.mkdir(parents=True, exist_ok=True)
     (output / LOGS_DIR).mkdir(exist_ok=True)
@@ -245,6 +259,10 @@ def run_pool(cfg) -> dict:
         if done.get("plan") == plan_as_dict(chunks):
             print(f"[tmg] pool already complete: {output}", flush=True)
             return done
+
+    free = _free_gib(output)
+    if free < float(cluster.get("min_free_disk_gib", 0)):
+        raise PoolError(f"only {free:.1f} GiB free under {output}; cluster.min_free_disk_gib is {cluster['min_free_disk_gib']}")
 
     states, changed = _inspect_chunks(generator, chunks, output, own)  # inspect every chunk before anything runs
     if changed:
