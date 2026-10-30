@@ -14,6 +14,9 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 : "${TASK:?TASK=<generator/task> is required}"
 SCENE=${SCENE:-ours}; OBSERVATION=${OBSERVATION:-image}; CLUSTER=${CLUSTER:-local}; SPLIT=${SPLIT:-val}; GENERATOR=${GENERATOR:-mimicgen}
 PORT=${PORT:-8765}; SHARDS=${SHARDS:-1}; EXTRA=${EXTRA:-}; IMAGE=${IMAGE:-robosuite}
+# Cold checkpoints on the Pod's shared storage can take over three minutes to load.
+READY_ATTEMPTS=90
+[ "$CLUSTER" = pod ] && READY_ATTEMPTS=450
 if [ "$CLUSTER" = pod ] && [ -z "${TMG_RESOURCE_OWNER:-}" ] && [ -f "${TMG_RESULTS_ROOT:-}/reports/evaluation_capacity/selected.json" ]; then
   exec python3 "$REPO/scripts/pod_resource_guard.py" --kind eval --task "$TASK" --evaluations "$SHARDS" -- bash "$0"
 fi
@@ -34,10 +37,10 @@ for p in $PORTS; do
   STARTED_PORTS="$STARTED_PORTS $p"
 done
 for p in $PORTS; do
-  for i in $(seq 1 90); do
+  for i in $(seq 1 "$READY_ATTEMPTS"); do
     if make -s -C "$REPO" serve-ready CLUSTER="$CLUSTER" PORT="$p" >/dev/null 2>&1; then break; fi
     sleep 2
-    [ "$i" = 90 ] && { echo "[evaluate] server on port $p did not come up"; exit 1; }
+    [ "$i" = "$READY_ATTEMPTS" ] && { echo "[evaluate] server on port $p did not come up"; exit 1; }
   done
 done
 APPEND=""
