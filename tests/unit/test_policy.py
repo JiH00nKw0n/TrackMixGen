@@ -105,6 +105,57 @@ def test_bc_rnn_net_shapes_and_rollout_state():
     assert a.shape == (2, 7) and a.abs().max() <= 1.0 + 1e-3 and rnn_state[0].shape == (2, 2, 16)
 
 
+def test_bc_rnn_net_without_crop_sees_the_whole_image():
+    # crop_shape None (the Isaac Lab tasks' rule): no crop in training or evaluation, and the spatial softmax is sized for
+    # the whole image. ResNet18's trunk divides the side by 32: 96 -> 3 without a crop, 64 -> 2 with a 64x64 crop.
+    torch = pytest.importorskip("torch")
+    pytest.importorskip("torchvision")
+    from tmg.policy.nets import BCRNNNet, BCRNNNetConfig, CropRandomizer
+
+    whole = BCRNNNet(BCRNNNetConfig(cameras=("a",), image_shape=(3, 96, 96), state_dim=4, action_dim=7, crop_shape=None,
+                                    rnn_hidden_dim=16, visual_feature_dim=8))
+    cropped = BCRNNNet(BCRNNNetConfig(cameras=("a",), image_shape=(3, 96, 96), state_dim=4, action_dim=7, crop_shape=(64, 64),
+                                      rnn_hidden_dim=16, visual_feature_dim=8))
+    enc = whole.encoders["a"]
+    assert isinstance(enc.crop, torch.nn.Identity) and (enc.pool.h, enc.pool.w) == (3, 3)
+    assert isinstance(cropped.encoders["a"].crop, CropRandomizer) and cropped.encoders["a"].pool.h == 2
+    x = torch.rand(2, 3, 96, 96)
+    whole.train()
+    assert torch.equal(enc.crop(x), x)
+    assert set(whole.state_dict()) == set(cropped.state_dict())          # the crop module adds no tensors
+    images, state, actions = {"a": torch.rand(2, 5, 3, 96, 96)}, torch.rand(2, 5, 4), torch.rand(2, 5, 7) * 2 - 1
+    loss = whole.loss(images, state, actions)
+    loss.backward()
+    assert torch.isfinite(loss) and enc.out.weight.grad is not None
+    whole.eval()
+    a, _ = whole.forward_step({"a": images["a"][:, 0]}, state[:, 0], whole.init_state(2, "cpu"))
+    assert a.shape == (2, 7)
+
+
+def test_bc_rnn_policy_without_crop_builds_trains_and_reloads(tmp_path):
+    # the task override crop_shape: null reaches BCRNNConfig as None; the policy trains one step and a saved checkpoint
+    # loads back with the same config and tensors (LeRobot's from_pretrained)
+    torch = pytest.importorskip("torch")
+    pytest.importorskip("lerobot")
+    from tmg.core.features import ACTION, STATE, image_feature
+    from tmg.policy.lerobot_policies import build_policy, policy_class
+
+    cfg = {"name": "bc_rnn", "params": {"crop_shape": [76, 76], "rnn_hidden_dim": 16, "seq_length": 3},
+           "by_observation": {"image": {}}}
+    features = {"cameras": ["agentview"], "image_shape": (3, 64, 64), "state_dim": 5, "env_state_dim": 0, "action_dim": 7}
+    policy = build_policy(cfg, features, "cpu", "image", overrides={"crop_shape": None})
+    assert policy.config.crop_shape is None and isinstance(policy.net.encoders["agentview"].crop, torch.nn.Identity)
+    batch = {image_feature("agentview"): torch.rand(2, 3, 3, 64, 64), STATE: torch.rand(2, 3, 5), ACTION: torch.rand(2, 3, 7) * 2 - 1}
+    loss, _ = policy(batch)
+    loss.backward()
+    assert torch.isfinite(loss)
+    policy.save_pretrained(tmp_path / "ckpt")
+    loaded = policy_class("bc_rnn").from_pretrained(tmp_path / "ckpt")
+    assert loaded.config.crop_shape is None and isinstance(loaded.net.encoders["agentview"].crop, torch.nn.Identity)
+    for k, v in policy.state_dict().items():
+        assert torch.equal(v, loaded.state_dict()[k]), k
+
+
 def test_bc_rnn_low_dim_net_has_no_encoders():
     torch = pytest.importorskip("torch")
     from tmg.policy.nets import BCRNNNet, BCRNNNetConfig
