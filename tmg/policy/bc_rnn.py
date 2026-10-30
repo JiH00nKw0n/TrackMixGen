@@ -39,7 +39,7 @@ class BCRNNConfig(PreTrainedConfig):
     """BC-RNN hyperparameters (MimicGen's BC-RNN image settings; see ``tmg.policy.nets``)."""
 
     seq_length: int = 10                     # training sequence length and rollout horizon of the hidden state
-    crop_shape: tuple[int, int] = (76, 76)
+    crop_shape: tuple[int, int] | None = (76, 76)   # None: no crop (the Isaac Lab tasks' policy_overrides)
     num_keypoints: int = 32
     visual_feature_dim: int = 64
     rnn_hidden_dim: int = 1000
@@ -100,7 +100,8 @@ class BCRNNPolicy(PreTrainedPolicy):
         self.net = BCRNNNet(BCRNNNetConfig(
             cameras=cameras, image_shape=tuple(int(v) for v in shape) if shape is not None else None,
             state_dim=int(config.robot_state_feature.shape[0]) + env_dim,
-            action_dim=int(config.action_feature.shape[0]), crop_shape=tuple(config.crop_shape),
+            action_dim=int(config.action_feature.shape[0]),
+            crop_shape=tuple(config.crop_shape) if config.crop_shape is not None else None,
             num_keypoints=config.num_keypoints, visual_feature_dim=config.visual_feature_dim,
             rnn_hidden_dim=config.rnn_hidden_dim, rnn_num_layers=config.rnn_num_layers, num_modes=config.num_modes,
             min_std=config.min_std, std_activation=config.std_activation, low_noise_eval=config.low_noise_eval))
