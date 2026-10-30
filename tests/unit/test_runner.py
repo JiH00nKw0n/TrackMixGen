@@ -306,6 +306,22 @@ def test_relocate_spec_rewrites_every_path_field_and_nothing_else():
     assert out.task == {"name": "square", "source": "/data/src.hdf5"} and out.extra == {"experiment": "out"}
 
 
+def test_relocate_spec_rewrites_chunk_paths_inside_extra():
+    # CP-Gen keeps the chunk's own paths in extra.cpgen_config; a finished chunk compared in a scratch folder must match
+    scratch, folder = Path("/scratch/tmp123/seed7"), Path("/pool/chunks/seed7")
+    spec = ChunkSpec(generator="cpgen", chunk={"index": 0, "seed": 7, "attempts": 2}, folder=str(scratch),
+                     records_dir=str(scratch / "records"), task={"name": "coffee"}, scene={"name": "ours"},
+                     method={"name": "none"}, protocol={}, generator_config="", expected_outputs=[],
+                     extra={"cpgen_config": {"save_dir": str(scratch / "generated"), "merge_demo_save_path": str(scratch / "generated.hdf5"),
+                                             "demo_path": "/data/sources/coffee.hdf5", "n_demos": 2},
+                            "list": [str(scratch / "a")], "other": "/scratch/tmp1234/x"})
+    out = runner._relocate_spec(spec, scratch, folder)
+    assert out.extra["cpgen_config"]["save_dir"] == "/pool/chunks/seed7/generated"
+    assert out.extra["cpgen_config"]["merge_demo_save_path"] == "/pool/chunks/seed7/generated.hdf5"
+    assert out.extra["cpgen_config"]["demo_path"] == "/data/sources/coffee.hdf5" and out.extra["cpgen_config"]["n_demos"] == 2
+    assert out.extra["list"] == ["/pool/chunks/seed7/a"] and out.extra["other"] == "/scratch/tmp1234/x"   # only whole path components
+
+
 def test_run_pool_shards_split_the_chunks_and_the_last_one_writes_done(pool, tmp_path):
     # two runners on one pool (one container per GPU): each runs the chunks of its index modulo 2, does not prepare the
     # other shard's unfinished chunks, and only the runner that finds every chunk done writes DONE.json
