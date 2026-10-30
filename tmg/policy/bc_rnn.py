@@ -38,7 +38,7 @@ class BCRNNConfig(PreTrainedConfig):
     """BC-RNN hyperparameters (MimicGen's BC-RNN image settings; see ``tmg.policy.nets``)."""
 
     seq_length: int = 10                     # training sequence length and rollout horizon of the hidden state
-    crop_shape: tuple[int, int] | None = (76, 76)
+    crop_shape: tuple[int, int] | None = (76, 76)   # None: no crop (the Isaac Lab tasks' policy_overrides)
     num_keypoints: int = 32
     visual_feature_dim: int = 64
     rnn_hidden_dim: int = 1000

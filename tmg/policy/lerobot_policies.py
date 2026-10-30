@@ -76,9 +76,9 @@ def resolve_crop(params: dict, features: dict) -> dict:
 
 
 def task_policy_overrides(task: dict, policy_name: str) -> dict:
-    """``task.policy_overrides.<policy name>``: per-task policy values taken from the task's official policy configs (for
-    example SoftMimicGen trains its image Diffusion Policy without a crop and its BC-RNN with a 76x76 crop on 128x128
-    images; Isaac Lab's GR1 image policies crop to 90% of the side). Empty when the task lists none."""
+    """``task.policy_overrides.<policy name>``: per-task policy values (for example the Isaac Lab tasks set ``crop_shape:
+    null`` for both image policies, the project rule of 2026-10-29, although SoftMimicGen's official BC-RNN crops 128x128
+    images to 76x76; MimicGen's tasks keep the 76x76 crop of the policy config). Empty when the task lists none."""
     blocks = (task or {}).get("policy_overrides") or {}
     return dict(blocks.get(policy_name) or {})
 
