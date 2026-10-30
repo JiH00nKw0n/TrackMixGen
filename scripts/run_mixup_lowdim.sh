@@ -11,7 +11,7 @@
 #   ranking pools are built by their own script on the planner GPU). A task whose ranking file already holds a 3,000-attempt
 #   ranking is skipped.
 # Stage 2: for every task and condition, one pool (generation pool_robosuite_lowdim) extended by 25 % steps until it holds
-#   SIZE successes, then its low-dim dataset of SIZE demonstrations. One pool at a time, each with the cluster's workers
+#   SIZE successes (a pool that already holds them, for example from the earlier 1,000-demonstration plan, is not generated again), then its low-dim dataset of SIZE demonstrations. One pool at a time, each with the cluster's workers
 #   (CP-Gen: CPGEN_WORKERS chunk processes, because every chunk runs cuRobo on the GPU).
 #
 #   CLUSTER=a100 scripts/run_mixup_lowdim.sh
@@ -20,14 +20,15 @@
 #   (MimicGen: hammer_cleanup mug_cleanup three_piece_assembly coffee threading square stack_three; CP-Gen: coffee threading
 #   mug_cleanup hammer_cleanup three_piece_assembly), RANK_TASKS (MimicGen: coffee threading square stack_three; CP-Gen: all
 #   its tasks), RANK_WAIT (0), CONDITIONS (the six conditions of the 2026-10-30 decision: mx_none mx_top1 mx_top5
-#   mx_success_a40 mx_transform mx_junction; the other mx_* files stay for the pools already made), SIZE (1000), RANK_WORKERS (12 per ranking pool), CPGEN_WORKERS
+#   mx_success_a40 mx_transform mx_junction; the other mx_* files stay for the pools already made), SIZE (500, decided
+#   2026-10-30; the first attempt counts scale with it), RANK_WORKERS (12 per ranking pool), CPGEN_WORKERS
 #   (24), SKIP_DATASET (1: pools only), MINI (1: toy scale for an end-to-end check: a MINI_ATTEMPTS-attempt pool (200) in
 #   chunks of MINI_CHUNK (50) in the folder pilot50 without images, MINI_SIZE-demonstration datasets (10), never extended;
 #   any committed or hand-made ranking file is accepted).
 # Resumable: finished pools and datasets are kept and skipped; a failed step is logged in FAILURES and the next one runs.
 set -uo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-CLUSTER=${CLUSTER:-a100}; SIZE=${SIZE:-1000}; GENERATOR=${GENERATOR:-mimicgen}
+CLUSTER=${CLUSTER:-a100}; SIZE=${SIZE:-500}; GENERATOR=${GENERATOR:-mimicgen}
 CONDITIONS=${CONDITIONS:-"mx_none mx_top1 mx_top5 mx_success_a40 mx_transform mx_junction"}
 RANK_WORKERS=${RANK_WORKERS:-12}; RANK_WAIT=${RANK_WAIT:-0}
 SCENE=ours; SELECTION=ours; GENERATION=pool_robosuite_lowdim; POOL_OVERRIDES=""
@@ -35,7 +36,8 @@ if [ "$GENERATOR" = cpgen ]; then
   IMAGE=cpgen; LOG_NAME=mixup_lowdim_cpgen
   TASKS=${TASKS:-"coffee threading mug_cleanup hammer_cleanup three_piece_assembly"}
   RANK_TASKS=${RANK_TASKS-$TASKS}
-  # Coffee gave 23.5 % in the 2026-10-29 smoke pool; the other tasks start at 5,000 attempts, as in the CP-Gen baseline driver
+  # attempts for 1,000 successes (scaled to SIZE below): Coffee gave 23.5 % in the 2026-10-29 smoke pool; the other tasks start
+  # at 5,000, as in the CP-Gen baseline driver
   declare -A ATTEMPTS=( [coffee]=4750 [threading]=5000 [mug_cleanup]=5000 [hammer_cleanup]=5000 [three_piece_assembly]=5000 )
   POOL_OVERRIDES="cluster.max_workers=${CPGEN_WORKERS:-24}"; RANK_WORKERS=${CPGEN_WORKERS:-24}
   [ -n "${GPU:-}" ] && export SINGULARITYENV_CUDA_VISIBLE_DEVICES=$GPU CUDA_VISIBLE_DEVICES=$GPU
@@ -43,9 +45,11 @@ else
   IMAGE=robosuite; LOG_NAME=mixup_lowdim
   TASKS=${TASKS:-"hammer_cleanup mug_cleanup three_piece_assembly coffee threading square stack_three"}
   RANK_TASKS=${RANK_TASKS-"coffee threading square stack_three"}
-  # first attempt count per task: about 1.1x the attempts that gave 1,000 successes in the 2026-10 low-dim pools
+  # attempts for 1,000 successes (scaled to SIZE below): about 1.1x the attempts that gave 1,000 successes in the 2026-10
+  # low-dim pools
   declare -A ATTEMPTS=( [coffee]=2500 [threading]=6250 [hammer_cleanup]=7000 [mug_cleanup]=8750 [stack_three]=9500 [square]=15000 [three_piece_assembly]=17000 )
 fi
+for t in "${!ATTEMPTS[@]}"; do ATTEMPTS[$t]=$(( (ATTEMPTS[$t] * SIZE / 1000 + 249) / 250 * 250 )); done   # whole chunks of 250
 if [ "${MINI:-0}" = 1 ]; then
   GENERATION=test/pilot50; SIZE=${MINI_SIZE:-10}; LOG_NAME=${LOG_NAME}_mini
   POOL_OVERRIDES="generation.chunk=${MINI_CHUNK:-50} generation.protocol.camera_names=[] $POOL_OVERRIDES"
@@ -60,7 +64,8 @@ M() { make -s -C "$REPO" "$@"; }
 common() { echo "GENERATOR=$GENERATOR IMAGE=$IMAGE TASK=$1 SCENE=$SCENE SELECTION=$SELECTION CLUSTER=$CLUSTER"; }
 ranking_file() { echo "$REPO/configs/experiment/generator/$GENERATOR/ranking/$1.yaml"; }
 has_ranking() {   # a 3,000-attempt ranking file (MINI: any ranking file, so a check can run before the ranking pools end)
-  if [ "${MINI:-0}" = 1 ]; then [ -f "$(ranking_file $1)" ]; else grep -q "3000 attempts" "$(ranking_file $1)" 2>/dev/null; fi
+  for t in "${!ATTEMPTS[@]}"; do ATTEMPTS[$t]=$(( (ATTEMPTS[$t] * SIZE / 1000 + 249) / 250 * 250 )); done   # whole chunks of 250
+if [ "${MINI:-0}" = 1 ]; then [ -f "$(ranking_file $1)" ]; else grep -q "3000 attempts" "$(ranking_file $1)" 2>/dev/null; fi
 }
 rank_pool_done() { [ -f "$DATA_ROOT/pools/$GENERATOR/$1/$SCENE/$SELECTION/none/rank_human_demos/DONE.json" ]; }
 pool_successes() {   # successes recorded in the pool's DONE.json, 0 when unfinished
@@ -97,7 +102,9 @@ for t in $TASKS; do
   M sources $(common $t) > "$LOG/sources_$t.log" 2>&1 || { fail "sources $t" "$LOG/sources_$t.log"; continue; }
   for m in $CONDITIONS; do
     attempts=${ATTEMPTS[$t]}
-    while :; do
+    if [ "$(pool_successes $t $m)" -ge "$SIZE" ]; then
+      log "[$t/$m] pool already holds $(pool_successes $t $m) successes, generation skipped"   # never re-plan a finished pool smaller
+    else while :; do
       log "[$t/$m] pool: $attempts attempts"
       M generate $(common $t) METHOD=$m GENERATION=$GENERATION OVERRIDES="generation.attempts=$attempts $POOL_OVERRIDES" >> "$LOG/pool_${t}_$m.log" 2>&1 \
         || { fail "pool $t/$m" "$LOG/pool_${t}_$m.log"; break; }
@@ -106,7 +113,7 @@ for t in $TASKS; do
       [ "$succ" -ge "$SIZE" ] && break
       [ "${MINI:-0}" = 1 ] && { fail "pool $t/$m (MINI: fewer than $SIZE successes in $attempts attempts)" "$LOG/pool_${t}_$m.log"; break; }
       attempts=$(( (attempts * 5 / 4 + 249) / 250 * 250 ))      # 25 % more, whole chunks of 250
-    done
+    done; fi
     [ "$(pool_successes $t $m)" -ge "$SIZE" ] || continue
     [ "${SKIP_DATASET:-0}" = 1 ] && continue
     M dataset $(common $t) METHOD=$m GENERATION=$GENERATION OBSERVATION=low_dim OVERRIDES="size=$SIZE" > "$LOG/dataset_${t}_$m.log" 2>&1 \
