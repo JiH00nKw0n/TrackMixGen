@@ -4,7 +4,7 @@
 받을 수 있다. 기준선이란 공식 MimicGen 생성기를 공식 원본 선택 방식, 행동 잡음, 보간 걸음 수로 돌려 시연을 만들고, 그 시연으로 정책을
 학습하고 평가하는 것이다. 생성, 학습, 평가는 모두 우리가 물체 배치 범위를 넓힌 장면 `ours`(1절)에서 돈다. 그래서 생성 단계부터
 공식 MimicGen 실험과 장면이 다르다. 학습과 평가에는 그 밖에도 우리 설정(영상 관측, 평가 상한 600걸음, 고정 평가 장면)을 쓴다. 실험은 과제마다 "공식 원본 시연 10개 내려받기, 공식 설정으로
-성공 시연 500개 이상 생성, 고정 평가 장면 만들기, 학습 데이터셋 500개 쓰기(2026-10-30 결정. 공식 MimicGen 실험은 1,000개다), 영상 Diffusion Policy와 영상 BC-RNN을 각각 시드
+성공 시연 1,000개 이상 생성, 고정 평가 장면 만들기, 학습 데이터셋 1,000개 쓰기, 영상 Diffusion Policy와 영상 BC-RNN을 각각 시드
 3개(202601, 202602, 202603)로 학습, 시드마다 검증 25장면으로 체크포인트 선택, 시험 300장면 평가" 순서로 진행한다. 명령
 하나(`scripts/run_mimicgen_baseline.sh`)가 전부를 돌리고, 중단되면 같은 명령을 다시 실행하면 끝난 단계는 건너뛰고 이어서 돈다.
 
@@ -64,19 +64,18 @@ Three의 `select_src_per_subtask: true` 하나이고, 우리 설정 작성기(`t
 | 시도 수 | 과제마다 다르다(아래). 성공 수를 보장하지 않고 정해진 수만큼 시도한 뒤 성공만 데이터셋에 쓴다 |
 | 실패 시도의 저장 | MimicGen의 실패 시연 파일(`demo_failed.hdf5`)은 쓰지 않는다. 모든 시도의 걸음별 기록과 성공 여부는 우리 기록(`records/`)에 남는다 |
 
-시도 수는 저차원 풀(2026-10, 하위작업별 무작위 선택)에서 성공 1,000개가 나오기까지 걸린 시도 수에 10%를 더한 값을 데이터셋 크기에
-비례해 줄인 값으로 시작한다. 데이터셋이 500개이므로 그 절반을 250회 단위로 올린 값이다. 풀의 성공 수가 500개에 못 미치면 스크립트가
-시도 수를 25%씩 늘려 이어서 생성한다(이미 끝난 묶음은 다시 만들지 않는다).
+시도 수는 저차원 풀(2026-10, 하위작업별 무작위 선택)에서 성공 1,000개가 나오기까지 걸린 시도 수에 10%를 더한 값으로 시작하고, 풀의
+성공 수가 1,000개에 못 미치면 스크립트가 시도 수를 25%씩 늘려 이어서 생성한다(이미 끝난 묶음은 다시 만들지 않는다).
 
 | 과제 | 처음 시도 수 | 저차원 풀에서 본 생성 성공률 (참고값, 선택 규칙이 다르다) |
 |---|---|---|
-| Coffee | 1,250 | 48.0% |
-| Threading | 3,250 | 18.4% |
-| Hammer Cleanup | 3,500 | 17.7% |
-| Mug Cleanup | 4,500 | 12.4% |
-| Stack Three | 4,750 | 11.4% |
-| Square | 7,500 | 7.0% |
-| Three Piece Assembly | 8,500 | 10.3% (원본 하나로 돌린 풀에서는 29.1%) |
+| Coffee | 2,500 | 48.0% |
+| Threading | 6,250 | 18.4% |
+| Hammer Cleanup | 7,000 | 17.7% |
+| Mug Cleanup | 8,750 | 12.4% |
+| Stack Three | 9,500 | 11.4% |
+| Square | 15,000 | 7.0% |
+| Three Piece Assembly | 17,000 | 10.3% (원본 하나로 돌린 풀에서는 29.1%) |
 
 장면(`scene=ours`, `configs/experiment/generator/mimicgen/scene/ours.yaml`)은 물체의 초기 배치 범위를 넓힌 것이다. 규칙은 MimicGen
 D1 범위의 중심을 두고 x와 y 폭을 두 배로 하되 탁자 중심에서 ±0.35 m를 넘지 않게 자르는 것이고, 회전 범위는 D1 값이다. Three Piece
@@ -343,7 +342,7 @@ driver_logs/                          드라이버 로그
 | 생성 묶음 시드 | 30001, 30002, ... (묶음 번호 순) | MimicGen의 `experiment.seed`. 같은 묶음은 같은 시드로 다시 만들어도 같은 시도를 낸다 |
 | 고정 장면 시드 | 202600 | 검증 25장면과 시험 300장면의 초기 배치 |
 | 학습 시드 | 202601, 202602, 202603 | 모형 초기화, 데이터 순서, 영상 자르기 위치 |
-| 데이터셋 시드 | 0 | 성공 시도 중 500개를 고르는 순서 (`n500_seed0.hdf5`) |
+| 데이터셋 시드 | 0 | 성공 시도 중 1,000개를 고르는 순서 (`n1000_seed0.hdf5`) |
 | 정책 평가 시드 | 평가 시드, 학습 시드, 장면 번호에서 유도 | Diffusion Policy의 잡음 표본 |
 
 학습은 GPU의 비결정성 때문에 같은 시드라도 비트 단위로 같지 않을 수 있다. 생성과 평가 장면은 결정적이다.
@@ -366,11 +365,11 @@ make resets GENERATOR=mimicgen TASK=coffee SCENE=ours CLUSTER=lab
 ```
 
 ```bash
-make dataset GENERATOR=mimicgen TASK=coffee SCENE=ours METHOD=none GENERATION=pool_robosuite_image OBSERVATION=image CLUSTER=lab OVERRIDES="size=500"
+make dataset GENERATOR=mimicgen TASK=coffee SCENE=ours METHOD=none GENERATION=pool_robosuite_image OBSERVATION=image CLUSTER=lab OVERRIDES="size=1000"
 ```
 
 ```bash
-make train GENERATOR=mimicgen TASK=coffee SCENE=ours METHOD=none GENERATION=pool_robosuite_image OBSERVATION=image POLICY=diffusion_policy SEED=202601 CLUSTER=lab OVERRIDES="dataset.size=500"
+make train GENERATOR=mimicgen TASK=coffee SCENE=ours METHOD=none GENERATION=pool_robosuite_image OBSERVATION=image POLICY=diffusion_policy SEED=202601 CLUSTER=lab OVERRIDES="dataset.size=1000"
 ```
 
 학습 뒤의 검증, 선택, 시험은 한 실행을 통째로 맡는 스크립트가 있다. 포트 블록(여기서는 8800부터 40개)은 다른 실행과 겹치지 않게 준다.
@@ -414,7 +413,7 @@ Diffusion Policy는 ResNet18 인코더 두 개와 U-Net을 처음부터 학습�
 - `finished chunks differ from the requested configuration`. 끝난 풀 묶음이 지금 설정과 다른 설정으로 만들어졌다는 뜻이다. 설정 파일을
   바꾼 뒤에 같은 풀을 이어 돌리면 난다. 의도한 변경이면 `OVERRIDES="generation.on_config_change=rebuild"`를 주어 다시 만들고, 아니면
   설정을 되돌린다.
-- 풀의 성공 수가 500개에 못 미친다. 드라이버가 시도 수를 25%씩 늘려 이어 돌리므로 그대로 두면 된다. 로그의 `pool: N successes in M
+- 풀의 성공 수가 1,000개에 못 미친다. 드라이버가 시도 수를 25%씩 늘려 이어 돌리므로 그대로 두면 된다. 로그의 `pool: N successes in M
   attempts` 줄로 진행을 본다.
 - 정책 서버 포트. 드라이버는 8800번부터 실행 하나에 40개씩 포트를 쓴다. 다른 프로그램이 그 범위를 쓰면 파이프라인이 그 포트를 건너뛰고
   다음 포트를 쓴다. 평가 중에 중단되면 `tmg-serve-<포트>` 이름의 컨테이너가 남을 수 있다. `docker ps`로 보고 `docker stop`으로 멈춘다.
