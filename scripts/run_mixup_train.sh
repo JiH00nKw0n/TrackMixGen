@@ -14,7 +14,7 @@
 #   CLUSTER=a100 GPU=6 scripts/run_mixup_train.sh
 # Variables: CLUSTER (a100), GPU (0), GENERATORS ("mimicgen cpgen"), CONDITIONS (the six conditions of the 2026-10-30 decision: mx_none mx_top1 mx_top5
 #   mx_success_a40 mx_transform mx_junction; the other mx_* files stay for the pools already made), SEEDS ("202601 202602
-#   202603"), SIZE (500, decided 2026-10-30), POLICY_PARALLEL (2), VAL_PARALLEL (4), TEST_SHARDS (6), PORT_BASE (12000), MINI (1: the toy scale
+#   202603"), MIMICGEN_TASKS and CPGEN_TASKS (each generator's tasks by default), SIZE (500, decided 2026-10-30), POLICY_PARALLEL (2), VAL_PARALLEL (4), TEST_SHARDS (6), PORT_BASE (12000), MINI (1: the toy scale
 #   of run_mixup_lowdim.sh MINI: pilot50 datasets of MINI_SIZE (10) demonstrations, 200 updates, 6 evaluation scenes per split).
 set -uo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
@@ -38,8 +38,8 @@ LOG=$DATA_ROOT/logs/$LOG_NAME; mkdir -p "$LOG"
 log() { echo "[train $(date '+%F %T')] $*" | tee -a "$LOG/driver.log"; }
 M() { make -s -C "$REPO" "$@"; }
 tasks_of() {
-  if [ "$1" = cpgen ]; then echo "coffee threading mug_cleanup hammer_cleanup three_piece_assembly"
-  else echo "hammer_cleanup mug_cleanup three_piece_assembly coffee threading square stack_three"; fi
+  if [ "$1" = cpgen ]; then echo "${CPGEN_TASKS:-coffee threading mug_cleanup hammer_cleanup three_piece_assembly}"
+  else echo "${MIMICGEN_TASKS:-hammer_cleanup mug_cleanup three_piece_assembly coffee threading square stack_three}"; fi
 }
 image_of() { [ "$1" = cpgen ] && echo cpgen || echo robosuite; }
 gen_log() { [ "$1" = cpgen ] && echo "$DATA_ROOT/logs/mixup_lowdim_cpgen$SUFFIX" || echo "$DATA_ROOT/logs/mixup_lowdim$SUFFIX"; }
