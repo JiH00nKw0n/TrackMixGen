@@ -59,9 +59,9 @@ resets_of() { echo "$DATA_ROOT/resets/$GENERATOR/$1/$SCENE/val25_test300_seed202
 run_of() { echo "$DATA_ROOT/runs/$GENERATOR/$1/$SCENE/$SELECTION/$METHOD/$GEN_NAME/$OBSERVATION/$2/seed$3"; }
 pool_successes() { python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(d.get('successes', 0))" "$DATA_ROOT/pools/$GENERATOR/$1/$SCENE/$SELECTION/$METHOD/$GEN_NAME/DONE.json" 2>/dev/null || echo 0; }
 
-generation_task() {   # one task: sources, pool (extended until SIZE successes), resets, dataset
+pool_task() {   # one task's sources and pool (extended until SIZE successes); returns 2 when its dataset and scenes exist
   local t=$1 attempts=${ATTEMPTS[$t]} common="GENERATOR=$GENERATOR IMAGE=$IMAGE TASK=$t CLUSTER=$CLUSTER SELECTION=$SELECTION"
-  if [ -f "$(dataset_of $t)" ] && [ -f "$(resets_of $t)" ]; then log "[$t] dataset and resets exist, generation skipped"; return 0; fi
+  if [ -f "$(dataset_of $t)" ] && [ -f "$(resets_of $t)" ]; then log "[$t] dataset and resets exist, generation skipped"; return 2; fi
   log "[$t] sources"
   M sources $common > "$LOG/sources_$t.log" 2>&1 || { fail "sources $t" "$LOG/sources_$t.log"; return 1; }
   while :; do
@@ -74,6 +74,10 @@ generation_task() {   # one task: sources, pool (extended until SIZE successes),
     [ "${MINI:-0}" = 1 ] && { fail "pool $t (MINI: fewer than $SIZE successes in $attempts attempts)" "$LOG/pool_$t.log"; return 1; }
     attempts=$(( (attempts * 5 / 4 + 249) / 250 * 250 ))         # 25 % more, rounded up to whole chunks of 250
   done
+}
+
+finish_task() {   # one task's dataset (for CP-Gen with the noisy-state replay) and fixed evaluation scenes
+  local t=$1 common="GENERATOR=$GENERATOR IMAGE=$IMAGE TASK=$t CLUSTER=$CLUSTER SELECTION=$SELECTION"
   M dataset $common SCENE=$SCENE METHOD=$METHOD GENERATION=$GENERATION OBSERVATION=$OBSERVATION OVERRIDES="size=$SIZE" \
     > "$LOG/dataset_$t.log" 2>&1 || { fail "dataset $t" "$LOG/dataset_$t.log"; return 1; }
   local reset_overrides=""          # CP-Gen rebuilds its environment from the dataset's env_args (container path of the dataset)
@@ -82,12 +86,26 @@ generation_task() {   # one task: sources, pool (extended until SIZE successes),
   log "[$t] dataset written: $(dataset_of $t)"
 }
 
+generation_task() { pool_task $1; local code=$?; [ $code = 2 ] && return 0; [ $code = 0 ] && finish_task $1; }
+
 generation_lane() {
-  for t in $TASKS; do
-    while [ "$(jobs -rp | wc -l)" -ge "$POOL_LANES" ]; do wait -n || true; done
-    generation_task $t &
-  done
-  wait
+  if [ "$POOL_LANES" = 1 ]; then
+    # one pool at a time (CP-Gen: cuRobo holds the GPU): a task's dataset step (noisy replay and rendering, about 3 h, on the
+    # CPU) runs beside the next task's pool, so the GPU does not sit empty between pools (2026-10-31: another user took
+    # GPU 5 during Hammer Cleanup's dataset step)
+    local finishing=()
+    for t in $TASKS; do
+      pool_task $t; local code=$?
+      [ $code = 0 ] && { finish_task $t & finishing+=($!); }
+    done
+    [ ${#finishing[@]} -gt 0 ] && wait "${finishing[@]}"
+  else
+    for t in $TASKS; do
+      while [ "$(jobs -rp | wc -l)" -ge "$POOL_LANES" ]; do wait -n || true; done
+      generation_task $t &
+    done
+    wait
+  fi
   log "generation lane done"
 }
 
