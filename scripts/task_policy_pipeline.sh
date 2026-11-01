@@ -33,7 +33,10 @@ if [ "${SKIP_TRAIN:-0}" = 1 ]; then log "train skipped (SKIP_TRAIN=1)"; else
 make -s -C "$REPO" train GENERATOR=$GENERATOR TASK=$TASK SCENE=$SCENE SELECTION=$SELECTION METHOD=$METHOD GENERATION=$GENERATION OBSERVATION=$OBSERVATION POLICY=$POLICY SEED=$SEED CLUSTER=$CLUSTER \
   OVERRIDES="dataset.size=$SIZE ${TRAIN_OVERRIDES:-}" || { log "TRAIN FAILED"; exit 1; }
 fi
-log "validate checkpoints ($VAL_PARALLEL at a time)"
+# two passes: the second validates again the checkpoints whose first validation failed (an evaluation with an error
+# writes no row), so one lost server or crashed simulator does not stop the run at the check below (2026-11-02)
+for pass in 1 2; do
+log "validate checkpoints ($VAL_PARALLEL at a time, pass $pass)"
 i=0; pids=""
 for d in "$RUN"/checkpoints/[0-9]*/; do
   d=${d%/}; [ -f "$d/checkpoint.json" ] || continue
@@ -49,6 +52,7 @@ for d in "$RUN"/checkpoints/[0-9]*/; do
   sleep 20      # stagger server start-ups
 done
 wait
+done
 for d in "$RUN"/checkpoints/[0-9]*/; do d=${d%/}; [ -f "$d/checkpoint.json" ] && ! validated "$(basename "$d")" && { log "checkpoint $(basename "$d") has no validation row"; exit 1; }; done
 log "select checkpoint"
 make -s -C "$REPO" select-checkpoint $C || { log "SELECT FAILED"; exit 1; }
@@ -59,7 +63,9 @@ tport=$((PORT0 + 20))
 while :; do ok=1; for p in $(seq "$tport" $((tport + TEST_SHARDS - 1))); do port_busy "$p" && { ok=0; break; }; done; [ "$ok" = 1 ] && break; tport=$((tport + 1)); done
 log "evaluate $(basename "$SEL_HOST") on the test scenes ($TEST_SHARDS shards, ports $tport..$((tport + TEST_SHARDS - 1)))"
 make -s -C "$REPO" evaluate RUN="$RUN" CKPT="$SEL_HOST" GENERATOR=$GENERATOR TASK=$TASK SCENE=$SCENE OBSERVATION=$OBSERVATION CLUSTER=$CLUSTER SPLIT=test \
-  PORT=$tport SHARDS=$TEST_SHARDS || { log "EVALUATE FAILED"; exit 1; }
+  PORT=$tport SHARDS=$TEST_SHARDS || { log "evaluate failed once, retrying the scenes without a result"; \
+  make -s -C "$REPO" evaluate RUN="$RUN" CKPT="$SEL_HOST" GENERATOR=$GENERATOR TASK=$TASK SCENE=$SCENE OBSERVATION=$OBSERVATION CLUSTER=$CLUSTER SPLIT=test \
+  PORT=$tport SHARDS=$TEST_SHARDS; } || { log "EVALUATE FAILED"; exit 1; }
 python3 - "$RUN" "$SEL_HOST" <<'PY'
 import json, sys, pathlib
 run, sel = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])

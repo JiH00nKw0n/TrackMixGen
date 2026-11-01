@@ -37,12 +37,17 @@ for p in $PORTS; do
     [ "$i" = 90 ] && { echo "[evaluate] server on port $p did not come up"; exit 1; }
   done
 done
+# one Isaac Sim per GPU: two on one T4 made the driver time out a context switch (Xid 109) and the simulator exit with
+# code 139 (2026-11-01, AWS). Every rollout run of the GPU in ISAAC_GPU waits for the GPU's lock; the policy servers
+# above do not take it (they hold only the checkpoint).
+LOCK=${ISAAC_GPU:+/tmp/tmg_isaacsim_gpu$ISAAC_GPU.lock}
+sim() { if [ -n "$LOCK" ]; then flock "$LOCK" "$@"; else "$@"; fi; }
 APPEND=""
 [ "$SPLIT" = val ] && APPEND="append_validation=$RUN_C"
 if [ "$SHARDS" -gt 1 ]; then
   k=0; pids=""
   for p in $PORTS; do
-    make -s -C "$REPO" eval CLUSTER="$CLUSTER" IMAGE="$IMAGE" GENERATOR="$GENERATOR" TASK="$TASK" SCENE="$SCENE" OBSERVATION="$OBSERVATION" \
+    sim make -s -C "$REPO" eval CLUSTER="$CLUSTER" IMAGE="$IMAGE" GENERATOR="$GENERATOR" TASK="$TASK" SCENE="$SCENE" OBSERVATION="$OBSERVATION" \
       OVERRIDES="checkpoint=$CKPT_C split=$SPLIT training_seed=$TRAINING_SEED evaluation.server.port=$p shard=[$k,$SHARDS] $EXTRA" &
     pids="$pids $!"; k=$((k + 1))
   done
@@ -50,5 +55,5 @@ if [ "$SHARDS" -gt 1 ]; then
   [ "$fail" = 0 ] || { echo "[evaluate] a shard failed"; exit 1; }
 fi
 # the merge run (every scene already played when sharded) writes the summary and the validation row
-make -s -C "$REPO" eval CLUSTER="$CLUSTER" IMAGE="$IMAGE" GENERATOR="$GENERATOR" TASK="$TASK" SCENE="$SCENE" OBSERVATION="$OBSERVATION" \
+sim make -s -C "$REPO" eval CLUSTER="$CLUSTER" IMAGE="$IMAGE" GENERATOR="$GENERATOR" TASK="$TASK" SCENE="$SCENE" OBSERVATION="$OBSERVATION" \
   OVERRIDES="checkpoint=$CKPT_C split=$SPLIT training_seed=$TRAINING_SEED evaluation.server.port=$PORT $APPEND $EXTRA"

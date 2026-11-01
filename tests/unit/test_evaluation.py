@@ -175,3 +175,40 @@ def test_evaluate_fails_without_scenes_and_on_mismatched_cameras(eval_setup, mon
                                                             "cameras": ["agentview", "robot0_eye_in_hand"], "env_state_dim": 14})
     with pytest.raises(RuntimeError, match="env_state_dim"):
         rollout.evaluate(compose("eval", [*overrides, "split=val"]))
+
+
+class FlakyClient(FakeClient):
+    """Loses the server on the first scene of ``fail_on`` (the act call raises, as a closed websocket does)."""
+
+    fail_on: ClassVar[set] = set()
+    reset_count = 0
+
+    def reset(self, seed=None, task=None):
+        FlakyClient.reset_count += 1
+        self.failing = FlakyClient.reset_count in FlakyClient.fail_on
+        super().reset(seed, task)
+
+    def act(self, obs):
+        if self.failing:
+            raise ConnectionError("keepalive ping timeout")
+        return super().act(obs)
+
+
+def test_evaluate_with_an_error_writes_nothing_and_a_rerun_plays_the_failed_scene_again(eval_setup, monkeypatch):
+    tmp_path, env, overrides = eval_setup
+    monkeypatch.setattr(session, "PolicyClient", FlakyClient)
+    FlakyClient.reset_count, FlakyClient.fail_on = 0, {2}         # the second played scene (reset 1) loses the server
+    args = [*overrides, "split=val", f"append_validation={tmp_path / 'runs/r'}"]
+    with pytest.raises(RuntimeError, match="1 of 3 episodes ended in an error"):
+        rollout.evaluate(compose("eval", args))
+    out = tmp_path / "runs/r/eval/val_h600/0000500"
+    rows = [json.loads(line) for line in (out / "episodes.jsonl").read_text().splitlines()]
+    assert [(r["reset_index"], r["error"] is not None) for r in rows] == [(0, False), (1, True), (2, False)]
+    assert not (out / "eval_summary.json").exists() and not (tmp_path / "runs/r/validation.jsonl").exists()
+    FlakyClient.fail_on = set()
+    summary = rollout.evaluate(compose("eval", args))              # only reset 1 is played again
+    rows = [json.loads(line) for line in (out / "episodes.jsonl").read_text().splitlines()]
+    assert [r["reset_index"] for r in rows] == [0, 1, 2, 1] and rows[-1]["error"] is None
+    assert summary["all"]["n"] == 3 and summary["all"]["errors"] == 0 and summary["all"]["n_success"] == 2
+    val_rows = [json.loads(line) for line in (tmp_path / "runs/r/validation.jsonl").read_text().splitlines()]
+    assert len(val_rows) == 1 and val_rows[0]["n_success"] == 2

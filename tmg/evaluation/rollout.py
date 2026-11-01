@@ -126,6 +126,8 @@ def _load_done(log: Path, checkpoint: str) -> dict[int, dict]:
         if row.get("checkpoint") != checkpoint:
             raise RuntimeError(f"{log} holds episodes of another checkpoint ({row.get('checkpoint')}); "
                                f"use another output folder for {checkpoint}")
+        if row.get("error"):      # an infrastructure failure (lost server, crashed simulator), not a policy outcome: play it again
+            continue
         done[row["reset_index"]] = row
     return done
 
@@ -200,6 +202,11 @@ def evaluate(cfg) -> dict:
         print(f"[tmg] eval shard {list(shard)} done: {summary['all']['n_success']}/{summary['all']['n']} successes "
               f"(no summary written; run once more without shard to merge)", flush=True)
         return summary
+    if summary["all"]["errors"]:
+        # an error is a failed evaluation, not a failed episode: no summary and no validation row, so the checkpoint
+        # stays unvalidated and a rerun plays the failed scenes again (2026-11-02, Dex validations scored 0/25 from a lost server)
+        raise RuntimeError(f"{summary['all']['errors']} of {summary['all']['n']} episodes ended in an error; "
+                           f"no summary written for {checkpoint}")
     write_json(output / SUMMARY, summary)
     print(f"[tmg] eval done: {summary['all']['n_success']}/{summary['all']['n']} successes", flush=True)
     if plain.get("append_validation"):

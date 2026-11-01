@@ -81,21 +81,26 @@ class PolicyRunner:
         action = self.io.postprocess(action)[0].detach().cpu().numpy().astype(np.float32)
         return rotation.decode(action) if self.action_rotation == rotation.ROTATION_6D else action
 
+    def answer(self, req: dict) -> dict:
+        """The reply to one request."""
+        kind = req.get("type")
+        if kind == "info":
+            return self.info()
+        if kind == "reset":
+            self.reset(req.get("seed"), req.get("task"))
+            return {"ok": True}
+        if kind == "act":
+            return {"action": self.act(req["obs"])}
+        return {"error": f"unknown request type {kind!r}"}
+
     async def handle(self, websocket):
-        """Serve one connection until it closes."""
+        """Serve one connection until it closes. The request runs in a worker thread so the event loop keeps answering
+        the client's keepalive pings: on a busy T4 the first Diffusion Policy action took over 40 s, the client's ping
+        went unanswered and it closed the connection, and every scene of that validation failed at step 0 (2026-11-01)."""
         async for raw in websocket:
             req = unpack(raw)
-            kind = req.get("type")
             async with self._lock:
-                if kind == "info":
-                    reply = self.info()
-                elif kind == "reset":
-                    self.reset(req.get("seed"), req.get("task"))
-                    reply = {"ok": True}
-                elif kind == "act":
-                    reply = {"action": self.act(req["obs"])}
-                else:
-                    reply = {"error": f"unknown request type {kind!r}"}
+                reply = await asyncio.to_thread(self.answer, req)
             await websocket.send(pack(reply))
 
 
