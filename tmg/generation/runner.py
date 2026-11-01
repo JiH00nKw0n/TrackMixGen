@@ -168,28 +168,44 @@ def launch_chunk(generator, chunk: Chunk, folder: Path, *, env: Mapping[str, str
     return LaunchedChunk(spec=spec, exit_code=code, elapsed_s=time.time() - start)
 
 
-def _run_chunk(generator, chunk: Chunk, output: Path, env: Mapping[str, str]) -> dict:
-    """Run one pending chunk of the pool and return its result line (``CHUNK_DONE.json`` content on success)."""
+def _run_chunk(generator, chunk: Chunk, output: Path, env: Mapping[str, str], retries: int = 1) -> dict:
+    """Run one pending chunk of the pool and return its result line (``CHUNK_DONE.json`` content on success).
+
+    A failed chunk runs again right away, up to ``retries`` more times, with the same seed; each failed try keeps its log
+    as ``<chunk>.failed<k>.log``. A transient start-up error would otherwise fail the whole pool only when every other
+    chunk has finished (2026-11-01: one CP-Gen chunk hit a Warp/cuRobo start-up error and the Threading pool failed
+    15 h later)."""
     folder = chunk.folder(output)
-    clear_partial_chunk(folder)
     log = output / LOGS_DIR / f"{chunk.name}.log"
-    launched = launch_chunk(generator, chunk, folder, env=env, log=log)
-    result = generator.chunk_result(launched.spec)
-    if result is None or "error" in result:
-        return {"chunk": chunk.name, "ok": False, "exit_code": launched.exit_code, "log": str(log),
-                "elapsed_s": launched.elapsed_s, "error": None if result is None else result["error"]}
-    result.update(chunk=chunk.name, ok=True, exit_code=launched.exit_code, elapsed_s=launched.elapsed_s, log=str(log))
-    write_json(folder / CHUNK_DONE, result)
-    return result
+    failed_logs = []
+    for attempt in range(retries + 1):
+        clear_partial_chunk(folder)
+        launched = launch_chunk(generator, chunk, folder, env=env, log=log)
+        result = generator.chunk_result(launched.spec)
+        if result is not None and "error" not in result:
+            result.update(chunk=chunk.name, ok=True, exit_code=launched.exit_code, elapsed_s=launched.elapsed_s, log=str(log),
+                          retries=attempt)
+            write_json(folder / CHUNK_DONE, result)
+            return result
+        failure = {"chunk": chunk.name, "ok": False, "exit_code": launched.exit_code, "log": str(log),
+                   "elapsed_s": launched.elapsed_s, "error": None if result is None else result["error"]}
+        if attempt < retries:
+            kept = log.with_name(f"{chunk.name}.failed{attempt + 1}.log")
+            log.replace(kept)
+            failed_logs.append(str(kept))
+            print(f"[tmg] chunk {chunk.name}: failed (exit code {launched.exit_code}), running it again; log {kept}", flush=True)
+    failure["failed_logs"] = failed_logs
+    return failure
 
 
-def _run_pending(generator, pending: list[Chunk], output: Path, env: Mapping[str, str], workers: int) -> list[dict]:
+def _run_pending(generator, pending: list[Chunk], output: Path, env: Mapping[str, str], workers: int,
+                 retries: int = 1) -> list[dict]:
     """Run the pending chunks ``workers`` at a time, printing one line per finished chunk."""
     results = []
     if not pending:
         return results
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        for result in pool.map(lambda chunk: _run_chunk(generator, chunk, output, env), pending):
+        for result in pool.map(lambda chunk: _run_chunk(generator, chunk, output, env, retries), pending):
             flag = "ok" if result["ok"] else "FAILED"
             print(f"[tmg] chunk {result['chunk']}: {flag} ({result.get('successes', '?')}/"
                   f"{result.get('attempts', '?')} successes, {result['elapsed_s']:.0f}s)", flush=True)
@@ -280,7 +296,7 @@ def run_pool(cfg) -> dict:
     mine = f" (shard {shard[0]}/{shard[1]}: {len(own)} chunks)" if own is not None else ""
     print(f"[tmg] pool {output}: {len(chunks)} chunks, {done} done, {len(pending)} to run here{mine}; "
           f"workers {explained}", flush=True)
-    results = _run_pending(generator, pending, output, _chunk_env(cluster), workers)
+    results = _run_pending(generator, pending, output, _chunk_env(cluster), workers, int(generation.get("chunk_retries", 1)))
     failed = [r for r in results if not r["ok"]]
     if failed:
         raise PoolError(f"{len(failed)} chunk(s) failed; see " + ", ".join(r["log"] for r in failed))

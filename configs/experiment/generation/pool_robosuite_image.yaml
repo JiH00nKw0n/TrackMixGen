@@ -29,5 +29,6 @@ protocol:
   render_video: false
   num_source_demos: null          # null = all
 on_config_change: error           # error | rebuild (finished chunks made under another config)
+chunk_retries: 1                  # a failed chunk runs again right away this many times before the pool fails
 shard: null                       # [index, count]: run only the chunks whose index is index modulo count, so count runners
                                   # (one container per GPU) share the pool; the last one to finish writes DONE.json

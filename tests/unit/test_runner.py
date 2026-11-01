@@ -79,9 +79,10 @@ class FakeLaunch:
     every caller.
     """
 
-    def __init__(self, failing_seeds=(), erroring_seeds=()):
+    def __init__(self, failing_seeds=(), erroring_seeds=(), flaky_seeds=()):
         self.failing = set(failing_seeds)
         self.erroring = set(erroring_seeds)
+        self.flaky = set(flaky_seeds)          # fail on their first launch only (a transient start-up error)
         self.calls: list[dict] = []
         self.real_run = subprocess.run
 
@@ -97,6 +98,9 @@ class FakeLaunch:
         stdout.write(f"fake chunk seed {seed}\n")
         if seed in self.failing:
             return _Completed(3)
+        if seed in self.flaky:
+            self.flaky.discard(seed)
+            return _Completed(4)
         attempts = int(spec["chunk"]["attempts"])
         stats = Path(spec["folder"]) / STATS
         stats.parent.mkdir(parents=True, exist_ok=True)
@@ -137,8 +141,8 @@ def pool(monkeypatch, tmp_path):
 
     monkeypatch.setattr(runner, "make_generator", make)
 
-    def run(cfg, failing_seeds=(), erroring_seeds=()):
-        launch = FakeLaunch(failing_seeds, erroring_seeds)
+    def run(cfg, failing_seeds=(), erroring_seeds=(), flaky_seeds=()):
+        launch = FakeLaunch(failing_seeds, erroring_seeds, flaky_seeds)
         monkeypatch.setattr(runner.subprocess, "run", launch)
         return runner.run_pool(cfg), launch
 
@@ -264,6 +268,23 @@ def test_run_pool_reports_failed_chunks_and_keeps_the_finished_ones(pool, tmp_pa
     assert not (output / CHUNKS_DIR / "seed102" / CHUNK_DONE).exists()
     summary, launch = pool(cfg)                                              # the rerun only runs the failed chunk
     assert [c["seed"] for c in launch.calls] == [102] and summary["attempts"] == 5
+
+
+def test_run_pool_runs_a_failed_chunk_again_right_away(pool, tmp_path):
+    cfg = _cfg(tmp_path)
+    output = tmp_path / "pool"
+    summary, launch = pool(cfg, flaky_seeds=[102])                          # the first try of 102 fails, the second works
+    assert sorted(c["seed"] for c in launch.calls) == [101, 102, 102, 103] and summary["attempts"] == 5
+    chunk = next(c for c in summary["chunks"] if c["chunk"] == "seed102")
+    assert chunk["ok"] is True and chunk["retries"] == 1
+    assert (output / LOGS_DIR / "seed102.failed1.log").exists() and (output / LOGS_DIR / "seed102.log").exists()
+    # a chunk that keeps failing is tried retries + 1 times, then the pool fails; chunk_retries=0 tries it once
+    for name, retries, kept in (("b", 1, True), ("c", 0, False)):
+        cfg = _cfg(tmp_path / name, chunk_retries=retries)
+        with pytest.raises(runner.PoolError, match="1 chunk\\(s\\) failed"):
+            pool(cfg, failing_seeds=[101])
+        logs = tmp_path / name / "pool" / LOGS_DIR
+        assert (logs / "seed101.failed1.log").exists() is kept and (logs / "seed101.log").exists()
 
 
 def test_run_pool_treats_a_result_with_an_error_entry_as_a_failed_chunk(pool, tmp_path):
