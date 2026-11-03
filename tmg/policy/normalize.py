@@ -3,7 +3,9 @@
 Modes per key, chosen by the policy config's ``normalization`` mapping (keys ``VISUAL``, ``STATE``, ``ENV`` for the
 object state ``observation.environment_state`` (defaults to the ``STATE`` mode), ``ACTION``):
 
-- ``identity``: pass through (BC-RNN as in robomimic: images in [0, 1], state raw, actions already in [-1, 1]);
+- ``identity``: pass through (BC-RNN as in robomimic: images in [0, 1], state raw, actions already in [-1, 1]; actions
+  outside [-1, 1], such as the Dex tasks' absolute poses, switch to ``min_max`` with one global range, see
+  ``global_min_max``);
 - ``mean_std``: ``(x - mean) / (std + eps)``;
 - ``min_max``: ``2 (x - min) / (max - min) - 1`` to [-1, 1] (Diffusion Policy's state and action mode).
 
@@ -32,6 +34,23 @@ def feature_type(key: str) -> str:
     if key == ENV_STATE:
         return "ENV"
     return "STATE"
+
+
+def exceeds_unit_range(stats: dict, key: str) -> bool:
+    """Whether ``stats[key]`` reaches outside [-1, 1], where tanh-bounded outputs (BC-RNN's GMM means) cannot go."""
+    s = stats[key]
+    return bool(np.min(s["min"]) < -1.0 or np.max(s["max"]) > 1.0)
+
+
+def global_min_max(stats: dict, key: str) -> dict:
+    """Make the ``min_max`` normalization of ``stats[key]`` use one minimum and one maximum over all dimensions, as
+    Isaac Lab's ``scripts/imitation_learning/robomimic/train.py --normalize_training_actions`` scales the actions of its
+    GR1 humanoid datasets to [-1, 1] (``normalize_hdf5_actions``: the min and max of all action values)."""
+    s = stats[key]
+    lo, hi = float(np.min(s["min"])), float(np.max(s["max"]))
+    s["min"] = np.full_like(np.asarray(s["min"], dtype=np.float32), lo)
+    s["max"] = np.full_like(np.asarray(s["max"], dtype=np.float32), hi)
+    return stats
 
 
 class Normalizer:

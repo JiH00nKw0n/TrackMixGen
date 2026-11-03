@@ -59,7 +59,8 @@ from tmg.data.loader import FrameDataset, TrajectoryStore, collate, compute_stat
 from tmg.policy import rotation
 from tmg.policy.ema import EMA
 from tmg.policy.io import PolicyIO, make_io
-from tmg.policy.lerobot_policies import build_optimizer, build_policy, task_policy_overrides
+from tmg.policy.lerobot_policies import build_optimizer, build_policy, normalization_modes, task_policy_overrides
+from tmg.policy.normalize import exceeds_unit_range, global_min_max
 
 
 def seed_everything(seed: int) -> None:
@@ -216,6 +217,16 @@ def _setup(cfg) -> TrainSetup:
 
         config.normalization_mapping = {**config.normalization_mapping, "ACTION": NormalizationMode.MIN_MAX}
         rotation.identity_dims(stats, ACTION)
+    elif normalization_modes(config).get("ACTION", "identity") == "identity" and exceeds_unit_range(stats, ACTION):
+        # absolute actions outside [-1, 1] (the Dex tasks' GR1 poses: hand heights up to 1.34 m, x up to 4.5 m) under an
+        # identity action mode (BC-RNN): its tanh means cannot reach them, so scale to [-1, 1] with one global range as
+        # Isaac Lab's robomimic training does for these humanoid datasets (--normalize_training_actions)
+        from lerobot.configs.types import NormalizationMode
+
+        config.normalization_mapping = {**config.normalization_mapping, "ACTION": NormalizationMode.MIN_MAX}
+        global_min_max(stats, ACTION)
+        print(f"[tmg] actions span [{float(stats[ACTION]['min'][0]):.3f}, {float(stats[ACTION]['max'][0]):.3f}]: "
+              "normalized to [-1, 1] with one global range", flush=True)
     io = make_io(str(policy_cfg["name"]), config, stats, device)
     dataset = FrameDataset(store, obs_delta=config.observation_delta_indices, action_delta=config.action_delta_indices or [0],
                            drop_n_last_frames=int(getattr(config, "drop_n_last_frames", 0) or 0),

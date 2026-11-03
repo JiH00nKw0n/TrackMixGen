@@ -68,6 +68,23 @@ def test_normalizer_modes_and_roundtrip(tmp_path):
         Normalizer(stats, {"STATE": "quantile"})
 
 
+def test_global_min_max_scales_absolute_actions_into_tanh_range():
+    torch = pytest.importorskip("torch")
+    from tmg.policy.normalize import Normalizer, exceeds_unit_range, global_min_max
+
+    # Bottle Door-like absolute actions: x near 4 m, a height near 1.1 m, a hand joint near -1.6 rad
+    actions = np.array([[3.6, 1.08, -1.6], [4.5, 1.18, 0.0]], dtype=np.float32)
+    stats = {"action": {"min": actions.min(0), "max": actions.max(0), "mean": actions.mean(0), "std": actions.std(0)}}
+    assert exceeds_unit_range(stats, "action")
+    assert not exceeds_unit_range({"action": {"min": np.array([-1.0]), "max": np.array([1.0])}}, "action")
+    global_min_max(stats, "action")
+    assert np.allclose(stats["action"]["min"], -1.6) and np.allclose(stats["action"]["max"], 4.5)
+    n = Normalizer(stats, {"ACTION": "min_max"})
+    out = n({"action": torch.tensor(actions)})["action"]
+    assert out.min() >= -1.0 - 1e-6 and out.max() <= 1.0 + 1e-6
+    assert torch.allclose(n.unnormalize_action(out), torch.tensor(actions), atol=1e-5)
+
+
 def test_ema_decay_schedule_and_update():
     torch = pytest.importorskip("torch")
     from tmg.policy.ema import EMA
