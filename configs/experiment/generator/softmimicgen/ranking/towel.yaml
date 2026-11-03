@@ -1,0 +1,15 @@
+# Source ranking of softmimicgen towel. Sources ordered from the highest to the lowest full-task generation
+# success rate per subtask (ties: lower source index first). The good/bad split is not stored here; the
+# method config chooses how many top sources count as high-success (method.mixing.good_fraction).
+generator: softmimicgen
+task: towel
+basis: Full-task generation success rate (successes / attempts) of each source demonstration, per subtask, measured by tmg
+  rank_sources on the baseline pool /data/pools/softmimicgen/towel/ours/none/rank_human_demos (3000 attempts, 12 chunks, scene
+  ours, generation rank_human_demos). The source of a subtask is the demonstration the generator selected for that subtask.
+split_note: The ranking only orders the sources. Which prefix counts as high-success is method.mixing.good_fraction.
+subtasks:
+  0:
+    order: [2, 1, 0]
+    attempts: {2: 994, 1: 1046, 0: 960}
+    successes: {2: 853, 1: 669, 0: 611}
+    rate: {2: 0.8581, 1: 0.6396, 0: 0.6365}

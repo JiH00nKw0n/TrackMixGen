@@ -1,0 +1,20 @@
+# Source ranking of dexmimicgen bottle_door. Sources ordered from the highest to the lowest full-task generation
+# success rate per subtask (ties: lower source index first). The good/bad split is not stored here; the
+# method config chooses how many top sources count as high-success (method.mixing.good_fraction).
+generator: dexmimicgen
+task: bottle_door
+basis: Full-task generation success rate (successes / attempts) of each source demonstration, per subtask, measured by tmg
+  rank_sources on the baseline pool /data/pools/dexmimicgen/bottle_door/ours/none/rank_human_demos (3000 attempts, 12 chunks,
+  scene ours, generation rank_human_demos). The source of a subtask is the demonstration the generator selected for that subtask.
+split_note: The ranking only orders the sources. Which prefix counts as high-success is method.mixing.good_fraction.
+subtasks:
+  0:
+    order: [4, 0, 3, 2, 1]
+    attempts: {4: 927, 0: 1001, 3: 956, 2: 114, 1: 2}
+    successes: {4: 652, 0: 490, 3: 446, 2: 38, 1: 0}
+    rate: {4: 0.7033, 0: 0.4895, 3: 0.4665, 2: 0.3333, 1: 0.0}
+  1:
+    order: [4, 0, 3, 2, 1]
+    attempts: {4: 927, 0: 1001, 3: 956, 2: 114, 1: 2}
+    successes: {4: 652, 0: 490, 3: 446, 2: 38, 1: 0}
+    rate: {4: 0.7033, 0: 0.4895, 3: 0.4665, 2: 0.3333, 1: 0.0}
