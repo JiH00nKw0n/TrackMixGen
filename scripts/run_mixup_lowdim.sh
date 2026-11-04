@@ -39,7 +39,7 @@ if [ "$GENERATOR" = cpgen ]; then
   # attempts for 1,000 successes (scaled to SIZE below): Coffee gave 23.5 % in the 2026-10-29 smoke pool; the other tasks start
   # at 5,000, as in the CP-Gen baseline driver
   declare -A ATTEMPTS=( [coffee]=4750 [threading]=5000 [mug_cleanup]=5000 [hammer_cleanup]=5000 [three_piece_assembly]=5000 )
-  POOL_OVERRIDES="cluster.max_workers=${CPGEN_WORKERS:-24}"; RANK_WORKERS=${CPGEN_WORKERS:-24}
+  POOL_OVERRIDES="cluster.max_workers=${CPGEN_WORKERS:-24} generation.chunk=${CPGEN_CHUNK:-250}"; RANK_WORKERS=${CPGEN_WORKERS:-24}
   [ -n "${GPU:-}" ] && export SINGULARITYENV_CUDA_VISIBLE_DEVICES=$GPU CUDA_VISIBLE_DEVICES=$GPU
 else
   IMAGE=robosuite; LOG_NAME=mixup_lowdim
