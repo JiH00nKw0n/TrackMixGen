@@ -15,6 +15,13 @@
 # Remaining after narrowing: hammer_cleanup drawer against the gripper in 22/200 resets. The same check on official_d1
 # (2026-10-26) shows 64/200 such resets, so this contact comes from the task's own drawer placement near the gripper's
 # home pose and the range is not narrowed further.
+# Narrowed on 2026-11-04 (user decision) for Hammer Cleanup, Mug Cleanup, Threading and Three Piece Assembly; the other tasks
+#   keep the ranges above. Outputs made before this change under <task>/ours must be moved aside before a rerun, because the
+#   drivers reuse an existing dataset, evaluation-scene file and test result. For those four tasks every x and y
+#   bound sits about halfway between MimicGen D1 and the 2026-10-26 ranges above, rounded to 0.05 m (0.025 m where the halfway
+#   point falls between), and where the two differ by only 0.05 m the D1 bound is kept; z_rot stays D1's. Three Piece Assembly
+#   keeps the D1/D2 positions and takes rotations halfway between D1 and D2 (base +-20 deg, pieces 45 to 135 deg). With the
+#   2026-10-26 ranges the image baselines reached 0-35 % on these tasks (MimicGen paper at D1: 61-64 %).
 name: ours
 generator: mimicgen
 env_suffix: OURS
@@ -33,19 +40,19 @@ bounds:
     coffee_machine: {x: [0.0, 0.2], y: [-0.25, -0.05], z_rot: [-0.5235987755982988, 1.0471975511965976], reference: table_offset}
     coffee_pod: {x: [-0.325, 0.175], y: [0.105, 0.35], z_rot: [0.0, 0.0], reference: table_offset}
   threading:
-    needle: {x: [-0.325, 0.175], y: [0.1, 0.3], z_rot: [-3.665191429188092, 0.5235987755982988], reference: table_offset}
-    tripod: {x: [-0.225, 0.275], y: [-0.25, -0.1], z_rot: [0.5235987755982988, 2.6179938779914944], reference: table_offset}
+    needle: {x: [-0.25, 0.1], y: [0.125, 0.275], z_rot: [-3.665191429188092, 0.5235987755982988], reference: table_offset}
+    tripod: {x: [-0.15, 0.2], y: [-0.2, -0.1], z_rot: [0.5235987755982988, 2.6179938779914944], reference: table_offset}
   stack_three:
     cubeA: {x: [-0.35, 0.35], y: [-0.35, 0.35], z_rot: [0.0, 6.283185307179586], reference: [0.0, 0.0, 0.8]}
     cubeB: {x: [-0.35, 0.35], y: [-0.35, 0.35], z_rot: [0.0, 6.283185307179586], reference: [0.0, 0.0, 0.8]}
     cubeC: {x: [-0.35, 0.35], y: [-0.35, 0.35], z_rot: [0.0, 6.283185307179586], reference: [0.0, 0.0, 0.8]}
   hammer_cleanup:
-    hammer: {x: [-0.2, 0.35], y: [-0.31, -0.07], z_rot: [0.0, 6.283185307179586], rotation_axis: y, reference: table_offset}
-    drawer: {x: [-0.1, 0.3], y: [0.2, 0.35], z_rot: [-0.5235987755982988, 0.5235987755982988], reference: table_offset}
+    hammer: {x: [-0.2, 0.25], y: [-0.275, -0.1], z_rot: [0.0, 6.283185307179586], rotation_axis: y, reference: table_offset}
+    drawer: {x: [-0.05, 0.25], y: [0.2, 0.3], z_rot: [-0.5235987755982988, 0.5235987755982988], reference: table_offset}
   mug_cleanup:
-    drawer: {x: [-0.25, 0.15], y: [0.2, 0.35], z_rot: [-0.5235987755982988, 0.5235987755982988], reference: table_offset}
-    object: {x: [-0.35, 0.35], y: [-0.35, -0.075], z_rot: [0.0, 6.283185307179586], reference: table_offset}
-  three_piece_assembly:                 # = MimicGen D2 exactly (2026-10-27): the widened ranges gave 6.1 % generation success and a 0.2 % policy
-    base: {x: [-0.22, 0.22], y: [-0.22, 0.22], z_rot: [-0.7853981633974483, 0.7853981633974483], reference: table_offset}
-    piece_1: {x: [-0.22, 0.22], y: [-0.22, 0.22], z_rot: [0.0, 3.141592653589793], reference: table_offset}
-    piece_2: {x: [-0.22, 0.22], y: [-0.22, 0.22], z_rot: [0.0, 3.141592653589793], reference: table_offset}
+    drawer: {x: [-0.2, 0.1], y: [0.25, 0.35], z_rot: [-0.5235987755982988, 0.5235987755982988], reference: table_offset}
+    object: {x: [-0.3, 0.25], y: [-0.3, -0.1], z_rot: [0.0, 6.283185307179586], reference: table_offset}
+  three_piece_assembly:                 # D1/D2 positions, rotations halfway between D1 and D2 (2026-11-04)
+    base: {x: [-0.22, 0.22], y: [-0.22, 0.22], z_rot: [-0.3490658503988659, 0.3490658503988659], reference: table_offset}
+    piece_1: {x: [-0.22, 0.22], y: [-0.22, 0.22], z_rot: [0.7853981633974483, 2.356194490192345], reference: table_offset}
+    piece_2: {x: [-0.22, 0.22], y: [-0.22, 0.22], z_rot: [0.7853981633974483, 2.356194490192345], reference: table_offset}
