@@ -17,7 +17,7 @@ class PolicyClient:
     def __enter__(self):
         from websockets.sync.client import connect
 
-        self._ws = connect(self.url, max_size=MAX_MESSAGE, open_timeout=self.timeout_s)
+        self._ws = connect(self.url, max_size=MAX_MESSAGE, open_timeout=self.timeout_s, ping_interval=None)   # see tmg.policy.server
         return self
 
     def __exit__(self, *exc):
@@ -27,7 +27,12 @@ class PolicyClient:
 
     def _call(self, message: dict) -> dict:
         self._ws.send(pack(message))
-        reply = unpack(self._ws.recv(timeout=self.timeout_s))
+        try:
+            reply = unpack(self._ws.recv(timeout=self.timeout_s))
+        except TimeoutError:      # a late reply would answer the next request: start a fresh connection (2026-11-02)
+            self.__exit__()
+            self.__enter__()
+            raise
         if "error" in reply:
             raise RuntimeError(f"policy server: {reply['error']}")
         return reply

@@ -81,8 +81,10 @@ writable_fill = docker run --rm -v $(call host_dir,$(1)):/out --entrypoint cp tm
 endif
 PREP_EXTRA = $(foreach p,$(CPGEN_WRITABLE),&& { test -n "$$(ls -A $(call host_dir,$(p)) 2>/dev/null)" || { mkdir -p $(call host_dir,$(p)) && $(call writable_fill,$(p)); }; })
 endif
+# Arena assets moved from the staging S3 mirror to production (2026-11-03): mount the patched path module into the Dex image
+ARENA_PATCH = $(if $(filter isaaclab-dex,$(IMAGE)),-v $(DATA_ROOT)/arena_patch/nucleus.py:/opt/src/IsaacLab-Arena/isaaclab_arena/assets/nucleus.py:ro,)
 DOCKER_RUN  = docker run --rm -i $(if $(shell tty -s && echo t),-t,) --network host $(DOCKER_GPU) \
-              -v $(DATA_ROOT):/data -v $(REPO):/opt/tmg $(DOCKER_VOL_EXTRA) \
+              -v $(DATA_ROOT):/data -v $(REPO):/opt/tmg $(DOCKER_VOL_EXTRA) $(ARENA_PATCH) \
               -e TMG_DATA_ROOT=/data -e HOME=/tmp -e HF_HOME=/data/.cache/huggingface \
               --user $(shell id -u):$(shell id -g) tmg/$(IMAGE):$(TAG)
 SINGULARITY_RUN = singularity exec $(SING_NV) $(SING_ENV_EXTRA) --cleanenv --no-home --writable-tmpfs --pwd /opt/tmg -B $(DATA_ROOT):/data -B $(REPO):/opt/tmg -B $(CONTAINER_TMP):/tmp $(SING_BIND_EXTRA) \

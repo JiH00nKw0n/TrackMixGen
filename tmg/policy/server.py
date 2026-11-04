@@ -107,7 +107,7 @@ class PolicyRunner:
 async def serve_forever(runner: PolicyRunner, host: str, port: int) -> None:
     import websockets
 
-    async with websockets.serve(runner.handle, host, port, max_size=MAX_MESSAGE):
+    async with websockets.serve(runner.handle, host, port, max_size=MAX_MESSAGE, ping_interval=None):   # no keepalive pings (2026-11-02)
         print(f"[tmg] policy server {runner.policy.name} from {runner.checkpoint} on ws://{host}:{port}", flush=True)
         await asyncio.Future()
 
