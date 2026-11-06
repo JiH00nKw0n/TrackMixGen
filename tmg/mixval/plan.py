@@ -57,9 +57,15 @@ def parse_range(text: str) -> list[int]:
 def build(sources: list[int], scenes: list[int], perturbations: int, originals_only: bool = False, parts_share: int | None = None) -> list[dict]:
     """The attempts in (scene, perturbation, condition) order, each with its id. With ``parts_share``, ``sources`` is one pair
     (a, b) and the conditions are ``parts_conditions`` with each of the two as the base."""
-    if parts_share is not None:
+    if parts_share is not None and len(sources) == 2:
         a, b = sources
         conds = parts_conditions(a, b, parts_share) + parts_conditions(b, a, parts_share)
+    elif parts_share is not None:   # every condition of the sources plus the part-wise blends of every ordered pair
+        conds = conditions(sources)
+        seen = {c["cond"] for c in conds}
+        for a, b in itertools.permutations(sources, 2):
+            conds += [c for c in parts_conditions(a, b, parts_share) if c["cond"] not in seen]
+            seen = {c["cond"] for c in conds}
     else:
         conds = [c for c in conditions(sources) if not originals_only or c["donor"] is None]
     attempts = []
@@ -83,6 +89,7 @@ def main(argv=None):
                    help="JSON file of [scene, pert] pairs: run only these instances (with --reps), instead of every perturbation of --scenes")
     p.add_argument("--reps", type=int, default=0, help="with --instances: repeats 1..N of each instance with other noise seeds")
     p.add_argument("--conds", default=None, help="comma-separated condition names to keep (default: all)")
+    p.add_argument("--record-poses", action="store_true", help="save every attempt's per-step eef and object poses")
     p.add_argument("--parts-share", type=int, default=None,
                    help="with two --sources: position-only and rotation-only blends at this donor share, both sources as the base")
     args = p.parse_args(argv)
@@ -92,6 +99,11 @@ def main(argv=None):
     if args.conds:
         keep = set(args.conds.split(","))
         attempts = [a for a in attempts if a["cond"] in keep]
+        missing = keep - {a["cond"] for a in attempts}
+        if missing:
+            raise SystemExit(f"conditions not in the plan: {sorted(missing)}")
+    if args.record_poses:
+        attempts = [{**a, "record_poses": True} for a in attempts]
     if args.instances:   # the repeat check: chosen instances only, each repeated with other noise (rep 1..N)
         chosen = {tuple(x) for x in json.loads(Path(args.instances).read_text())}
         attempts = [{**a, "id": f"{a['id']}_r{r}", "rep": r} for r in range(1, args.reps + 1)

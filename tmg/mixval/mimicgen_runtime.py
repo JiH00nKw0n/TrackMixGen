@@ -121,6 +121,7 @@ class FixedMimicGenRuntime(mgrt.MimicGenRuntime):
         self.mix_error = False
         self.reset_info: dict = {}
         self.t0 = 0.0
+        self.step_poses: dict[str, list] = {}   # per step: eef and object poses (4x4) and the gripper command, when recorded
 
     def _write(self, success: bool, failure: str | None) -> None:
         a = self.current
@@ -129,6 +130,10 @@ class FixedMimicGenRuntime(mgrt.MimicGenRuntime):
                 **self.reset_info}
         with open(self.results, "a") as f:
             f.write(json.dumps(line, default=float) + "\n")
+        if self.step_poses:   # one file per attempt: (T, 4, 4) eef and object poses and (T,) gripper commands
+            pdir = self.results.parent / "poses"
+            pdir.mkdir(exist_ok=True)
+            np.savez_compressed(pdir / f"{a['id']}.npz", success=bool(success), **{k: np.asarray(v) for k, v in self.step_poses.items()})
         self.open = False
         print(f"[mixval] {self.k + 1}/{len(self.attempts)} {a['id']} success={line['success']} {line['elapsed_s']}s", flush=True)
 
@@ -139,6 +144,7 @@ class FixedMimicGenRuntime(mgrt.MimicGenRuntime):
         self.k += 1
         self.current = a = self.attempts[self.k]
         self.mix_log, self.mix_error, self.t0 = [], False, time.time()
+        self.step_poses = {}
         sim = env.env.sim
         state = self.scenes[int(a["scene"])]
         sc.check_state_size(state, sim)
@@ -151,6 +157,16 @@ class FixedMimicGenRuntime(mgrt.MimicGenRuntime):
         self.reset_info = {"perturbation": applied, "seed": seed}
         self.open = True
         return env.get_state()
+
+    def record_step(self, waypoint, datagen_info, play_action):
+        """The parent's step record, plus (for attempts with record_poses) the eef and object poses of the step."""
+        super().record_step(waypoint, datagen_info, play_action)
+        if self.current and self.current.get("record_poses"):
+            sp = self.step_poses
+            sp.setdefault("eef", []).append(np.asarray(datagen_info.eef_pose, dtype=np.float32))
+            for name, pose in datagen_info.object_poses.items():
+                sp.setdefault(f"obj_{name}", []).append(np.asarray(pose, dtype=np.float32))
+            sp.setdefault("gripper", []).append(float(np.asarray(play_action).reshape(-1)[-1]))
 
     def end_attempt(self, results: dict):
         super().end_attempt(results)
