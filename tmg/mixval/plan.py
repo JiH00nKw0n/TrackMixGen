@@ -12,7 +12,8 @@ Conditions per (scene, perturbation), for sources S (the top-ranked CP-Gen sourc
 With three sources that is 3 + 6 x 4 = 27 conditions. Perturbation 0 is the stored scene; perturbations 1..P move
 every free object by a fixed offset (``runtime.perturbation``). Attempts are sorted by scene, perturbation and condition
 and dealt to the shards round-robin, so each shard advances through the scenes in order and a partial run already covers
-the first scenes under every condition.
+the first scenes under every condition. ``--originals-only`` keeps only the orig_<a> conditions: the control run that plays
+the remaining sources unmixed on the same scene instances.
 """
 from __future__ import annotations
 
@@ -42,12 +43,13 @@ def parse_range(text: str) -> list[int]:
     return out
 
 
-def build(sources: list[int], scenes: list[int], perturbations: int) -> list[dict]:
+def build(sources: list[int], scenes: list[int], perturbations: int, originals_only: bool = False) -> list[dict]:
     """The attempts in (scene, perturbation, condition) order, each with its id."""
+    conds = [c for c in conditions(sources) if not originals_only or c["donor"] is None]
     attempts = []
     for scene in scenes:
         for pert in range(perturbations + 1):
-            for c in conditions(sources):
+            for c in conds:
                 attempts.append({"id": f"s{scene:03d}_p{pert}_{c['cond']}", "scene": scene, "pert": pert, **c})
     return attempts
 
@@ -59,10 +61,12 @@ def main(argv=None):
     p.add_argument("--scenes", required=True, help="reset indices of the scenes file, e.g. 25-74")
     p.add_argument("--perturbations", type=int, default=4)
     p.add_argument("--shards", type=int, required=True)
+    p.add_argument("--originals-only", action="store_true",
+                   help="only the orig_<a> conditions (control: the other sources unmixed on the same scene instances)")
     args = p.parse_args(argv)
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    attempts = build(args.sources, parse_range(args.scenes), args.perturbations)
+    attempts = build(args.sources, parse_range(args.scenes), args.perturbations, args.originals_only)
     for k in range(args.shards):
         shard = out / f"shard_{k:02d}"
         shard.mkdir(exist_ok=True)
@@ -70,7 +74,8 @@ def main(argv=None):
             for a in attempts[k::args.shards]:
                 f.write(json.dumps(a) + "\n")
     meta = {"sources": args.sources, "scenes": args.scenes, "perturbations": args.perturbations, "shards": args.shards,
-            "attempts": len(attempts), "conditions": [c["cond"] for c in conditions(args.sources)]}
+            "attempts": len(attempts), "originals_only": args.originals_only,
+            "conditions": sorted({a["cond"] for a in attempts})}
     (out / "plan.json").write_text(json.dumps(meta, indent=1))
     print(json.dumps({k: v for k, v in meta.items() if k != "conditions"}))
 
