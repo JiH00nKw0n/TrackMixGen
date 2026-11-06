@@ -1,0 +1,37 @@
+basis: tmg.generation.method.transform_model (logistic) fit on the A100 baseline ranking pool /data/pools/mimicgen/threading/ours/ours/none/rank_human_demos (3000 attempts, sources drawn uniformly per subtask)
+link: logistic
+attempts: 3000
+success_rate: 0.1843
+num_sources: 10
+r2: 0.09
+subtasks:
+  0:
+    offset: -1.658332
+    source:
+    - 0.0
+    - -0.463752
+    - 0.382218
+    - 0.48473
+    - 0.337646
+    - -0.102166
+    - 0.308691
+    - 0.378904
+    - -0.352172
+    - 0.428101
+    displacement: -1.989905
+    rotation: 0.086065
+  1:
+    offset: -0.200391
+    source:
+    - 0.0
+    - -0.543289
+    - 0.376101
+    - -1.818666
+    - -1.109559
+    - -0.59406
+    - -1.060884
+    - -0.057589
+    - -0.135786
+    - -2.141481
+    displacement: -4.478457
+    rotation: -0.401651

@@ -1,0 +1,54 @@
+basis: tmg.generation.method.transform_model --link decay fit on the A100 ranking pool /data/pools/mimicgen/threading/ours/ours/none/rank_human_demos (3,000 attempts, 2026-11-07)
+link: decay
+mixed_factor: 0.514586
+attempts: 3000
+success_rate: 0.1843
+num_sources: 10
+r2: 0.1005
+subtasks:
+  0:
+    decay_displacement:
+    - 2.33492
+    - 5.108216
+    - 1.344681
+    - 0.044965
+    - 1.447121
+    - 2.921584
+    - 1.22861
+    - 1.008782
+    - 4.175221
+    - 0.0
+    decay_rotation:
+    - 0.078742
+    - 0.0
+    - 0.03389
+    - 0.0
+    - 0.0
+    - 0.137117
+    - 0.047858
+    - 0.0
+    - 0.0
+    - 0.15686
+  1:
+    decay_displacement:
+    - 2.755664
+    - 4.32613
+    - 0.0
+    - 12.448601
+    - 8.889365
+    - 5.058409
+    - 6.083859
+    - 2.376575
+    - 1.949758
+    - 16.066156
+    decay_rotation:
+    - 0.144695
+    - 0.500995
+    - 0.517201
+    - 0.729501
+    - 0.320811
+    - 0.286416
+    - 0.861849
+    - 0.337648
+    - 0.381213
+    - 0.819507

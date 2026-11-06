@@ -1,0 +1,15 @@
+# Mixup exploration, convex mixing with the decay success model (tmg/generation/method/transform_model.py --link decay;
+# user proposal 2026-11-07 from the chapter 4 fragility pool): each source's predicted success starts at 1 at zero
+# transform and falls by the same ratio per unit of displacement and of rotation, at rates of its own, so the weights are
+# near uniform when the scene is close to the sources and move to the sources that tolerate large transforms when it is
+# far. Rule "above_mean" as in mx_convex_above.
+defaults:
+  - mx_none
+  - _self_
+name: mx_convex_decay
+mixing:
+  enabled: true
+  type: convex
+  rule: above_mean
+  model: ${generator.name}/${task.name}
+  model_dir: transform_model_decay

@@ -115,10 +115,12 @@ def _mixer_types() -> dict[str, MixerType]:
     """Mixer implementations by ``method.mixing.type``."""
     if not _MIXERS:
         # imported here, not at the top: guided_mix imports MixContext and MixedSegment from this module
+        from tmg.generation.method.convex_mix import ConvexMixer
         from tmg.generation.method.geometric_mix import JunctionMixer, TransformMixer
         from tmg.generation.method.guided_mix import FixedPairMixer, GuidedMixer
 
-        _MIXERS.update(guided=GuidedMixer, transform=TransformMixer, junction=JunctionMixer, fixed=FixedPairMixer)
+        _MIXERS.update(guided=GuidedMixer, transform=TransformMixer, junction=JunctionMixer, fixed=FixedPairMixer,
+                       convex=ConvexMixer)
     return _MIXERS
 
 

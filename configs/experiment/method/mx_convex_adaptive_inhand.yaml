@@ -1,0 +1,16 @@
+# Mixup exploration, scene-adaptive convex mixing (tmg/generation/method/convex_mix.py, rule "above_mean"): like
+# mx_convex_above, but the logistic success model also has source-by-location terms
+# (configs/experiment/generator/<gen>/transform_model_location/<task>.yaml, fitted with --location), so the set of blended
+# sources and their weights change with where the objects are (user request 2026-11-06).
+# Plus the in-hand term (user request 2026-11-07): the distance between where the carried object sits in the gripper now and
+# where it sat in each source at its segment start (transform_model_location_inhand, fitted with --source).
+defaults:
+  - mx_none
+  - _self_
+name: mx_convex_adaptive_inhand
+mixing:
+  enabled: true
+  type: convex
+  rule: above_mean
+  model: ${generator.name}/${task.name}
+  model_dir: transform_model_location_inhand

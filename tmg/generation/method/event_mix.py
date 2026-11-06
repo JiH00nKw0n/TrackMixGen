@@ -169,6 +169,73 @@ def mix_segments(poses_a, gripper_a, poses_b, gripper_b, weight_a: float, parts:
     return mixed, grip, meta
 
 
+def mix_many(poses, series, weights, parts: str = "both"):
+    """Convex blend of any number of segments: ``(mixed poses, mixed event series, alignment metadata)``.
+
+    ``poses[k]`` are segment k's target poses in its own frozen reference-object frame, ``series[k]`` its scalar event
+    series (positive = close), and ``weights`` one non-negative share per segment that sums to 1. Segments with weight 0
+    are ignored; with one non-zero weight that segment is returned unchanged. The gripper events of the kept segments
+    must share the initial state and the order (``IncompatibleGripperEvents`` otherwise). Each event is placed at the
+    weighted mean of the segments' event steps and every interval between events is time-warped separately; positions
+    are the weighted mean, rotations the weighted rotation mean (``Rotation.mean``), and the event series the weighted
+    mean. ``parts`` keeps the rotations (``position``) or the positions (``rotation``) of the largest-weight segment.
+    With two segments the positions, the timeline and the series equal ``mix_segments``; the rotations differ from its
+    shortest-rotation blend only by the difference between a chordal mean and a geodesic blend.
+    """
+    if parts not in BLEND_PARTS:
+        raise ValueError(f"parts must be one of {BLEND_PARTS}, got {parts!r}")
+    w = np.asarray(weights, dtype=float).reshape(-1)
+    if len(w) != len(poses) or len(w) != len(series):
+        raise ValueError(f"{len(w)} weights for {len(poses)} pose arrays and {len(series)} event series")
+    if not np.all(np.isfinite(w)) or np.any(w < 0) or abs(w.sum() - 1) > 1e-6:
+        raise ValueError("weights must be finite, non-negative and sum to 1")
+    keep = [k for k in range(len(w)) if w[k] > 0]
+    anchor = int(np.argmax(w))
+    if len(keep) == 1:
+        return np.array(poses[anchor], dtype=float), np.array(series[anchor], dtype=float).reshape(-1), {
+            "identity_source": anchor, "weights": w.tolist(), "samples": len(poses[anchor])}
+    segs = []
+    for k in keep:
+        g = np.asarray(series[k], dtype=float).reshape(-1)
+        segs.append((k, _check_poses(poses[k], len(g)), g))
+    base = events(segs[0][2])
+    for k, _, g in segs[1:]:
+        if _matching_events(segs[0][2], g) is None:
+            raise IncompatibleGripperEvents(f"segment {k}: open/close event order or initial commanded state differs from segment {segs[0][0]}")
+    wk = np.array([w[k] for k, _, _ in segs])
+    knots_k = [np.r_[0, events(g)[1], len(p)].astype(float) for _, p, g in segs]
+    desired = sum(wi * kn for wi, kn in zip(wk, knots_k))
+    knots = np.rint(desired).astype(int)
+    if np.any(np.diff(knots) <= 0):
+        raise IncompatibleGripperEvents("rounding collapses a gripper event interval")
+    n = int(knots[-1])
+    times = np.arange(n)
+    aligned, index, grip = [], [], np.zeros(n)
+    for (k, p, g), kn, wi in zip(segs, knots_k, wk):
+        t = np.interp(times, knots, kn)
+        i = np.minimum(np.floor(t + 1e-9).astype(int), len(g) - 1)
+        aligned.append(sample_poses(p, t))
+        index.append(i)
+        grip += wi * g[i]
+    states = [gripper_states(g)[i] for (_, _, g), i in zip(segs, index)]
+    if any(not np.array_equal(states[0], s) for s in states[1:]):
+        raise IncompatibleGripperEvents("warped commands disagree on the event phase")
+    out = np.tile(np.eye(4), (n, 1, 1))
+    a = keep.index(anchor)
+    out[:, :3, 3] = sum(wi * al[:, :3, 3] for wi, al in zip(wk, aligned))
+    for t in range(n):
+        out[t, :3, :3] = Rotation.from_matrix(np.stack([al[t, :3, :3] for al in aligned])).mean(weights=wk).as_matrix()
+    if parts == "position":
+        out[:, :3, :3] = aligned[a][:, :3, :3]
+    if parts == "rotation":
+        out[:, :3, 3] = aligned[a][:, :3, 3]
+    meta = dict(samples=n, weights=w.tolist(), segments=[k for k, _, _ in segs], event_labels=base[2],
+                event_steps={str(k): events(g)[1].tolist() for k, _, g in segs},
+                desired_event_steps=desired[1:-1].tolist(), actual_event_steps=knots[1:-1].tolist(),
+                source_index={str(k): i.tolist() for (k, _, _), i in zip(segs, index)})
+    return out, grip, meta
+
+
 def anchor_rotation_degrees(poses_a, gripper_a, poses_b, gripper_b) -> list[float] | None:
     """Rotation differences (deg) between the two segments at the anchors (start, every close event, end), or
     None when the gripper event structure differs."""

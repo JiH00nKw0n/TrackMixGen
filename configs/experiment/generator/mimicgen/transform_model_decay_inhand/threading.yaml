@@ -1,0 +1,55 @@
+basis: tmg.generation.method.transform_model fit on the A100 ranking pool /data/pools/mimicgen/threading/ours/ours/none/rank_human_demos (3,000 attempts) with --source tmg_data/sources/mimicgen/threading/source.hdf5 (2026-11-07)
+link: decay
+mixed_factor: 1.0
+attempts: 3000
+success_rate: 0.1843
+num_sources: 10
+r2: 0.1537
+subtasks:
+  0:
+    decay_displacement:
+    - 1.394712
+    - 2.127578
+    - 0.0
+    - 0.051374
+    - 0.958848
+    - 1.511761
+    - 0.148616
+    - 0.0
+    - 1.973598
+    - 0.0
+    decay_rotation:
+    - 0.079627
+    - 0.0
+    - 0.023753
+    - 0.0
+    - 0.0
+    - 0.104374
+    - 0.073774
+    - 0.0
+    - 0.0
+    - 0.031989
+  1:
+    decay_displacement:
+    - 3.102763
+    - 1.246967
+    - 0.0
+    - 11.819541
+    - 8.71705
+    - 4.85074
+    - 5.163
+    - 2.337688
+    - 0.29149
+    - 14.772417
+    decay_rotation:
+    - 0.047435
+    - 0.0
+    - 0.440847
+    - 0.869509
+    - 0.318743
+    - 0.111842
+    - 0.734662
+    - 0.300104
+    - 0.06381
+    - 0.648262
+    inhand: 109.776213

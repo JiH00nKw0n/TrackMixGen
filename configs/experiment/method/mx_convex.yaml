@@ -1,0 +1,13 @@
+# Mixup exploration, convex mixing (tmg/generation/method/convex_mix.py): every subtask segment is a convex combination
+# of the source segments weighted by the success the task's logistic success model
+# (configs/experiment/generator/<gen>/transform_model/<task>.yaml) predicts in the current scene, rule "proportional".
+# Same labels and source draw as mx_none, so only the mixing differs from the existing mx_* conditions.
+defaults:
+  - mx_none
+  - _self_
+name: mx_convex
+mixing:
+  enabled: true
+  type: convex
+  rule: proportional
+  model: ${generator.name}/${task.name}
