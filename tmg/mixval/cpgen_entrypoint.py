@@ -1,6 +1,6 @@
 """One shard of the blend-ratio check, inside the CP-Gen image.
 
-    python -m tmg.mixval.entrypoint --template <chunk_spec.json> --shard <dir> --scenes <scenes.hdf5>
+    python -m tmg.mixval.cpgen_entrypoint --template <chunk_spec.json> --shard <dir> --scenes <scenes.hdf5>
 
 ``--template`` is the chunk spec of an all-sources CP-Gen pool chunk of the task (it carries the task, the scene chain,
 CP-Gen's config and the graft hashes). ``<dir>/attempts.jsonl`` is the shard's part of the plan (``plan``); attempts
@@ -40,7 +40,7 @@ def main(argv=None):
 
     extra = spec["extra"]
     with cpgen_checkout(extra["source_root"], workdir=shard / "cwd"):
-        from tmg.mixval import runtime
+        from tmg.mixval import cpgen_runtime as runtime
 
         register_scene_env(spec)
         scenes = runtime.load_scenes(args.scenes, sorted({a["scene"] for a in attempts}))
