@@ -79,12 +79,23 @@ def main(argv=None):
     p.add_argument("--shards", type=int, required=True)
     p.add_argument("--originals-only", action="store_true",
                    help="only the orig_<a> conditions (control: the other sources unmixed on the same scene instances)")
+    p.add_argument("--instances", default=None,
+                   help="JSON file of [scene, pert] pairs: run only these instances (with --reps), instead of every perturbation of --scenes")
+    p.add_argument("--reps", type=int, default=0, help="with --instances: repeats 1..N of each instance with other noise seeds")
+    p.add_argument("--conds", default=None, help="comma-separated condition names to keep (default: all)")
     p.add_argument("--parts-share", type=int, default=None,
                    help="with two --sources: position-only and rotation-only blends at this donor share, both sources as the base")
     args = p.parse_args(argv)
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     attempts = build(args.sources, parse_range(args.scenes), args.perturbations, args.originals_only, args.parts_share)
+    if args.conds:
+        keep = set(args.conds.split(","))
+        attempts = [a for a in attempts if a["cond"] in keep]
+    if args.instances:   # the repeat check: chosen instances only, each repeated with other noise (rep 1..N)
+        chosen = {tuple(x) for x in json.loads(Path(args.instances).read_text())}
+        attempts = [{**a, "id": f"{a['id']}_r{r}", "rep": r} for r in range(1, args.reps + 1)
+                    for a in attempts if (a["scene"], a["pert"]) in chosen]
     for k in range(args.shards):
         shard = out / f"shard_{k:02d}"
         shard.mkdir(exist_ok=True)
@@ -93,6 +104,7 @@ def main(argv=None):
                 f.write(json.dumps(a) + "\n")
     meta = {"sources": args.sources, "scenes": args.scenes, "perturbations": args.perturbations, "shards": args.shards,
             "attempts": len(attempts), "originals_only": args.originals_only, "parts_share": args.parts_share,
+            "instances": args.instances, "reps": args.reps,
             "conditions": sorted({a["cond"] for a in attempts})}
     (out / "plan.json").write_text(json.dumps(meta, indent=1))
     print(json.dumps({k: v for k, v in meta.items() if k != "conditions"}))

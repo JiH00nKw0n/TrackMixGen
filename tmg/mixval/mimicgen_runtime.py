@@ -146,7 +146,7 @@ class FixedMimicGenRuntime(mgrt.MimicGenRuntime):
         sync_controllers(env)
         applied = sc.apply_perturbation(sim, sc.perturbation(a["scene"], a["pert"], len(sc.free_joints(sim))))
         sync_controllers(env)
-        seed = sc.instance_seed(a["scene"], a["pert"])
+        seed = sc.instance_seed(a["scene"], a["pert"], a.get("rep", 0))
         sc.seed_everything(seed)
         self.reset_info = {"perturbation": applied, "seed": seed}
         self.open = True

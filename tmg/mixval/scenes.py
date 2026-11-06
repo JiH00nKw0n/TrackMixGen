@@ -19,8 +19,10 @@ PERT_YAW_DEG = 5.0
 MJ_FREE = 0                # mjJNT_FREE
 
 
-def instance_seed(scene: int, pert: int) -> int:
-    return int(np.random.SeedSequence([PERT_SEED, int(scene), int(pert), 1]).generate_state(1)[0])
+def instance_seed(scene: int, pert: int, rep: int = 0) -> int:
+    """Seed of the random streams of one scene instance. ``rep`` > 0 repeats the instance with other noise (the same scene and
+    perturbation, other subtask boundaries and action noise); rep 0 is the seed every first run used."""
+    return int(np.random.SeedSequence([PERT_SEED, int(scene), int(pert), 1 + int(rep)]).generate_state(1)[0])
 
 
 def seed_everything(seed: int) -> None:
