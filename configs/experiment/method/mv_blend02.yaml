@@ -1,0 +1,14 @@
+# Blend-ratio study, policy check: every attempt follows source 0 blended with source 2 at a 25 % donor share (weight_a 0.75)
+# in every subtask, the best blend on the exploration scenes of the generation check (56.4 %; mix_0_2_25 there).
+defaults:
+  - mx_none
+  - _self_
+name: mv_blend02
+sources:
+  list: [0]
+mixing:
+  enabled: true
+  type: fixed
+  donor: 2
+  weight_a: 0.75
+  max_anchor_rotation_deg: 40.0

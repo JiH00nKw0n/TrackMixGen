@@ -34,6 +34,17 @@ def conditions(sources: list[int], shares=DONOR_SHARES) -> list[dict]:
     return out
 
 
+def parts_conditions(a: int, b: int, share: int) -> list[dict]:
+    """Which part of a blend causes a failure: source a alone, then a blended with b at donor share ``share`` % in both
+    position and rotation (mix_), in position only with a's rotations (mixpos_), and in rotation only with a's positions
+    (mixrot_). The timeline and the gripper commands are the blend's in all three (event_mix.mix_segments)."""
+    w = round(1 - share / 100, 4)
+    out = [{"cond": f"orig_{a}", "primary": a, "donor": None, "weight_a": 1.0, "donor_share": 0, "parts": "both"}]
+    for prefix, parts in (("mix", "both"), ("mixpos", "position"), ("mixrot", "rotation")):
+        out.append({"cond": f"{prefix}_{a}_{b}_{share}", "primary": a, "donor": b, "weight_a": w, "donor_share": share, "parts": parts})
+    return out
+
+
 def parse_range(text: str) -> list[int]:
     """``25-74`` or ``25,30,31`` (inclusive ranges)."""
     out = []
@@ -43,9 +54,14 @@ def parse_range(text: str) -> list[int]:
     return out
 
 
-def build(sources: list[int], scenes: list[int], perturbations: int, originals_only: bool = False) -> list[dict]:
-    """The attempts in (scene, perturbation, condition) order, each with its id."""
-    conds = [c for c in conditions(sources) if not originals_only or c["donor"] is None]
+def build(sources: list[int], scenes: list[int], perturbations: int, originals_only: bool = False, parts_share: int | None = None) -> list[dict]:
+    """The attempts in (scene, perturbation, condition) order, each with its id. With ``parts_share``, ``sources`` is one pair
+    (a, b) and the conditions are ``parts_conditions`` with each of the two as the base."""
+    if parts_share is not None:
+        a, b = sources
+        conds = parts_conditions(a, b, parts_share) + parts_conditions(b, a, parts_share)
+    else:
+        conds = [c for c in conditions(sources) if not originals_only or c["donor"] is None]
     attempts = []
     for scene in scenes:
         for pert in range(perturbations + 1):
@@ -63,10 +79,12 @@ def main(argv=None):
     p.add_argument("--shards", type=int, required=True)
     p.add_argument("--originals-only", action="store_true",
                    help="only the orig_<a> conditions (control: the other sources unmixed on the same scene instances)")
+    p.add_argument("--parts-share", type=int, default=None,
+                   help="with two --sources: position-only and rotation-only blends at this donor share, both sources as the base")
     args = p.parse_args(argv)
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    attempts = build(args.sources, parse_range(args.scenes), args.perturbations, args.originals_only)
+    attempts = build(args.sources, parse_range(args.scenes), args.perturbations, args.originals_only, args.parts_share)
     for k in range(args.shards):
         shard = out / f"shard_{k:02d}"
         shard.mkdir(exist_ok=True)
@@ -74,7 +92,7 @@ def main(argv=None):
             for a in attempts[k::args.shards]:
                 f.write(json.dumps(a) + "\n")
     meta = {"sources": args.sources, "scenes": args.scenes, "perturbations": args.perturbations, "shards": args.shards,
-            "attempts": len(attempts), "originals_only": args.originals_only,
+            "attempts": len(attempts), "originals_only": args.originals_only, "parts_share": args.parts_share,
             "conditions": sorted({a["cond"] for a in attempts})}
     (out / "plan.json").write_text(json.dumps(meta, indent=1))
     print(json.dumps({k: v for k, v in meta.items() if k != "conditions"}))

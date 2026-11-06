@@ -116,9 +116,9 @@ def _mixer_types() -> dict[str, MixerType]:
     if not _MIXERS:
         # imported here, not at the top: guided_mix imports MixContext and MixedSegment from this module
         from tmg.generation.method.geometric_mix import JunctionMixer, TransformMixer
-        from tmg.generation.method.guided_mix import GuidedMixer
+        from tmg.generation.method.guided_mix import FixedPairMixer, GuidedMixer
 
-        _MIXERS.update(guided=GuidedMixer, transform=TransformMixer, junction=JunctionMixer)
+        _MIXERS.update(guided=GuidedMixer, transform=TransformMixer, junction=JunctionMixer, fixed=FixedPairMixer)
     return _MIXERS
 
 
@@ -160,4 +160,8 @@ def build_method(cfg: Mapping, *, chunk_seed: int) -> Method:
         from tmg.generation.method.source_select import TopKSources
 
         sources = TopKSources.from_config(source_cfg, chunk_seed=chunk_seed)
+    elif source_cfg.get("list") is not None:
+        from tmg.generation.method.source_select import FixedSources
+
+        sources = FixedSources.from_config(source_cfg, chunk_seed=chunk_seed)
     return Method(name=name, mixer=mixer, follower_factory=factory, labels=labels, sources=sources)

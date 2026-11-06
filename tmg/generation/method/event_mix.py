@@ -61,12 +61,19 @@ def sample_poses(poses: np.ndarray, times: np.ndarray) -> np.ndarray:
     return out
 
 
-def blend_poses(a: np.ndarray, b: np.ndarray, weight_a) -> np.ndarray:
+BLEND_PARTS = ("both", "position", "rotation")
+
+
+def blend_poses(a: np.ndarray, b: np.ndarray, weight_a, parts: str = "both") -> np.ndarray:
     """Linear translation blend and shortest-rotation blend of two aligned pose arrays.
 
     ``weight_a`` is the share of ``a``: one number for the whole array, or one number per pose (shape ``(n,)``)
-    for a blend whose weight changes along the segment.
+    for a blend whose weight changes along the segment. ``parts`` blends both (default), only the positions (the
+    rotations stay ``a``'s), or only the rotations (the positions stay ``a``'s); the blend-ratio study uses the last two
+    to tell which part of a blend causes a failure.
     """
+    if parts not in BLEND_PARTS:
+        raise ValueError(f"parts must be one of {BLEND_PARTS}, got {parts!r}")
     a = np.asarray(a, dtype=float)
     b = np.asarray(b, dtype=float)
     if a.shape != b.shape:
@@ -76,14 +83,18 @@ def blend_poses(a: np.ndarray, b: np.ndarray, weight_a) -> np.ndarray:
     rb = Rotation.from_matrix(b[:, :3, :3])
     delta = ra.inv() * rb
     if np.ndim(weight_a) == 0:
-        out[:, :3, 3] = weight_a * a[:, :3, 3] + (1 - weight_a) * b[:, :3, 3]
-        out[:, :3, :3] = (ra * Rotation.from_rotvec((1 - weight_a) * delta.as_rotvec())).as_matrix()
-        return out
-    w = np.asarray(weight_a, dtype=float).reshape(-1)
-    if len(w) != len(a):
-        raise ValueError(f"{len(w)} weights for {len(a)} poses")
-    out[:, :3, 3] = w[:, None] * a[:, :3, 3] + (1 - w)[:, None] * b[:, :3, 3]
-    out[:, :3, :3] = (ra * Rotation.from_rotvec((1 - w)[:, None] * delta.as_rotvec())).as_matrix()
+        w_pos = w_rot = float(weight_a)
+    else:
+        w = np.asarray(weight_a, dtype=float).reshape(-1)
+        if len(w) != len(a):
+            raise ValueError(f"{len(w)} weights for {len(a)} poses")
+        w_pos, w_rot = w[:, None], w[:, None]
+    if parts == "rotation":
+        w_pos = 1.0
+    if parts == "position":
+        w_rot = 1.0
+    out[:, :3, 3] = w_pos * a[:, :3, 3] + (1 - w_pos) * b[:, :3, 3]
+    out[:, :3, :3] = (ra * Rotation.from_rotvec((1 - w_rot) * delta.as_rotvec())).as_matrix()
     return out
 
 
@@ -133,13 +144,14 @@ def align_segments(poses_a, gripper_a, poses_b, gripper_b, weight_a: float):
     return sample_poses(pa, ta), sample_poses(pb, tb), ia, ib, meta
 
 
-def mix_segments(poses_a, gripper_a, poses_b, gripper_b, weight_a: float):
+def mix_segments(poses_a, gripper_a, poses_b, gripper_b, weight_a: float, parts: str = "both"):
     """Return (mixed poses, mixed gripper commands, alignment metadata).
 
     Inputs are the target poses of a subtask segment, each expressed in its own frozen reference-object
     frame, and the per-step gripper commands of shape (N,) or (N, 1). The events are placed at the ``weight_a``
     blend of both sources' event steps (:func:`align_segments`) and the poses and commands are blended with
-    ``weight_a`` at every step.
+    ``weight_a`` at every step. ``parts`` limits the pose blend to the positions or the rotations (:func:`blend_poses`);
+    the timeline and the gripper commands are the same for all three.
     """
     if not np.isfinite(weight_a) or not 0 <= weight_a <= 1:
         raise ValueError("weight_a must lie in [0, 1]")
@@ -149,7 +161,7 @@ def mix_segments(poses_a, gripper_a, poses_b, gripper_b, weight_a: float):
             "identity_source": "A" if weight_a == 1 else "B", "weight_a": float(weight_a), "samples": len(p)}
     ga, gb = _check_commands(gripper_a, gripper_b)
     aligned_a, aligned_b, ia, ib, align = align_segments(poses_a, ga, poses_b, gb, weight_a)
-    mixed = blend_poses(aligned_a, aligned_b, weight_a)
+    mixed = blend_poses(aligned_a, aligned_b, weight_a, parts)
     grip = weight_a * ga.reshape(-1)[ia] + (1 - weight_a) * gb.reshape(-1)[ib]
     if ga.ndim == 2:
         grip = grip[:, None]

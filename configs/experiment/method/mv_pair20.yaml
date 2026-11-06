@@ -1,0 +1,8 @@
+# Blend-ratio study, policy check: every attempt follows source 2 or source 0 (one uniform draw per attempt, the same source
+# for both subtasks), unmixed. Tells whether using both sources' data is enough without blending their trajectories.
+defaults:
+  - mx_none
+  - _self_
+name: mv_pair20
+sources:
+  list: [2, 0]

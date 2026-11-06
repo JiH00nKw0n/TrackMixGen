@@ -38,7 +38,7 @@ from tmg.generation.method.guided_mix import GuidedMixConfig, GuidedMixer
 from tmg.generation.method.interfaces import Method
 from tmg.mixval import scenes as sc
 
-RECORD_KEYS = ("subtask", "mixed", "source_b", "anchor_rotation_degrees", "identity_reason")
+RECORD_KEYS = ("subtask", "mixed", "source_b", "anchor_rotation_degrees", "identity_reason", "blend_parts")
 
 
 def sync_controllers(env) -> None:
@@ -78,6 +78,7 @@ class FixedMixer(GuidedMixer):
 
     def _decide(self, context):
         a = self.owner.current
+        self.blend_parts = a.get("parts", "both")
         primary = int(context.primary)
         record = {"subtask": int(context.subtask_ind), "source_a": primary, "weight_a": a["weight_a"], "mixed": False}
         self.owner.mix_log.append(record)

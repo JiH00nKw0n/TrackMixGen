@@ -87,6 +87,7 @@ class GuidedMixer:
         self.seed_offset = int(config.seed_offset)
         self.calls = 0
         self._groups: dict[int, tuple[set[int], set[int]]] = {}
+        self.blend_parts = "both"   # event_mix.blend_poses parts; the blend-ratio study sets position or rotation per attempt
 
     def groups(self, subtask_ind: int) -> tuple[set[int], set[int]]:
         """``(good, bad)`` source sets of ``subtask_ind`` under the configured split (cached per subtask)."""
@@ -232,14 +233,15 @@ class GuidedMixer:
         obj_a, inv_a, pa, ga, sa = primary
         eef_a_obj = inv_a @ np.asarray(context.primary_eef_start, dtype=float)
         if not callable(weight):
-            mixed_obj, grip, meta = mix_segments(pa, sa, donor.poses, donor.series, weight)
-            eef_start = obj_a @ blend_poses(eef_a_obj[None], donor.eef_start[None], weight)[0]
+            mixed_obj, grip, meta = mix_segments(pa, sa, donor.poses, donor.series, weight, self.blend_parts)
+            eef_start = obj_a @ blend_poses(eef_a_obj[None], donor.eef_start[None], weight, self.blend_parts)[0]
             gripper = self._blend_grippers(ga, donor.grippers, grip, meta, weight)
         else:
             mixed_obj, gripper, meta = self._blend_schedule(pa, sa, ga, donor, weight)
             eef_start = obj_a @ blend_poses(eef_a_obj[None], donor.eef_start[None], float(meta["weights"][0]))[0]
         mixed = transform_all(obj_a, mixed_obj)
-        record.update(mixed=True, source_b=int(donor.index), anchor_rotation_degrees=donor.angles, alignment=meta)
+        record.update(mixed=True, source_b=int(donor.index), anchor_rotation_degrees=donor.angles, alignment=meta,
+                      blend_parts=self.blend_parts)
         return MixedSegment(eef_start, mixed, gripper, record)
 
     def _choose(self, context: MixContext, primary: int, candidates: list[_Donor], call: int, record: dict):
@@ -259,3 +261,34 @@ class GuidedMixer:
         grip = w * sa[ia] + (1 - w) * donor.series[ib]
         meta = dict(weights=[round(float(v), 4) for v in w], **align)
         return mixed, self._blend_grippers(ga, donor.grippers, grip, meta, w), meta
+
+
+class FixedPairMixer(GuidedMixer):
+    """``GuidedMixer`` with the donor and the share fixed by the method config (``mixing.donor``, ``mixing.weight_a``):
+    every subtask of a primary other than the donor is blended with the donor, provided the pair's gripper events match and
+    its anchor rotations stay within ``max_anchor_rotation_deg`` (otherwise unchanged, with the reason recorded). No ranking
+    and no success groups. Used by the policy check of the blend-ratio study (branch mixval/threading-blend-ratio)."""
+
+    def __init__(self, *, donor: int, chunk_seed: int, config: GuidedMixConfig):
+        super().__init__(ranking=None, chunk_seed=chunk_seed, config=config)
+        self.donor = int(donor)
+
+    @classmethod
+    def from_config(cls, cfg: Mapping, *, chunk_seed: int) -> FixedPairMixer:
+        return cls(donor=int(cfg["donor"]), chunk_seed=chunk_seed, config=GuidedMixConfig.from_mapping(cfg))
+
+    def describe(self) -> dict:
+        return {"type": "fixed", "donor": self.donor, "weight_a": self.weight_a, "max_anchor_rotation_deg": self.max_anchor_deg,
+                "gripper_events": self.detector.name}
+
+    def groups(self, subtask_ind: int) -> tuple[set[int], set[int]]:
+        return {self.donor}, set()
+
+    def _identity_reason(self, context: MixContext, primary: int, good: set[int], bad: set[int]) -> str | None:
+        if primary == self.donor:
+            return "primary is the donor"
+        if not context.has_reference_object:
+            return "subtask has no reference object"
+        if self.weight_a >= 1:
+            return "weight_a is 1"
+        return None

@@ -1,0 +1,8 @@
+# Blend-ratio study, policy check (branch mixval/threading-blend-ratio): every attempt follows source 1, the best single
+# source on the exploration scenes of the generation check (42.7 % there). No mixing, no path following.
+defaults:
+  - mx_none
+  - _self_
+name: mv_single1
+sources:
+  list: [1]

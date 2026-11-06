@@ -50,3 +50,35 @@ class TopKSources:
     def describe(self) -> dict:
         """JSON-able description for logs and provenance."""
         return {"type": "top_k", "top_k": self.top_k, "ranking": self.ranking.describe()}
+
+
+class FixedSources:
+    """Sources fixed by the method config (``method.sources.list``), one per attempt: subtask 0 draws uniformly from the list
+    (private stream ``SeedSequence([chunk_seed, attempt, seed_offset])``) and every later subtask of the attempt reuses that
+    source, so an attempt follows one demonstration even where the generator would pick per subtask. Used by the policy
+    check of the blend-ratio study (branch mixval/threading-blend-ratio): the best single source, or two sources unmixed."""
+
+    def __init__(self, *, sources, chunk_seed: int, seed_offset: int = DEFAULT_SEED_OFFSET):
+        self.sources = [int(s) for s in sources]
+        if not self.sources:
+            raise ValueError("sources.list must name at least one source")
+        self.chunk_seed = int(chunk_seed)
+        self.seed_offset = int(seed_offset)
+        self.attempts = 0
+        self.current: int | None = None
+
+    @classmethod
+    def from_config(cls, cfg: Mapping, *, chunk_seed: int) -> FixedSources:
+        """Build from the ``method.sources`` block (``list``, optional ``seed_offset``)."""
+        return cls(sources=cfg["list"], chunk_seed=chunk_seed, seed_offset=int(cfg.get("seed_offset", DEFAULT_SEED_OFFSET)))
+
+    def pick(self, subtask_ind: int) -> int:
+        """Subtask 0: a new draw for the attempt; later subtasks: the attempt's source."""
+        if int(subtask_ind) == 0 or self.current is None:
+            rng = np.random.default_rng(np.random.SeedSequence([self.chunk_seed, self.attempts, self.seed_offset]))
+            self.attempts += 1
+            self.current = self.sources[int(rng.integers(len(self.sources)))]
+        return self.current
+
+    def describe(self) -> dict:
+        return {"type": "fixed", "list": self.sources}
