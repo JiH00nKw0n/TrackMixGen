@@ -61,7 +61,8 @@ SING_ENV_EXTRA = $(if $(EGL_DEVICE_ID),--env MUJOCO_EGL_DEVICE_ID=$(EGL_DEVICE_I
 endif
 # the CP-Gen image needs the GPU (cuRobo motion planning) also for generation and evaluation
 ifeq ($(IMAGE),cpgen)
-DOCKER_GPU = --gpus all
+# ISAAC_GPU (a GPU index) exposes only that GPU, so cuRobo and the EGL device are both index 0 in the container
+DOCKER_GPU = --gpus $(if $(ISAAC_GPU),device=$(ISAAC_GPU),all)
 SING_NV    = --nv
 # CP-Gen writes into two folders of the image: cuRobo's task configs (it adds its straight-line cost inside the cuRobo
 # checkout) and MimicGen's ShapeNet mug assets (Mug Cleanup writes a scaled mug xml next to the mesh). Both are read-only
