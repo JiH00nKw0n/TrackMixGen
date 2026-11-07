@@ -1,0 +1,9 @@
+# Source ranking of DexMimicGen GR1 Microwave Opening. PROVISIONAL (2026-11-07): the 3,000-attempt ranking pool
+# (pools/dexmimicgen/microwave/ours/none/rank_human_demos) used the official nearest-neighbour choice and so only sources 4,
+# 6 and 7; the other sources are listed after them in index order. mx_random10 reads only the set of sources, not the order.
+# Replaced by the order measured on the mx_random10 pool before mx_top1 runs.
+generator: dexmimicgen
+task: microwave
+basis: PROVISIONAL, see the header
+default:
+  order: [7, 6, 4, 0, 1, 2, 3, 5, 8, 9]

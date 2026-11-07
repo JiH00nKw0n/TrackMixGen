@@ -137,6 +137,12 @@ class AutoDataRuntime(IsaacLabRuntime):
         return (int(getattr(spec, "num_interpolation_steps", 0)), int(getattr(spec, "num_fixed_steps", 0)),
                 float(getattr(spec, "action_noise", 0.0)))
 
+    def current_eef_pose(self, generator, env_id: int, eef_name: str) -> np.ndarray:
+        return _np(generator.datastream.get_robot_eef_pose(env_ids=[env_id], eef_name=eef_name)[0])
+
+    def current_object_poses(self, generator, env_id: int) -> dict:
+        return {k: _np(v[0]) for k, v in generator.datastream.get_object_poses(env_ids=[env_id]).items()}
+
     def measured_poses(self, datastream, env_id: int, eefs) -> dict:
         """Measured end-effector poses: the configured links (``measure_links``) or the embodiment's observed eef poses."""
         if self.layout.measure_links:
@@ -198,6 +204,8 @@ def install(runtime: AutoDataRuntime, graft_hashes: dict) -> dict:
     gen.insert_before_return('_tmg.end_attempt(self, env_id, {"success": False})', occurrence=0, expected_returns=2)
     gen.insert_before_return('_tmg.end_attempt(self, env_id, {"success": buffers.success})', occurrence=1, expected_returns=2)
     builder = graft_builder(DataGenerator, runtime, graft_hashes.get("trajectory"))
+    if getattr(runtime.method, "sources", None) is not None:      # top-k ranked sources replace the official choice
+        builder.wrap_assign_value("selected_src_demo_ind", "_tmg.pick_source", extra_args=("locals()",))
     exe = Graft(MultiWaypoint.execute, expected_hash=graft_hashes.get("execute"), label="MultiWaypoint.execute")
     exe.insert_after_assign("play_action", "_tmg.record_command(self, datastream, env_id, play_action)", occurrence=0)
     exe.name_final_return("success")

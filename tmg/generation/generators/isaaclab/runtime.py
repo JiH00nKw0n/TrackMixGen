@@ -149,6 +149,7 @@ class IsaacLabRuntime:
         self._pending: dict | None = None
         self._pending_track: dict | None = None
         self._selected: dict[str, int] = {}           # eef -> source demonstration chosen in this attempt
+        self._carried: dict[str, str | None] = {}     # eef -> reference object of its previous subtask in this attempt
         self._seg_id = -1
         self._action_owner = None                     # object whose target_eef_pose_to_action is wrapped
         self._original_action_fn = None
@@ -191,6 +192,14 @@ class IsaacLabRuntime:
         cfg = generator.env_cfg.subtask_configs[eef_name][subtask_ind]
         return int(cfg.num_interpolation_steps), int(cfg.num_fixed_steps), float(cfg.action_noise)
 
+    def current_eef_pose(self, generator, env_id: int, eef_name: str) -> np.ndarray:
+        """The end effector's pose now, in the frame of the sources' ``eef_pose`` (the controller's eef frame)."""
+        return _np(generator.env.get_robot_eef_pose(env_ids=[env_id], eef_name=eef_name)[0])
+
+    def current_object_poses(self, generator, env_id: int) -> dict:
+        """Every object's pose now (4x4)."""
+        return {k: _np(v[0]) for k, v in generator.env.get_object_poses(env_ids=[env_id]).items()}
+
     def measured_poses(self, owner, env_id: int, eefs) -> dict:
         """Measured end-effector poses: the configured links (``measure_links``) or the environment's observed eef poses."""
         if self.layout.measure_links:
@@ -212,6 +221,7 @@ class IsaacLabRuntime:
         self._attempt_t0 = time.time()
         self._labels, self._executed, self._pending, self._pending_track = [], [], None, None
         self._selected = {}
+        self._carried = {}
         self.rec.begin_attempt()
         self._seg_id = -1
         if self._hand_layout is None:
@@ -286,15 +296,49 @@ class IsaacLabRuntime:
                                                                         start, end, soft)
             object_poses.append(object_pose)
             segments.append((eef_i, targets_i, hand_i))
+        extra = {"eef": eef_name, "soft": soft}
+        current = local_vars.get("subtask_object_pose")
+        if current is not None and not soft:
+            extra["current_object_pose"] = _np(current)
+        carried = self._carried.get(eef_name)
+        if carried is not None and not soft:          # the reference object of this hand's previous subtask
+            env_id = int(local_vars["env_id"])
+            now = self._hand_in_object(self.current_eef_pose(generator, env_id, eef_name),
+                                       self.current_object_poses(generator, env_id)[carried])
+            starts = [int(bounds[i, subtask_ind][0]) for i in range(len(infos))]
+            extra["inhand_gaps"] = [float(np.linalg.norm(now - self._hand_in_object(_np(info.eef_pose[eef_name][t]),
+                                                                                      _np(info.object_poses[carried][t]))))
+                                    for info, t in zip(infos, starts)]
+            extra["carried_object"] = carried
+        self._carried[eef_name] = object_name
         context = MixContext(subtask_ind=subtask_ind, primary=primary, primary_eef_start=_np(eef[0]),
                              primary_targets=_np(targets), primary_gripper=_np(grippers), src_object_poses=object_poses,
                              src_segments=segments, num_sources=len(infos), has_reference_object=object_name is not None,
-                             rng=np.random.default_rng(0), extra={"eef": eef_name, "soft": soft})
+                             rng=np.random.default_rng(0), extra=extra)
         mixed = self.method.mixer.mix(context)
         self._last_mix = mixed.record
         if not mixed.record.get("mixed"):
             return eef, targets, unchanged
         return self.pack_mixed(mixed, eef, targets, grippers, unchanged, eef_name)
+
+    @staticmethod
+    def _hand_in_object(eef_pose, object_pose) -> np.ndarray:
+        """Position of the end effector in an object's frame (both 4x4 world poses). The Isaac Lab in-hand gap uses this
+        side of the relation, not the object in the gripper frame as MimicGen's does, because the generation records of
+        these tasks measure a wrist link whose origin is the eef frame's but whose orientation is not."""
+        eef_pose, object_pose = np.asarray(eef_pose, dtype=float), np.asarray(object_pose, dtype=float)
+        return object_pose[:3, :3].T @ (eef_pose[:3, 3] - object_pose[:3, 3])
+
+    def pick_source(self, local_vars: dict, official: int) -> int:
+        """Grafted around ``selected_src_demo_ind = ...``: the official choice, or a draw of ``method.sources`` (top-k
+        ranked sources) when the builder made a new choice for this subtask; the draw is also written back to the
+        builder's per-eef choices so later subtasks and the other hands reuse it as they would the official one."""
+        sources = getattr(self.method, "sources", None)
+        if sources is None or not local_vars.get("need_selection"):
+            return official
+        k = int(sources.pick(int(local_vars["subtask_ind"])))
+        local_vars["selected_src_demo_inds"][str(local_vars["eef_name"])] = k
+        return k
 
     def record_subtask(self, local_vars: dict) -> None:
         """Grafted after the transformed sequence: the subtask's source, boundaries and object pose, plus the mix record."""

@@ -1,0 +1,11 @@
+# Mixup exploration, "random source": every attempt draws its source uniformly among all 10 source demonstrations
+# (tmg/generation/method/source_select.py, top_k = all sources of the ranking, so the order does not matter); no mixing,
+# no path following. For DexMimicGen this replaces the official nearest-neighbour choice (nn_k 3), which on the Microwave
+# scenes always picks sources 4, 6 or 7, so that the question 5 baseline matches question 4's random source (2026-11-07).
+defaults:
+  - mx_none
+  - _self_
+name: mx_random10
+sources:
+  top_k: 10
+  ranking: ${generator.name}/${task.name}
