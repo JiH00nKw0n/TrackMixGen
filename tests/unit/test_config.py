@@ -34,7 +34,11 @@ def test_method_variants_compose(monkeypatch, tmp_path):
         assert plain["method"]["name"] == name
         assert plain["method"]["mixing"]["enabled"] is mixing
         assert plain["method"]["tracking"]["enabled"] is tracking
-        assert plain["method"]["mixing"]["ranking"] == "mimicgen/square" and plain["method"]["mixing"]["good_fraction"] == 0.5
+        assert plain["method"]["mixing"]["type"] == "logistic" and plain["method"]["mixing"]["coefficients"] == "mimicgen/square"
+    for k in (1, 3, 5):
+        plain = resolved(compose("generate", ["task=square", f"method=rank_top{k}"]))
+        assert plain["method"]["sources"] == {"type": "rank_based", "top_k": k, "ranking": "mimicgen/square"}
+        assert plain["method"]["mixing"]["enabled"] is False and plain["method"]["tracking"]["enabled"] is False
 
 
 def test_check_scene_composes_for_every_mimicgen_task(tmp_path):

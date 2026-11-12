@@ -1,14 +1,11 @@
-# TrackMix: guided source mixing + error-adaptive path following + pre-noise action labels.
+# TrackMix: logistic source mixing + error-adaptive path following + pre-noise action labels.
 name: trackmix
 mixing:
   enabled: true
-  type: guided                      # implementation (tmg/generation/method/guided_mix.py); a variant adds a class and a name here
-  weight_a: 0.8                     # share of the primary (selected) source in the blend
-  max_anchor_rotation_deg: 20.0     # donor allowed only if hand orientation differs at most this much at the anchors
-  ranking: ${generator.name}/${task.name}   # configs/experiment/generator/<gen>/ranking/<task>.yaml (tmg rank_sources)
-  good_fraction: 0.5                # top ceil(N * fraction) ranked sources count as high-success (donors)
-  good_count: null                  # explicit count instead of the fraction, when set
-  seed_offset: 817263               # mixes with a private RNG seeded from (chunk seed, call index, this)
+  type: logistic                    # tmg/generation/method/logistic_mix.py: per subtask, predict every source's success in the
+                                    # current scene and blend the sources at or above the mean prediction, weighted by it
+  coefficients: ${generator.name}/${task.name}   # configs/experiment/generator/<gen>/coefficients/<task>.yaml (tmg fit_coefficients);
+                                    # `make generate` builds it from scratch when missing (scripts/ensure_coefficients.sh)
 tracking:
   enabled: true
   type: error_adaptive              # implementation (tmg/generation/method/tracking.py)

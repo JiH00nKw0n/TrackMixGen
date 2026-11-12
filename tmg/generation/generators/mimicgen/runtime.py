@@ -8,6 +8,7 @@ Anchors (by the name the official statement assigns):
 
 generate():
   after  ``new_initial_state = env.get_state()``                 -> _tmg.begin_attempt(env)
+  after  ``selected_src_demo_ind = self.select_source_demo(...)`` -> source rule (identity returns the official pick)
   after  ``src_subtask_object_pose = ...``                       -> segment mixer (identity returns inputs)
   after  ``transformed_seq = WaypointSequence.from_poses(...)``   -> _tmg.record_subtask(locals())
   before the final ``return results``                            -> _tmg.end_attempt(results)
@@ -20,6 +21,8 @@ execute():
   after  ``cur_success_metrics = env.is_success()``               -> _tmg.record_success(cur_success_metrics, env_interface)
 
 With the identity method every callback only records: no random draw, no changed value, no changed file.
+A source rule (``method.sources``, ``RankBasedSampling``: top-K of the ranking file) replaces the official pick after the
+official selection ran, so the official selection's own random draws are taken as before.
 With the follower, grafted waypoints carry ``noise=None`` so the official ``np.random.randn`` line is skipped
 and ``pre_noise`` applies the noise the execution bookkeeping chose (a global draw for an original waypoint,
 a private draw for an extra step).
@@ -68,6 +71,31 @@ class MimicGenRuntime:
         self.exec.begin_attempt()
         self._last_mix = None
         self._traj = None
+        self._carried = None
+
+    def select_source(self, subtask_ind, official) -> int:
+        """Grafted after the official source selection: the method's source rule's pick, or the official one."""
+        if self.method.sources is None:
+            return official
+        return int(self.method.sources.pick(int(subtask_ind)))
+
+    def scene_extra(self, local_vars: dict, infos, all_inds, subtask_ind: int, object_name) -> dict:
+        """What the logistic mixer needs of the current scene: the reference object's pose the segment is moved to and,
+        from the second subtask on, the in-hand pose (the previous subtask's reference object in the end-effector frame)
+        now and in every source at the start of its segment. The same quantities as the attempt record's ``cur_obj_pose``,
+        ``eef_pose`` and ``objects`` (``tmg fit_coefficients`` reads those)."""
+        from tmg.generation.method.success_model import in_hand
+        current = local_vars.get("cur_object_pose")
+        extra = {"current_object_pose": None if current is None else np.array(current)}
+        carried = self._carried
+        if carried is not None:
+            cur = local_vars["cur_datagen_info"]
+            extra["carried_object"] = carried
+            extra["current_in_hand"] = in_hand(np.array(cur.eef_pose), np.array(cur.object_poses[carried]))
+            extra["source_in_hand"] = [in_hand(np.array(info.eef_pose[int(all_inds[i, subtask_ind][0])]),
+                                               np.array(info.object_poses[carried][int(all_inds[i, subtask_ind][0])]))
+                                       for i, info in enumerate(infos)]
+        return extra
 
     def mix_segment(self, generator, local_vars: dict):
         """Grafted after the source segment is extracted: return the (possibly mixed) first eef pose array,
@@ -89,11 +117,13 @@ class MimicGenRuntime:
             segments.append((np.array(info.eef_pose[start]), np.array(info.target_pose[start:end]),
                              np.array(info.gripper_action[start:end])))
             object_poses.append(None if object_name is None else np.array(info.object_poses[object_name][start]))
+        extra = self.scene_extra(local_vars, infos, all_inds, subtask_ind, object_name)
+        self._carried = object_name
         context = MixContext(
             subtask_ind=subtask_ind, primary=int(local_vars["selected_src_demo_ind"]),
             primary_eef_start=np.array(eef[0]), primary_targets=np.array(targets), primary_gripper=np.array(grippers),
             src_object_poses=object_poses, src_segments=segments, num_sources=len(infos),
-            has_reference_object=object_name is not None, rng=np.random.default_rng(0))
+            has_reference_object=object_name is not None, rng=np.random.default_rng(0), extra=extra)
         mixed = self.method.mixer.mix(context)
         self._last_mix = mixed.record
         if not mixed.record.get("mixed"):
@@ -202,6 +232,8 @@ def build_grafts(generate, execute, graft_hashes: dict) -> tuple[Graft, Graft]:
     functions with those anchors; ``graft_hashes`` holds the pinned hashes under ``generate`` and ``execute``."""
     gen = Graft(generate, expected_hash=graft_hashes.get("generate"), label="DataGenerator.generate")
     gen.insert_after_assign("new_initial_state", "_tmg.begin_attempt(env)")
+    gen.insert_after_assign("selected_src_demo_ind", "selected_src_demo_ind = _tmg.select_source(subtask_ind, selected_src_demo_ind)",
+                            occurrence=1)
     gen.insert_after_assign(
         "src_subtask_object_pose",
         "src_subtask_eef_poses, src_subtask_target_poses, src_subtask_gripper_actions = _tmg.mix_segment(self, locals())")

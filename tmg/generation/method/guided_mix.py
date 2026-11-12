@@ -61,7 +61,7 @@ class GuidedMixer:
     ``good`` group whose gripper events match and whose anchor rotations differ by at most
     ``max_anchor_rotation_deg``; otherwise the segment is returned unchanged with the reason recorded.
     """
-    def __init__(self, *, ranking: SourceRanking, chunk_seed: int, config: GuidedMixConfig | None = None, **values):
+    def __init__(self, *, ranking: SourceRanking | None, chunk_seed: int, config: GuidedMixConfig | None = None, **values):
         """Args:
             ranking: the task's source ranking (task-wide or per subtask).
             chunk_seed: seeds the private donor-choice RNG together with ``seed_offset`` and the mix call index.

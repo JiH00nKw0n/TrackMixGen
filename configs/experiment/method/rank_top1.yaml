@@ -1,0 +1,11 @@
+# Rank-based sampling baseline, top 1: every source choice is a uniform draw among the 1 best sources of the task's
+# ranking file (configs/experiment/generator/<gen>/ranking/<task>.yaml, tmg rank_sources); no mixing, no path following.
+# tmg/generation/method/rank_sampling.py (RankBasedSampling). `make generate` builds the ranking file when missing.
+defaults:
+  - none
+  - _self_
+name: rank_top1
+sources:
+  type: rank_based
+  top_k: 1
+  ranking: ${generator.name}/${task.name}

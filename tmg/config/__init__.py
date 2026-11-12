@@ -53,6 +53,8 @@ COMMANDS: dict[str, CommandSpec] = {
                                exit_code="ok"),
     "rank_sources": CommandSpec("tmg.generation.rank_sources:rank_sources",
                                 "order a task's source demonstrations by their generation success in a baseline pool"),
+    "fit_coefficients": CommandSpec("tmg.generation.fit_coefficients:fit_coefficients",
+                                    "fit the per-subtask success model of the logistic mixer on a uniform-source baseline pool"),
     "dataset": CommandSpec("tmg.data.dataset:build_dataset",
                            "select successful attempts of a finished pool and write one training hdf5"),
     "train": CommandSpec("tmg.policy.trainer:train", "train one policy on one dataset (train image)"),

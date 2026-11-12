@@ -114,7 +114,7 @@ TRAIN_RUN = $(DOCKER_TRAIN)
 endif
 CONTAINER_RUN_HOSTNET = true
 
-.PHONY: help build sif sources generate verify-baseline rank-sources dataset resets train validate evaluate eval serve-detached serve-stop serve-ready print-data-root check-scene show shell test test-local lint
+.PHONY: help build sif sources generate verify-baseline rank-sources fit-coefficients coefficients dataset resets train validate evaluate eval serve-detached serve-stop serve-ready print-data-root check-scene show shell test test-local lint
 
 help:  ## this help
 	@awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' $(firstword $(MAKEFILE_LIST))
@@ -129,7 +129,8 @@ sif:  ## build the singularity image SIF from a docker archive ARCHIVE (made wit
 sources:  ## download and prepare the source demonstrations of TASK
 	$(PREP) && $(CONTAINER_RUN) sources generator=$(GENERATOR) task=$(TASK)
 
-generate:  ## generate one pool (TASK, SCENE, SELECTION=official|ours, METHOD, GENERATION, OVERRIDES)
+generate:  ## generate one pool (TASK, SCENE, SELECTION=official|ours, METHOD, GENERATION, OVERRIDES); builds the ranking/coefficient file first when METHOD needs a missing one
+	@METHOD=$(strip $(METHOD)) GENERATOR=$(GENERATOR) IMAGE=$(IMAGE) TASK=$(TASK) SCENE=$(strip $(SCENE)) CLUSTER=$(CLUSTER) scripts/ensure_coefficients.sh
 	$(PREP) && $(CONTAINER_RUN) generate $(GEN_ARGS)
 
 verify-baseline:  ## official generator vs adapter with method=none on one chunk; must be identical
@@ -137,6 +138,12 @@ verify-baseline:  ## official generator vs adapter with method=none on one chunk
 
 rank-sources:  ## order TASK's source demonstrations from its baseline pool (GENERATION=rank_human_demos, SELECTION as generated) and write the ranking next to the generator config
 	$(PREP) && $(CONTAINER_RUN) rank_sources generator=$(GENERATOR) task=$(TASK) scene=$(SCENE) selection=$(SELECTION) generation=$(GENERATION) cluster=$(CLUSTER) $(OVERRIDES)
+
+fit-coefficients:  ## fit the logistic mixer's per-subtask success model on TASK's uniform-source baseline pool (SELECTION=ours, GENERATION=rank_human_demos) and write coefficients/<task>.yaml
+	$(PREP) && $(CONTAINER_RUN) fit_coefficients generator=$(GENERATOR) task=$(TASK) scene=$(SCENE) selection=$(SELECTION) generation=$(GENERATION) cluster=$(CLUSTER) $(OVERRIDES)
+
+coefficients:  ## build TASK's ranking and coefficient files from scratch when missing (3,000-attempt uniform-source pool, rank-sources, fit-coefficients)
+	GENERATOR=$(GENERATOR) IMAGE=$(IMAGE) TASK=$(TASK) SCENE=$(strip $(SCENE)) CLUSTER=$(CLUSTER) scripts/ensure_coefficients.sh
 
 dataset:  ## write a training dataset from the finished pool (TASK, SCENE, METHOD, GENERATION, OBSERVATION=image|low_dim; OVERRIDES: size=... seed=...)
 	$(PREP) && $(CONTAINER_RUN) dataset $(GEN_ARGS) observation=$(OBSERVATION)

@@ -84,11 +84,12 @@ class Method:
     mixer: SegmentMixer | None
     follower_factory: Any | None                   # callable() -> PathFollower, one per segment
     labels: str = "executed"                       # executed | pre_noise
+    sources: Any | None = None                     # RankBasedSampling (method.sources) or None: the generator's own choice
 
     @property
     def is_identity(self) -> bool:
-        """True when the method changes nothing (no mixer, no follower, executed labels)."""
-        return self.mixer is None and self.follower_factory is None and self.labels == "executed"
+        """True when the method changes nothing (no mixer, no follower, executed labels, the generator's sources)."""
+        return self.mixer is None and self.follower_factory is None and self.labels == "executed" and self.sources is None
 
 
 class MixerType(Protocol):
@@ -114,8 +115,9 @@ def _mixer_types() -> dict[str, MixerType]:
     if not _MIXERS:
         # imported here, not at the top: guided_mix imports MixContext and MixedSegment from this module
         from tmg.generation.method.guided_mix import GuidedMixer
+        from tmg.generation.method.logistic_mix import LogisticMixer
 
-        _MIXERS["guided"] = GuidedMixer
+        _MIXERS.update(guided=GuidedMixer, logistic=LogisticMixer)
     return _MIXERS
 
 
@@ -127,7 +129,9 @@ def _follower_types() -> dict[str, FollowerType]:
 def build_method(cfg: Mapping, *, chunk_seed: int) -> Method:
     """Build the method of a ``method`` config block (plain mapping).
 
-    ``mixing.type`` (default ``guided``) and ``tracking.type`` (default ``error_adaptive``) pick the implementation;
+    ``mixing.type`` (default ``guided``; ``logistic`` reads the coefficient file) and ``tracking.type`` (default
+    ``error_adaptive``) pick the implementation; ``sources`` (``type: rank_based``, ``top_k``, ``ranking``) restricts the
+    generator's source choice to the best sources of the ranking file (``RankBasedSampling``);
     a new variant is a class added to ``_mixer_types`` or ``_FOLLOWERS`` plus a method config file naming it.
     """
     name = str(cfg.get("name", "none"))
@@ -150,4 +154,13 @@ def build_method(cfg: Mapping, *, chunk_seed: int) -> Method:
         if kind not in types:
             raise ValueError(f"method.tracking.type {kind!r} unknown; known: {sorted(types)}")
         factory = types[kind].factory(tracking)
-    return Method(name=name, mixer=mixer, follower_factory=factory, labels=labels)
+    sources = None
+    source_cfg = dict(cfg.get("sources") or {})
+    if source_cfg:
+        kind = str(source_cfg.get("type", "rank_based"))
+        if kind != "rank_based":
+            raise ValueError(f"method.sources.type {kind!r} unknown; known: ['rank_based']")
+        from tmg.generation.method.rank_sampling import RankBasedSampling
+
+        sources = RankBasedSampling.from_config(source_cfg, chunk_seed=chunk_seed)
+    return Method(name=name, mixer=mixer, follower_factory=factory, labels=labels, sources=sources)
