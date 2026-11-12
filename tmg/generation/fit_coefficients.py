@@ -22,7 +22,8 @@ from tmg.core.chunks import CHUNKS_DIR, POOL_DONE, RESOLVED_CONFIG, chunk_is_don
 from tmg.core.provenance import write_provenance
 from tmg.core.records import RECORDS_DIR, read_attempts
 from tmg.generation.method.success_model import (
-    INHAND_FEATURES, SCENE_FEATURES, STABILIZER, UNITS, coefficients_path, design_rows, fit_subtask, subtask_outcomes)
+    INHAND_FEATURES, SCENE_FEATURES, STABILIZER, UNITS, coefficients_path, design_rows, fit_subtask, reached_outcomes,
+    subtask_outcomes)
 
 COEFFICIENT_FILE = "coefficients.yaml"
 SUMMARY = "FIT_COEFFICIENTS.json"
@@ -64,27 +65,32 @@ def fit_coefficients(cfg) -> dict:
     write_provenance(output, extra={"command": "fit_coefficients", "output": str(output), "pool": str(pool)})
     task, generator = plain["task"], plain["generator"]
     signals = task.get("subtask_term_signals")
-    if not signals:
-        raise KeyError(f"task {task['name']} has no subtask_term_signals (one per subtask, null for the last)")
     chunks = sorted(p for p in (pool / CHUNKS_DIR).glob("seed*") if chunk_is_done(p))
     attempts, outcomes = [], []
     for chunk in chunks:
         folder = chunk / RECORDS_DIR
         for a in read_attempts(folder):
-            with np.load(folder / a["npz"]) as z:
-                steps = {k: z[k] for k in z.files if k in ("seg_sub", "seg_of_step") or k.startswith("term__")}
             attempts.append(a)
-            outcomes.append(subtask_outcomes(a, steps, signals))
+            if signals:                    # MimicGen: the recorded subtask termination signals
+                with np.load(folder / a["npz"]) as z:
+                    steps = {k: z[k] for k in z.files if k in ("seg_sub", "seg_of_step") or k.startswith("term__")}
+                outcomes.append(subtask_outcomes(a, steps, signals))
+    if not signals and attempts:          # CP-Gen: an attempt stops at its first failed subtask
+        num = max(len(a["subtasks"]) for a in attempts)
+        signals = [None] * num
+        outcomes = [reached_outcomes(a, num) for a in attempts]
     if not attempts:
         raise FileNotFoundError(f"no finished chunk with attempt records under {pool}")
     if len(attempts) < int(plain["min_attempts"]):
         raise ValueError(f"{len(attempts)} attempts in {pool}, fewer than min_attempts={plain['min_attempts']}")
     num_sources = int(task.get("num_sources") or 1 + max(int(s["src_demo_ind"]) for a in attempts for s in a["subtasks"]))
-    infos = read_source_infos(plain["source"]) if len(signals) > 1 else None
+    with_src = any("src_eef_pose" in sub for a in attempts for sub in a["subtasks"])
+    infos = read_source_infos(plain["source"]) if len(signals) > 1 and not with_src else None
     blocks = {}
     for k, signal in enumerate(signals):
         X, y, carried = design_rows(attempts, outcomes, k, num_sources, infos)
-        block = {"term_signal": signal if k < len(signals) - 1 else "task success", **fit_subtask(X, y, num_sources, k)}
+        label = "task success" if k == len(signals) - 1 else (signal or "went on to the next subtask")
+        block = {"term_signal": label, **fit_subtask(X, y, num_sources, k)}
         if carried is not None:
             block["carried_object"] = carried
         blocks[k] = block

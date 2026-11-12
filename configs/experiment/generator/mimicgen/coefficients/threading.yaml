@@ -1,0 +1,134 @@
+# Success-model coefficients of mimicgen threading (tmg fit_coefficients). Per subtask k:
+#   P(subtask k succeeds | reached, source j) = sigmoid(alpha[j] + dx*|dx| + dy*|dy| + rotation*rot
+#                                            + inhand_position*dpos + inhand_rotation*drot)  (in-hand terms k >= 1)
+# Units: {'dx': 'm', 'dy': 'm', 'rotation': 'rad', 'inhand_position': 'm', 'inhand_rotation': 'rad'}. The source ranking is a separate file (../ranking/threading.yaml).
+generator: mimicgen
+task: threading
+basis: Maximum-likelihood fit (Newton, stabilizer 0.001) on the uniform-source baseline pool /data/pools/mimicgen/threading/ours/ours/none/rank_human_demos
+  (3000 attempts, 24 chunks, scene ours, selection ours, generation rank_human_demos); one fit per subtask on the attempts
+  that reached it, label = that subtask's success.
+num_sources: 10
+features:
+  scene:
+  - dx
+  - dy
+  - rotation
+  inhand:
+  - inhand_position
+  - inhand_rotation
+units:
+  dx: m
+  dy: m
+  rotation: rad
+  inhand_position: m
+  inhand_rotation: rad
+stabilizer: 0.001
+subtask_term_signals:
+- grasp
+- null
+subtasks:
+  0:
+    term_signal: grasp
+    reached: 3000
+    successes: 2966
+    log_loss: 0.0462
+    alpha:
+      0: 8.6181
+      1: 9.695237
+      2: 8.132478
+      3: 9.35217
+      4: 8.499476
+      5: 8.746494
+      6: 13.100214
+      7: 7.241602
+      8: 8.682943
+      9: 9.829025
+    slopes:
+      dx: -25.84856
+      dy: -6.748223
+      rotation: 0.244962
+    source_counts:
+      0:
+        reached: 282
+        successes: 281
+      1:
+        reached: 323
+        successes: 321
+      2:
+        reached: 315
+        successes: 313
+      3:
+        reached: 301
+        successes: 296
+      4:
+        reached: 308
+        successes: 301
+      5:
+        reached: 282
+        successes: 279
+      6:
+        reached: 294
+        successes: 294
+      7:
+        reached: 302
+        successes: 297
+      8:
+        reached: 279
+        successes: 272
+      9:
+        reached: 314
+        successes: 312
+  1:
+    term_signal: task success
+    reached: 2966
+    successes: 589
+    log_loss: 0.4224
+    alpha:
+      0: 1.053762
+      1: 1.294011
+      2: 0.965474
+      3: -1.444632
+      4: -0.088677
+      5: 0.340165
+      6: 0.03037
+      7: 0.721
+      8: 1.342759
+      9: -1.090671
+    slopes:
+      dx: -3.273131
+      dy: 1.996974
+      rotation: -0.611803
+      inhand_position: -163.304659
+      inhand_rotation: -0.401684
+    source_counts:
+      0:
+        reached: 277
+        successes: 100
+      1:
+        reached: 315
+        successes: 62
+      2:
+        reached: 297
+        successes: 91
+      3:
+        reached: 293
+        successes: 14
+      4:
+        reached: 296
+        successes: 46
+      5:
+        reached: 287
+        successes: 54
+      6:
+        reached: 294
+        successes: 41
+      7:
+        reached: 318
+        successes: 88
+      8:
+        reached: 317
+        successes: 79
+      9:
+        reached: 272
+        successes: 14
+    carried_object: needle

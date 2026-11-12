@@ -1,0 +1,189 @@
+# Success-model coefficients of mimicgen mug_cleanup (tmg fit_coefficients). Per subtask k:
+#   P(subtask k succeeds | reached, source j) = sigmoid(alpha[j] + dx*|dx| + dy*|dy| + rotation*rot
+#                                            + inhand_position*dpos + inhand_rotation*drot)  (in-hand terms k >= 1)
+# Units: {'dx': 'm', 'dy': 'm', 'rotation': 'rad', 'inhand_position': 'm', 'inhand_rotation': 'rad'}. The source ranking is a separate file (../ranking/mug_cleanup.yaml).
+generator: mimicgen
+task: mug_cleanup
+basis: Maximum-likelihood fit (Newton, stabilizer 0.001) on the uniform-source baseline pool /data/pools/mimicgen/mug_cleanup/ours/ours/none/rank_human_demos
+  (3000 attempts, 24 chunks, scene ours, selection ours, generation rank_human_demos); one fit per subtask on the attempts
+  that reached it, label = that subtask's success.
+num_sources: 10
+features:
+  scene:
+  - dx
+  - dy
+  - rotation
+  inhand:
+  - inhand_position
+  - inhand_rotation
+units:
+  dx: m
+  dy: m
+  rotation: rad
+  inhand_position: m
+  inhand_rotation: rad
+stabilizer: 0.001
+subtask_term_signals:
+- open
+- grasp
+- null
+subtasks:
+  0:
+    term_signal: open
+    reached: 3000
+    successes: 2816
+    log_loss: 0.193
+    alpha:
+      0: 6.831904
+      1: 4.09263
+      2: 7.086479
+      3: 5.854609
+      4: 4.407474
+      5: 4.186942
+      6: 5.033515
+      7: 4.580171
+      8: 3.40786
+      9: 6.722961
+    slopes:
+      dx: -8.596506
+      dy: -5.049921
+      rotation: -3.566482
+    source_counts:
+      0:
+        reached: 283
+        successes: 281
+      1:
+        reached: 277
+        successes: 248
+      2:
+        reached: 305
+        successes: 303
+      3:
+        reached: 295
+        successes: 289
+      4:
+        reached: 341
+        successes: 313
+      5:
+        reached: 290
+        successes: 262
+      6:
+        reached: 280
+        successes: 267
+      7:
+        reached: 319
+        successes: 297
+      8:
+        reached: 285
+        successes: 234
+      9:
+        reached: 325
+        successes: 322
+  1:
+    term_signal: grasp
+    reached: 2816
+    successes: 1510
+    log_loss: 0.6094
+    alpha:
+      0: 0.313863
+      1: 0.89575
+      2: 2.306989
+      3: 1.356815
+      4: 0.726513
+      5: 0.508304
+      6: 1.588188
+      7: -0.876514
+      8: 1.642649
+      9: 1.064805
+    slopes:
+      dx: -0.049913
+      dy: -2.110505
+      rotation: -0.289621
+      inhand_position: 0.020808
+      inhand_rotation: -0.739248
+    source_counts:
+      0:
+        reached: 269
+        successes: 106
+      1:
+        reached: 296
+        successes: 159
+      2:
+        reached: 274
+        successes: 225
+      3:
+        reached: 303
+        successes: 190
+      4:
+        reached: 266
+        successes: 129
+      5:
+        reached: 273
+        successes: 117
+      6:
+        reached: 265
+        successes: 181
+      7:
+        reached: 294
+        successes: 41
+      8:
+        reached: 284
+        successes: 198
+      9:
+        reached: 292
+        successes: 164
+    carried_object: drawer
+  2:
+    term_signal: task success
+    reached: 1510
+    successes: 432
+    log_loss: 0.4393
+    alpha:
+      0: 0.792409
+      1: 1.283977
+      2: 1.370252
+      3: 1.87856
+      4: 1.876647
+      5: 0.722947
+      6: 0.629041
+      7: 1.459048
+      8: 0.767872
+      9: 0.288499
+    slopes:
+      dx: -0.074721
+      dy: 2.108345
+      rotation: -0.73545
+      inhand_position: -61.36623
+      inhand_rotation: 0.133435
+    source_counts:
+      0:
+        reached: 155
+        successes: 36
+      1:
+        reached: 142
+        successes: 52
+      2:
+        reached: 142
+        successes: 47
+      3:
+        reached: 150
+        successes: 57
+      4:
+        reached: 146
+        successes: 57
+      5:
+        reached: 147
+        successes: 37
+      6:
+        reached: 160
+        successes: 37
+      7:
+        reached: 139
+        successes: 34
+      8:
+        reached: 148
+        successes: 44
+      9:
+        reached: 181
+        successes: 31
+    carried_object: object

@@ -11,18 +11,16 @@ from tmg.generation.method.ranking import (
 TASKS = ("square", "coffee", "threading", "stack_three")
 
 
-def test_committed_mimicgen_rankings_load_and_agree_with_the_2026_10_groups():
-    expected_good = {"square": {0: {1, 2, 4, 5, 9}, 1: {1, 2, 5, 6, 9}},
-                     "coffee": {0: {2, 5, 6, 8, 9}, 1: {0, 2, 3, 4, 6}},
-                     "threading": {0: {2, 3, 4, 6, 7}, 1: {0, 2, 5, 7, 8}},
-                     "stack_three": {0: {2, 5, 6, 8, 9}, 1: {1, 5, 7, 8, 9}, 2: {1, 4, 5, 7, 9}, 3: {0, 1, 4, 7, 8}}}
-    for task in TASKS:
+def test_committed_mimicgen_rankings_load_and_come_from_3000_attempt_pools():
+    """The committed MimicGen rankings (2026-11-13) are measured on the 3,000-attempt uniform-source pools, ordered by rate,
+    one order per subtask, every source ranked."""
+    for task in (*TASKS, "hammer_cleanup", "mug_cleanup", "three_piece_assembly"):
         ranking = load_ranking(f"mimicgen/{task}")
         assert ranking.generator == "mimicgen" and ranking.task == task and ranking.default is None
-        for subtask, good in expected_good[task].items():
-            ranked = ranking.for_subtask(subtask)
-            assert len(ranked.order) == 10
-            assert ranked.split(good_fraction=0.5)[0] == good
+        assert "3000 attempts" in ranking.basis
+        for subtask, ranked in ranking.subtasks.items():
+            assert sorted(ranked.order) == list(range(10))
+            assert sum(ranked.attempts.values()) == 3000
             rates = [ranked.rate[s] for s in ranked.order]
             assert rates == sorted(rates, reverse=True)
 

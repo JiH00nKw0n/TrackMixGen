@@ -21,10 +21,11 @@ Fit: maximum likelihood (Newton's method) on the attempts of a uniform-source ba
 A tiny fixed L2 term (``STABILIZER``, the same for every task and coefficient, never tuned) keeps the estimate finite
 when a source never (or always) succeeds; it changes the other coefficients by far less than their standard errors.
 
-Subtask success comes from the records: for every subtask but the last, the subtask's termination signal
+Subtask success comes from the records (MimicGen): for every subtask but the last, the subtask's termination signal
 (``task.subtask_term_signals``, MimicGen's ``subtask_term_signal`` of the task template, recorded per step as
 ``term__<signal>``) turned on at some step up to the end of that subtask's execution; the last subtask succeeds when the
-attempt succeeds. An attempt reaches subtask k when every earlier subtask succeeded.
+attempt succeeds. An attempt reaches subtask k when every earlier subtask succeeded. CP-Gen stops an attempt at its first
+failed subtask (constraint), so there subtask k succeeded when the attempt went on to subtask k + 1 (``reached_outcomes``).
 
 The coefficients live in ``configs/experiment/generator/<generator>/coefficients/<task>.yaml`` (written by
 ``tmg fit_coefficients``), separate from the ranking file ``.../ranking/<task>.yaml`` that ``RankBasedSampling`` reads.
@@ -211,6 +212,32 @@ def source_in_hand(source_infos: Sequence[Mapping], j: int, start: int, carried:
     return in_hand(info["eef_pose"][start], info["object_poses"][carried][start])
 
 
+def _inhand_row(s: Mapping, j: int, carried: str, source_infos) -> np.ndarray:
+    """In-hand features of one subtask record. The source's in-hand pose comes from the record itself when it carries the
+    source's end-effector and object poses (CP-Gen: ``src_eef_pose``, ``src_objects``), else from ``source_infos``
+    (MimicGen ``datagen_info``). When the carried object's source pose is not available (a CP-Gen constraint that does not
+    involve it), both features are 0 for that row, and the model uses 0 for it at mixing time as well."""
+    objects = s.get("objects") or {}
+    if carried not in objects:
+        return np.zeros(2)
+    now = in_hand(s["eef_pose"], objects[carried])
+    if "src_eef_pose" in s:
+        src_objects = s.get("src_objects") or {}
+        if carried not in src_objects:
+            return np.zeros(2)
+        return inhand_features(now, in_hand(s["src_eef_pose"], src_objects[carried]))
+    if source_infos is None:
+        raise ValueError("the in-hand features of subtask >= 1 need the source demonstrations' datagen_info")
+    return inhand_features(now, source_in_hand(source_infos, j, int(s["src_subtask_start"]), carried))
+
+
+def reached_outcomes(attempt: Mapping, num_subtasks: int) -> list[bool]:
+    """Subtask success of a generator that stops an attempt at its first failed subtask (CP-Gen): subtask k succeeded when
+    the attempt went on to subtask k + 1; the last subtask succeeded when the attempt succeeded."""
+    n = len(attempt.get("subtasks") or [])
+    return [n > k + 1 if k < num_subtasks - 1 else bool(attempt["success"]) and n >= num_subtasks for k in range(num_subtasks)]
+
+
 def design_rows(attempts: Sequence[Mapping], outcomes: Sequence[Sequence[bool]], k: int, num_sources: int,
                 source_infos: Sequence[Mapping] | None) -> tuple[np.ndarray, np.ndarray, str | None]:
     """The design matrix and labels of subtask k: one row per attempt that reached it.
@@ -228,13 +255,8 @@ def design_rows(attempts: Sequence[Mapping], outcomes: Sequence[Sequence[bool]],
         x[j] = 1.0
         parts = [x, scene_features(s["cur_obj_pose"], s["src_obj_pose"])]
         if k >= 1:
-            if source_infos is None:
-                raise ValueError("the in-hand features of subtask >= 1 need the source demonstrations' datagen_info")
             carried = str(subs[k - 1]["object_name"])
-            objects = s["objects"]
-            now = in_hand(s["eef_pose"], objects[carried])
-            src = source_in_hand(source_infos, j, int(s["src_subtask_start"]), carried)
-            parts.append(inhand_features(now, src))
+            parts.append(_inhand_row(s, j, carried, source_infos))
         rows.append(np.concatenate(parts))
         ys.append(float(out[k]))
     return np.array(rows), np.array(ys), carried

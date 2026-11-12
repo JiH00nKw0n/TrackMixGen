@@ -153,3 +153,16 @@ def test_build_method_reads_coefficient_and_ranking_files(tmp_path, monkeypatch)
     m = build_method({"name": "rank_top3", "sources": {"type": "rank_based", "top_k": 3, "ranking": "g/t"}}, chunk_seed=0)
     assert isinstance(m.sources, RankBasedSampling) and not m.is_identity
     assert isinstance(rank_based_sampling({"ranking": "g/t", "top_k": 1}, chunk_seed=0), RankBasedSampling)
+
+
+def test_committed_mimicgen_coefficient_files_load():
+    from tmg.generation.method.success_model import load_coefficients
+    subtasks = {"coffee": 2, "square": 2, "threading": 2, "stack_three": 4, "hammer_cleanup": 3, "mug_cleanup": 3,
+                "three_piece_assembly": 4}
+    for task, n in subtasks.items():
+        model = load_coefficients(f"mimicgen/{task}")
+        assert model.num_sources == 10 and sorted(model.subtasks) == list(range(n))
+        assert set(model.subtasks[0].slopes) == {"dx", "dy", "rotation"}
+        assert set(model.subtasks[1].slopes) == {"dx", "dy", "rotation", "inhand_position", "inhand_rotation"}
+        p = model.for_subtask(0).predict(np.zeros((10, 3)))
+        assert p.shape == (10,) and np.all((p > 0) & (p < 1))

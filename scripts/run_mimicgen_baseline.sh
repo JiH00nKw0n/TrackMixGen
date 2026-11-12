@@ -15,7 +15,10 @@
 #   ("diffusion_policy bc_rnn"), SEEDS ("202601 202602 202603"), SIZE (1000), POOL_LANES (2: pools generated at the same time),
 #   POLICY_PARALLEL (2: policy pipelines on the GPU at the same time), VAL_PARALLEL (4: checkpoints validated at a time per run),
 #   TEST_SHARDS (6: parallel shards of the 300 test scenes), SELECTION (official: the generator's source selection rule; ours = a source
-#   chosen at random for every subtask), ONLY_GENERATION (1: stop after the datasets), BUNDLE_NAME,
+#   chosen at random for every subtask), METHOD (none: the baseline; a method config such as mixup_only runs the same pipeline
+#   with that method, writes under <...>/<selection>/<method>/ and logs to logs/<generator>_<method>; the evaluation scenes are
+#   shared with the baseline; `make generate` first builds the task's coefficient file if the method needs a missing one),
+#   ONLY_GENERATION (1: stop after the datasets), BUNDLE_NAME,
 #   MINI (1: an end-to-end check at toy scale: a 200-attempt pool in the folder pilot50, 10-demonstration datasets, 200 training
 #   updates, 6 evaluation scenes per split; same code path as the real run).
 set -uo pipefail
@@ -27,7 +30,7 @@ else DEFAULT_TASKS="three_piece_assembly square stack_three mug_cleanup hammer_c
 TASKS=${TASKS:-$DEFAULT_TASKS}   # longest pools first
 POLICIES=${POLICIES:-"diffusion_policy bc_rnn"}; SEEDS=${SEEDS:-"202601 202602 202603"}; SIZE=${SIZE:-1000}
 POOL_LANES=${POOL_LANES:-2}; POLICY_PARALLEL=${POLICY_PARALLEL:-2}; VAL_PARALLEL=${VAL_PARALLEL:-4}; TEST_SHARDS=${TEST_SHARDS:-6}
-SCENE=ours; METHOD=none; OBSERVATION=image; SELECTION=${SELECTION:-official}
+SCENE=ours; METHOD=${METHOD:-none}; OBSERVATION=image; SELECTION=${SELECTION:-official}
 GENERATION=${GENERATION:-pool_robosuite_image}; GEN_OVERRIDES=${GEN_OVERRIDES:-}; TRAIN_OVERRIDES=${TRAIN_OVERRIDES:-}; EVAL_EXTRA=${EVAL_EXTRA:-}
 # first attempt counts per task: about 1.1x the attempts that gave 1,000 successes in the 2026-10 low-dim pools (per-subtask random
 # selection); the pool is extended by 25 % steps until it holds SIZE successes, so a lower success rate only costs time
@@ -49,8 +52,9 @@ fi
 GEN_NAME=${GENERATION##*/}
 export SINGULARITYENV_CUDA_VISIBLE_DEVICES=$GPU CUDA_VISIBLE_DEVICES=$GPU
 DATA_ROOT=$(make -s -C "$REPO" print-data-root CLUSTER="$CLUSTER")
-LOG=$DATA_ROOT/logs/${GENERATOR}_baseline; mkdir -p "$LOG"
-BUNDLE_NAME=${BUNDLE_NAME:-${GENERATOR}_baseline_$(date +%Y%m%d)}
+if [ "$METHOD" = none ]; then RUN_NAME=${GENERATOR}_baseline; else RUN_NAME=${GENERATOR}_${METHOD}; fi
+LOG=$DATA_ROOT/logs/$RUN_NAME; mkdir -p "$LOG"
+BUNDLE_NAME=${BUNDLE_NAME:-${RUN_NAME}_$(date +%Y%m%d)}
 log() { echo "[driver $(date '+%F %T')] $*" | tee -a "$LOG/driver.log"; }
 fail() { log "$1 FAILED (see $2)"; echo "$1" >> "$LOG/FAILURES"; }
 M() { make -s -C "$REPO" "$@"; }
@@ -144,7 +148,7 @@ collect_bundles() {
   done
 }
 
-log "start: cluster $CLUSTER, GPU $GPU, tasks: $TASKS, policies: $POLICIES, seeds: $SEEDS, selection $SELECTION, generation $GENERATION, size $SIZE${MINI:+, MINI mode}"
+log "start: cluster $CLUSTER, GPU $GPU, method $METHOD, tasks: $TASKS, policies: $POLICIES, seeds: $SEEDS, selection $SELECTION, generation $GENERATION, size $SIZE${MINI:+, MINI mode}"
 if [ -f "$LOG/FAILURES" ]; then mv "$LOG/FAILURES" "$LOG/FAILURES.$(date +%Y%m%d_%H%M%S)"; fi
 if [ -f "$LOG/DONE" ]; then mv "$LOG/DONE" "$LOG/DONE.$(date +%Y%m%d_%H%M%S)"; fi
 generation_lane &

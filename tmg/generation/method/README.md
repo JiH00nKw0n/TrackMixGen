@@ -7,6 +7,12 @@ simulator, so every class is unit-tested with numpy arrays alone.
 ```
 interfaces.py   MixContext, MixedSegment, SegmentMixer, PathFollower, Method, build_method and the type
                 registries _MIXERS / _FOLLOWERS (MixerType, FollowerType protocols)
+logistic_mix.py LogisticMixer: per subtask, predict every source's success in the current scene with the coefficient file
+                and blend the sources at or above the mean prediction (mixing.type: logistic, used by trackmix)
+success_model.py the per-subtask logistic success model, its features, its fit and the coefficient file
+                (configs/experiment/generator/<gen>/coefficients/<task>.yaml, written by tmg fit_coefficients)
+rank_sampling.py RankBasedSampling: uniform draw among the top-K sources of the ranking file (sources.type: rank_based;
+                methods rank_top1, rank_top3, rank_top5)
 guided_mix.py   GuidedMixer and its GuidedMixConfig: source mixing guided by the measured ranking (mixing.type: guided)
 event_mix.py    event-aligned blending of two segments (used by GuidedMixer)
 tracking.py     ErrorAdaptiveFollower, EndEffectorPath: error-adaptive following  (tracking.type: error_adaptive)
@@ -14,6 +20,18 @@ grippers.py     gripper state and event rules: gripper_states / change_indices (
                 SignGripper and ClosureGripper detectors (scalar +/- commands, many-joint hands), build_detector
 ranking.py      reading the measured source rankings and splitting them into high- and low-success groups
 ```
+
+**Two files per task, one pool.** The ranking file (`ranking/<task>.yaml`, `tmg rank_sources`) orders the sources and is
+read by `RankBasedSampling`. The coefficient file (`coefficients/<task>.yaml`, `tmg fit_coefficients`) holds the logistic
+model and is read by `LogisticMixer`. Both come from the 3,000-attempt uniform-source pool (method `none`, selection `ours`,
+generation `rank_human_demos`). `make coefficients` (`scripts/ensure_coefficients.sh`) builds whichever file is missing, and
+`make generate` calls it first for a method that needs one, so a new task starts from scratch without manual steps.
+
+The logistic model, for subtask k given that the attempt reached it and source j is used:
+`P = sigmoid(alpha_kj + a_k |dx| + b_k |dy| + c_k rot + [k >= 1](d_k inhand_pos + e_k inhand_rot))`, where dx, dy and rot
+compare the current reference object with source j's at its segment start, and the in-hand terms compare the previous
+subtask's reference object in the end-effector frame now and in source j. Labels come from the recorded subtask termination
+signals (`task.subtask_term_signals`); the last subtask's label is the attempt's success.
 
 ## 1. The two hooks
 

@@ -1,0 +1,134 @@
+# Success-model coefficients of mimicgen coffee (tmg fit_coefficients). Per subtask k:
+#   P(subtask k succeeds | reached, source j) = sigmoid(alpha[j] + dx*|dx| + dy*|dy| + rotation*rot
+#                                            + inhand_position*dpos + inhand_rotation*drot)  (in-hand terms k >= 1)
+# Units: {'dx': 'm', 'dy': 'm', 'rotation': 'rad', 'inhand_position': 'm', 'inhand_rotation': 'rad'}. The source ranking is a separate file (../ranking/coffee.yaml).
+generator: mimicgen
+task: coffee
+basis: Maximum-likelihood fit (Newton, stabilizer 0.001) on the uniform-source baseline pool /data/pools/mimicgen/coffee/ours/ours/none/rank_human_demos
+  (3000 attempts, 12 chunks, scene ours, selection ours, generation rank_human_demos); one fit per subtask on the attempts
+  that reached it, label = that subtask's success.
+num_sources: 10
+features:
+  scene:
+  - dx
+  - dy
+  - rotation
+  inhand:
+  - inhand_position
+  - inhand_rotation
+units:
+  dx: m
+  dy: m
+  rotation: rad
+  inhand_position: m
+  inhand_rotation: rad
+stabilizer: 0.001
+subtask_term_signals:
+- grasp
+- null
+subtasks:
+  0:
+    term_signal: grasp
+    reached: 3000
+    successes: 2808
+    log_loss: 0.179
+    alpha:
+      0: 6.430969
+      1: 7.284764
+      2: 7.166611
+      3: 6.260911
+      4: 5.74982
+      5: 6.497927
+      6: 6.090915
+      7: 6.417399
+      8: 6.596078
+      9: 7.424007
+    slopes:
+      dx: -22.153545
+      dy: 0.632896
+      rotation: 0.0
+    source_counts:
+      0:
+        reached: 314
+        successes: 295
+      1:
+        reached: 290
+        successes: 280
+      2:
+        reached: 306
+        successes: 295
+      3:
+        reached: 282
+        successes: 260
+      4:
+        reached: 302
+        successes: 270
+      5:
+        reached: 308
+        successes: 285
+      6:
+        reached: 297
+        successes: 270
+      7:
+        reached: 321
+        successes: 296
+      8:
+        reached: 290
+        successes: 274
+      9:
+        reached: 290
+        successes: 283
+  1:
+    term_signal: task success
+    reached: 2808
+    successes: 1435
+    log_loss: 0.5958
+    alpha:
+      0: 2.207059
+      1: 1.942327
+      2: 1.970126
+      3: 2.352269
+      4: 2.518222
+      5: 1.968789
+      6: 2.013209
+      7: 1.685432
+      8: -0.162359
+      9: 2.037026
+    slopes:
+      dx: -2.330731
+      dy: -0.790767
+      rotation: -0.827857
+      inhand_position: -155.089939
+      inhand_rotation: -1.917055
+    source_counts:
+      0:
+        reached: 292
+        successes: 168
+      1:
+        reached: 294
+        successes: 153
+      2:
+        reached: 280
+        successes: 144
+      3:
+        reached: 283
+        successes: 181
+      4:
+        reached: 285
+        successes: 186
+      5:
+        reached: 268
+        successes: 142
+      6:
+        reached: 260
+        successes: 141
+      7:
+        reached: 284
+        successes: 138
+      8:
+        reached: 279
+        successes: 34
+      9:
+        reached: 283
+        successes: 148
+    carried_object: coffee_pod

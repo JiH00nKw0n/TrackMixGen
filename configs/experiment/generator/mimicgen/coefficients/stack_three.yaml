@@ -1,0 +1,244 @@
+# Success-model coefficients of mimicgen stack_three (tmg fit_coefficients). Per subtask k:
+#   P(subtask k succeeds | reached, source j) = sigmoid(alpha[j] + dx*|dx| + dy*|dy| + rotation*rot
+#                                            + inhand_position*dpos + inhand_rotation*drot)  (in-hand terms k >= 1)
+# Units: {'dx': 'm', 'dy': 'm', 'rotation': 'rad', 'inhand_position': 'm', 'inhand_rotation': 'rad'}. The source ranking is a separate file (../ranking/stack_three.yaml).
+generator: mimicgen
+task: stack_three
+basis: Maximum-likelihood fit (Newton, stabilizer 0.001) on the uniform-source baseline pool /data/pools/mimicgen/stack_three/ours/ours/none/rank_human_demos
+  (3000 attempts, 12 chunks, scene ours, selection ours, generation rank_human_demos); one fit per subtask on the attempts
+  that reached it, label = that subtask's success.
+num_sources: 10
+features:
+  scene:
+  - dx
+  - dy
+  - rotation
+  inhand:
+  - inhand_position
+  - inhand_rotation
+units:
+  dx: m
+  dy: m
+  rotation: rad
+  inhand_position: m
+  inhand_rotation: rad
+stabilizer: 0.001
+subtask_term_signals:
+- grasp_1
+- stack_1
+- grasp_2
+- null
+subtasks:
+  0:
+    term_signal: grasp_1
+    reached: 3000
+    successes: 2483
+    log_loss: 0.3742
+    alpha:
+      0: 4.038398
+      1: 4.191941
+      2: 5.226723
+      3: 4.540388
+      4: 3.518598
+      5: 4.395091
+      6: 5.127327
+      7: 4.806417
+      8: 5.024348
+      9: 4.362838
+    slopes:
+      dx: -1.504831
+      dy: -1.025299
+      rotation: -1.300156
+    source_counts:
+      0:
+        reached: 302
+        successes: 230
+      1:
+        reached: 265
+        successes: 212
+      2:
+        reached: 305
+        successes: 275
+      3:
+        reached: 324
+        successes: 270
+      4:
+        reached: 284
+        successes: 195
+      5:
+        reached: 311
+        successes: 253
+      6:
+        reached: 282
+        successes: 249
+      7:
+        reached: 318
+        successes: 279
+      8:
+        reached: 306
+        successes: 272
+      9:
+        reached: 303
+        successes: 248
+  1:
+    term_signal: stack_1
+    reached: 2483
+    successes: 1499
+    log_loss: 0.5973
+    alpha:
+      0: 1.98811
+      1: 2.676612
+      2: 1.769052
+      3: 2.018228
+      4: 1.45514
+      5: 2.091091
+      6: 1.430837
+      7: 2.972777
+      8: 2.151183
+      9: 1.9403
+    slopes:
+      dx: 0.03836
+      dy: -2.464272
+      rotation: -0.354241
+      inhand_position: -65.309053
+      inhand_rotation: 0.023716
+    source_counts:
+      0:
+        reached: 232
+        successes: 133
+      1:
+        reached: 263
+        successes: 184
+      2:
+        reached: 251
+        successes: 141
+      3:
+        reached: 239
+        successes: 145
+      4:
+        reached: 258
+        successes: 124
+      5:
+        reached: 269
+        successes: 171
+      6:
+        reached: 231
+        successes: 110
+      7:
+        reached: 256
+        successes: 201
+      8:
+        reached: 256
+        successes: 154
+      9:
+        reached: 228
+        successes: 136
+    carried_object: cubeA
+  2:
+    term_signal: grasp_2
+    reached: 1499
+    successes: 869
+    log_loss: 0.6498
+    alpha:
+      0: 0.596371
+      1: 1.13955
+      2: 1.02135
+      3: 1.395864
+      4: 1.551429
+      5: 1.366044
+      6: 1.153355
+      7: 1.438573
+      8: 1.464045
+      9: 1.648701
+    slopes:
+      dx: 0.042033
+      dy: -2.187526
+      rotation: -0.395846
+      inhand_position: -1.417678
+      inhand_rotation: 0.081745
+    source_counts:
+      0:
+        reached: 130
+        successes: 53
+      1:
+        reached: 125
+        successes: 67
+      2:
+        reached: 162
+        successes: 83
+      3:
+        reached: 169
+        successes: 104
+      4:
+        reached: 144
+        successes: 93
+      5:
+        reached: 152
+        successes: 89
+      6:
+        reached: 134
+        successes: 74
+      7:
+        reached: 159
+        successes: 99
+      8:
+        reached: 162
+        successes: 100
+      9:
+        reached: 162
+        successes: 107
+    carried_object: cubeB
+  3:
+    term_signal: task success
+    reached: 869
+    successes: 358
+    log_loss: 0.5741
+    alpha:
+      0: 2.009251
+      1: 2.232665
+      2: 2.27861
+      3: 1.609097
+      4: 1.604666
+      5: 1.733479
+      6: 1.839298
+      7: 1.89852
+      8: 1.948416
+      9: 2.027786
+    slopes:
+      dx: 0.424815
+      dy: -1.187887
+      rotation: -0.85566
+      inhand_position: -44.463954
+      inhand_rotation: -0.0161
+    source_counts:
+      0:
+        reached: 100
+        successes: 43
+      1:
+        reached: 95
+        successes: 43
+      2:
+        reached: 83
+        successes: 39
+      3:
+        reached: 83
+        successes: 28
+      4:
+        reached: 92
+        successes: 33
+      5:
+        reached: 76
+        successes: 27
+      6:
+        reached: 86
+        successes: 36
+      7:
+        reached: 71
+        successes: 31
+      8:
+        reached: 89
+        successes: 37
+      9:
+        reached: 94
+        successes: 41
+    carried_object: cubeC

@@ -1,0 +1,134 @@
+# Success-model coefficients of mimicgen square (tmg fit_coefficients). Per subtask k:
+#   P(subtask k succeeds | reached, source j) = sigmoid(alpha[j] + dx*|dx| + dy*|dy| + rotation*rot
+#                                            + inhand_position*dpos + inhand_rotation*drot)  (in-hand terms k >= 1)
+# Units: {'dx': 'm', 'dy': 'm', 'rotation': 'rad', 'inhand_position': 'm', 'inhand_rotation': 'rad'}. The source ranking is a separate file (../ranking/square.yaml).
+generator: mimicgen
+task: square
+basis: Maximum-likelihood fit (Newton, stabilizer 0.001) on the uniform-source baseline pool /data/pools/mimicgen/square/ours/ours/none/rank_human_demos
+  (3000 attempts, 12 chunks, scene ours, selection ours, generation rank_human_demos); one fit per subtask on the attempts
+  that reached it, label = that subtask's success.
+num_sources: 10
+features:
+  scene:
+  - dx
+  - dy
+  - rotation
+  inhand:
+  - inhand_position
+  - inhand_rotation
+units:
+  dx: m
+  dy: m
+  rotation: rad
+  inhand_position: m
+  inhand_rotation: rad
+stabilizer: 0.001
+subtask_term_signals:
+- grasp
+- null
+subtasks:
+  0:
+    term_signal: grasp
+    reached: 3000
+    successes: 2247
+    log_loss: 0.4392
+    alpha:
+      0: 4.308486
+      1: 4.429608
+      2: 4.019033
+      3: 3.393183
+      4: 4.378381
+      5: 4.129101
+      6: 3.553377
+      7: 3.394253
+      8: 1.221395
+      9: 4.29073
+    slopes:
+      dx: -3.498537
+      dy: -0.377264
+      rotation: -1.083837
+    source_counts:
+      0:
+        reached: 287
+        successes: 242
+      1:
+        reached: 299
+        successes: 255
+      2:
+        reached: 278
+        successes: 229
+      3:
+        reached: 300
+        successes: 207
+      4:
+        reached: 301
+        successes: 255
+      5:
+        reached: 316
+        successes: 259
+      6:
+        reached: 300
+        successes: 223
+      7:
+        reached: 302
+        successes: 219
+      8:
+        reached: 310
+        successes: 102
+      9:
+        reached: 307
+        successes: 256
+  1:
+    term_signal: task success
+    reached: 2247
+    successes: 217
+    log_loss: 0.2116
+    alpha:
+      0: -1.021874
+      1: -0.540782
+      2: -0.225816
+      3: -1.454286
+      4: -0.780468
+      5: 0.027005
+      6: -0.454401
+      7: -1.746312
+      8: -1.580406
+      9: -0.413264
+    slopes:
+      dx: -0.57138
+      dy: 0.899078
+      rotation: 0.0
+      inhand_position: -53.836172
+      inhand_rotation: 0.053224
+    source_counts:
+      0:
+        reached: 206
+        successes: 13
+      1:
+        reached: 210
+        successes: 26
+      2:
+        reached: 248
+        successes: 37
+      3:
+        reached: 223
+        successes: 11
+      4:
+        reached: 243
+        successes: 19
+      5:
+        reached: 223
+        successes: 40
+      6:
+        reached: 222
+        successes: 21
+      7:
+        reached: 214
+        successes: 6
+      8:
+        reached: 222
+        successes: 9
+      9:
+        reached: 236
+        successes: 35
+    carried_object: square_nut

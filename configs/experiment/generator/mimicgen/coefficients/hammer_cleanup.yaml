@@ -1,0 +1,189 @@
+# Success-model coefficients of mimicgen hammer_cleanup (tmg fit_coefficients). Per subtask k:
+#   P(subtask k succeeds | reached, source j) = sigmoid(alpha[j] + dx*|dx| + dy*|dy| + rotation*rot
+#                                            + inhand_position*dpos + inhand_rotation*drot)  (in-hand terms k >= 1)
+# Units: {'dx': 'm', 'dy': 'm', 'rotation': 'rad', 'inhand_position': 'm', 'inhand_rotation': 'rad'}. The source ranking is a separate file (../ranking/hammer_cleanup.yaml).
+generator: mimicgen
+task: hammer_cleanup
+basis: Maximum-likelihood fit (Newton, stabilizer 0.001) on the uniform-source baseline pool /data/pools/mimicgen/hammer_cleanup/ours/ours/none/rank_human_demos
+  (3000 attempts, 24 chunks, scene ours, selection ours, generation rank_human_demos); one fit per subtask on the attempts
+  that reached it, label = that subtask's success.
+num_sources: 10
+features:
+  scene:
+  - dx
+  - dy
+  - rotation
+  inhand:
+  - inhand_position
+  - inhand_rotation
+units:
+  dx: m
+  dy: m
+  rotation: rad
+  inhand_position: m
+  inhand_rotation: rad
+stabilizer: 0.001
+subtask_term_signals:
+- open
+- grasp
+- null
+subtasks:
+  0:
+    term_signal: open
+    reached: 3000
+    successes: 2754
+    log_loss: 0.2219
+    alpha:
+      0: 9.081872
+      1: 5.862186
+      2: 5.482466
+      3: 6.167504
+      4: 4.938408
+      5: 6.006566
+      6: 5.894844
+      7: 6.478059
+      8: 4.787234
+      9: 5.080325
+    slopes:
+      dx: -9.033655
+      dy: 5.444283
+      rotation: -7.263343
+    source_counts:
+      0:
+        reached: 317
+        successes: 316
+      1:
+        reached: 292
+        successes: 270
+      2:
+        reached: 292
+        successes: 263
+      3:
+        reached: 307
+        successes: 291
+      4:
+        reached: 262
+        successes: 228
+      5:
+        reached: 312
+        successes: 291
+      6:
+        reached: 288
+        successes: 266
+      7:
+        reached: 321
+        successes: 307
+      8:
+        reached: 309
+        successes: 263
+      9:
+        reached: 300
+        successes: 259
+  1:
+    term_signal: grasp
+    reached: 2754
+    successes: 975
+    log_loss: 0.3949
+    alpha:
+      0: 4.775159
+      1: 4.144927
+      2: 4.746774
+      3: 4.772143
+      4: 3.93832
+      5: 4.441205
+      6: 4.453028
+      7: 4.053812
+      8: 4.111859
+      9: 4.484946
+    slopes:
+      dx: 0.538682
+      dy: -5.968295
+      rotation: -1.894517
+      inhand_position: -1.289518
+      inhand_rotation: -4.237632
+    source_counts:
+      0:
+        reached: 279
+        successes: 115
+      1:
+        reached: 278
+        successes: 85
+      2:
+        reached: 280
+        successes: 115
+      3:
+        reached: 275
+        successes: 115
+      4:
+        reached: 250
+        successes: 73
+      5:
+        reached: 282
+        successes: 98
+      6:
+        reached: 266
+        successes: 94
+      7:
+        reached: 268
+        successes: 82
+      8:
+        reached: 275
+        successes: 89
+      9:
+        reached: 301
+        successes: 109
+    carried_object: drawer
+  2:
+    term_signal: task success
+    reached: 975
+    successes: 507
+    log_loss: 0.4262
+    alpha:
+      0: 2.356335
+      1: 2.117274
+      2: 2.128889
+      3: 2.449783
+      4: 1.633631
+      5: 1.694612
+      6: 1.974006
+      7: 2.08584
+      8: 2.293669
+      9: 2.292201
+    slopes:
+      dx: -1.998092
+      dy: 0.185216
+      rotation: -0.1788
+      inhand_position: -83.509105
+      inhand_rotation: 0.097282
+    source_counts:
+      0:
+        reached: 112
+        successes: 59
+      1:
+        reached: 78
+        successes: 42
+      2:
+        reached: 116
+        successes: 62
+      3:
+        reached: 99
+        successes: 57
+      4:
+        reached: 114
+        successes: 52
+      5:
+        reached: 90
+        successes: 42
+      6:
+        reached: 99
+        successes: 50
+      7:
+        reached: 89
+        successes: 44
+      8:
+        reached: 85
+        successes: 48
+      9:
+        reached: 93
+        successes: 51
+    carried_object: hammer
