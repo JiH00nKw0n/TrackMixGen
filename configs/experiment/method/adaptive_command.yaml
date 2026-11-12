@@ -1,0 +1,29 @@
+# Adaptive Command (방법론 B): the follower corrects the next command from the current tracking error so that the hand
+# lands on the next reference point within the controller's one-step reach, and slows the progress only when that point
+# is out of reach. No mixing, pre-noise labels. tmg/generation/method/adaptive_command.py; proposal
+# reports/tracking_method_b_proposal_20261113.md. The response coefficients are the Coffee fit (10 source demonstrations).
+name: adaptive_command
+mixing: {enabled: false}
+tracking:
+  enabled: true
+  type: adaptive_command
+  a_p: 0.629                  # one-step response: next motion = a_p * previous motion + b_p * max_dpos * action (position)
+  b_p: 0.0936
+  a_r: 0.712                  # same for rotation (axis-angle)
+  b_r: 0.0663
+  max_dpos: 0.05              # controller limit per step (OSC_POSE output_max, m)
+  max_drot: 0.5               # (rad)
+  kappa: 0.5                  # share of the current tracking error removed in one step
+  smooth: 1.0                 # weight keeping the action close to the previous one
+  ds_min: 0.25                # smallest advance along the path per step
+  ds_step: 0.05               # advance search grid (from 1 downward)
+  eps_pos: 0.002              # shortfall allowed when choosing the advance (m)
+  eps_rot_deg: 1.0
+  residual_max: 0.003         # previous prediction off by more than this (m): command the reference point unchanged
+  arrive_pos: 0.005           # arrival check before a gripper event (m)
+  arrive_rot_deg: 3.0
+  arrive_max_wait: 5          # extra steps at most waiting for arrival
+  approach_window: 10
+  extra_steps_cap: segment
+  gripper_events: {type: sign}
+labels: pre_noise

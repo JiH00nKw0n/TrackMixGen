@@ -12,7 +12,10 @@ the same chunk starts from attempt 0 again, so ``configure`` wipes stale partial
 Per-step arrays (T steps, S segments)::
 
     eef_names (E,)                 end-effector names in the order of the E axis below (one for a single arm)
-    w_pos (T,E,3) w_rot (T,E,9)    planned target pose of each end effector at the step (world frame)
+    w_pos (T,E,3) w_rot (T,E,9)    planned target pose of each end effector at the step (world frame): the pose sent to the
+                                   controller (Adaptive Command sends a corrected command, not the reference path point)
+    r_pos (T,E,3) r_rot (T,E,9)    reference path point of the step (the follower's p(s) after the step; equals w_* when
+                                   the follower does not correct the command, and when no follower runs)
     e_pos (T,E,3) e_rot (T,E,9)    measured end-effector pose before the step
     a_pre (T,A)                    arm action before noise and before clipping (normalized units)
     a_label (T,A+G)                action label the dataset will use: clipped pre-noise arm + gripper
@@ -91,6 +94,7 @@ class AttemptRecorder:
     def _reset(self):
         """Clear the per-attempt buffers."""
         self.w_pos, self.w_rot, self.e_pos, self.e_rot = [], [], [], []
+        self.r_pos, self.r_rot = [], []
         self.eef_names: list[str] = []
         self.a_pre, self.a_label, self.a_exec, self.noise = [], [], [], []
         self.seg_of_step, self.seg_sub, self.seg_kind, self.seg_len = [], [], [], []
@@ -181,6 +185,10 @@ class AttemptRecorder:
         e = np.stack([np.asarray(e_poses[n], dtype=float) for n in self.eef_names])
         self.w_pos.append(w[:, :3, 3].astype(np.float32))
         self.w_rot.append(w[:, :3, :3].reshape(len(self.eef_names), 9).astype(np.float32))
+        ref_poses = (track or {}).get("ref") or w_poses
+        r = np.stack([np.asarray(ref_poses[n], dtype=float) for n in self.eef_names])
+        self.r_pos.append(r[:, :3, 3].astype(np.float32))
+        self.r_rot.append(r[:, :3, :3].reshape(len(self.eef_names), 9).astype(np.float32))
         self.e_pos.append(e[:, :3, 3].astype(np.float32))
         self.e_rot.append(e[:, :3, :3].reshape(len(self.eef_names), 9).astype(np.float32))
         self.a_pre.append(np.asarray(a_pre, dtype=np.float32).reshape(-1))
@@ -262,6 +270,8 @@ class AttemptRecorder:
             eef_names=np.array(self.eef_names, dtype=str),
             w_pos=np.array(self.w_pos, dtype=np.float32).reshape(-1, n_eef, 3),
             w_rot=np.array(self.w_rot, dtype=np.float32).reshape(-1, n_eef, 9),
+            r_pos=np.array(self.r_pos, dtype=np.float32).reshape(-1, n_eef, 3),
+            r_rot=np.array(self.r_rot, dtype=np.float32).reshape(-1, n_eef, 9),
             e_pos=np.array(self.e_pos, dtype=np.float32).reshape(-1, n_eef, 3),
             e_rot=np.array(self.e_rot, dtype=np.float32).reshape(-1, n_eef, 9),
             a_pre=np.array(self.a_pre, dtype=np.float32),

@@ -1,4 +1,5 @@
-"""Error-adaptive path following (the "tracking" technique).
+"""Adaptive Pacing: error-adaptive path following (the "tracking" technique; tracking.type adaptive_pacing, alias
+error_adaptive). Adaptive Command (``adaptive_command.py``) is the variant that corrects the command instead.
 
 One follower covers the whole trajectory a generator executes for one subtask: the bridge (interpolation
 and fixed) waypoints and the transformed skill waypoints, flattened into one path w_0..w_{n-1}, as the
@@ -211,3 +212,6 @@ class ErrorAdaptiveFollower:
                   "k": k, "region": self.region[k_before], "capped": bool(capped), "new_slots": new_slots,
                   "e_pos": float(e_pos), "e_rot": float(e_rot), "kind": self.kinds[k]}
         return self.targets(s), self.grippers_at(k), self._noises[k], record
+
+
+AdaptivePacingFollower = ErrorAdaptiveFollower      # the method's name (2026-11-13); error_adaptive stays as the config alias

@@ -1,0 +1,8 @@
+# Adaptive Pacing (방법론 A): error-adaptive path following only (the follower slows the progress along the path when
+# the hand lags; it always commands the reference path point). No mixing, pre-noise labels. Same values as trackmix's
+# tracking block. tmg/generation/method/tracking.py (ErrorAdaptiveFollower).
+defaults:
+  - tracking_only
+  - _self_
+name: adaptive_pacing
+tracking: {type: adaptive_pacing}

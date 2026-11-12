@@ -21,7 +21,8 @@ if [ -n "${METHOD:-}" ]; then
   files=$(method_files "$METHOD")
   [ -n "$files" ] || exit 0
   want=""
-  if grep -qE '^  type: logistic' $files && ! grep -qE '^mixing: \{enabled: false' "$REPO/configs/experiment/method/$METHOD.yaml"; then
+  # a file of the chain that sets mixing: {enabled: false} (the method or one of its parents) turns mixing off
+  if grep -qE '^  type: logistic' $files && ! grep -qE '^mixing: \{enabled: false' $files; then
     want=coefficients
   fi
   if grep -qE '^  type: rank_based' $files; then
