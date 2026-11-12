@@ -1,0 +1,11 @@
+# Generation, validation and test share these uniform ranges (metres, radians).
+# Translation centres follow the existing ours scene. Rope half offsets are additional.
+name: diverse20
+override_bounds: true
+bounds:
+  rope:
+    reset_object_position:
+      pose_range: {x: [-0.05, 0.15], y: [-0.1, 0.1], yaw: [-1.0471975511965976, 1.0471975511965976]}
+      partial_pose_range: {x: [-0.05, 0.15], y: [-0.05, 0.15], yaw: [-1.5707963267948966, 1.5707963267948966]}
+  towel:
+    reset_object_position: {x: [-0.05, 0.15], y: [-0.1, 0.1], yaw: [-1.0471975511965976, 1.0471975511965976]}
