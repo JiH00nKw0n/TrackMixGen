@@ -81,6 +81,14 @@ def pose_from_obs(obs: dict) -> np.ndarray:
     return pose
 
 
+def _site_pose(pos, quat_xyzw) -> np.ndarray:
+    """4x4 pose from a position and an (x, y, z, w) quaternion (robosuite's convention)."""
+    pose = np.eye(4)
+    pose[:3, 3] = np.asarray(pos, dtype=float).reshape(3)
+    pose[:3, :3] = Rotation.from_quat(np.asarray(quat_xyzw, dtype=float).reshape(4)).as_matrix()
+    return pose
+
+
 class SourcePicker:
     """How the source demonstration (CP-Gen constraint sequence) of an attempt is chosen.
 
@@ -166,13 +174,40 @@ class CPGenRuntime:
         if result.get("action") is None:
             return result
         if getattr(policy, "new_constraint", False):
-            self._begin_segment(policy, first_action=np.asarray(result["action"], dtype=float))
+            self._begin_segment(policy, first_action=np.asarray(result["action"], dtype=float), obs=obs)
             if self.follower is not None:
                 return self._follower_action(policy)
         self._target = action_to_pose(result["action"])
         return result
 
-    def _begin_segment(self, policy, *, first_action: np.ndarray) -> None:
+    def _scene_record(self, constraint, obs: dict | None) -> dict:
+        """What ``tmg fit_coefficients`` reads of a constraint (subtask): its reference object, that object's pose now and
+        in the source at the window's first step, the end-effector site pose now and in the source, and every
+        task-relevant object's pose now (``objects``) and in the source (``src_objects``, the constraint's objects only).
+        The reference object is ``obj_names[0]`` for a robot-object constraint and ``obj_names[1]`` (the object the held
+        object is placed on) for an object-object constraint. Empty when the observation lacks the poses."""
+        names = list(getattr(constraint, "obj_names", None) or [])
+        src_obj = getattr(constraint, "src_obj_pose", None) or {}
+        src_obs = getattr(constraint, "src_obs", None) or {}
+        if obs is None or not names:
+            return {}
+        ref = names[1] if getattr(constraint, "constraint_type", None) == "object-object" and len(names) > 1 else names[0]
+        if f"{ref}_pose" not in obs or ref not in src_obj:
+            return {}
+        quat_key = "robot0_eef_quat_site" if "robot0_eef_quat_site" in obs else "robot0_eef_quat"
+        out = {"object_name": ref, "constraint_type": getattr(constraint, "constraint_type", None),
+               "cur_obj_pose": np.asarray(obs[f"{ref}_pose"], dtype=float),
+               "src_obj_pose": np.asarray(src_obj[ref], dtype=float)[0],
+               "eef_pose": _site_pose(obs["robot0_eef_pos"], obs[quat_key]),
+               "objects": {k[:-5]: np.asarray(v, dtype=float) for k, v in obs.items()
+                           if k.endswith("_pose") and np.asarray(v).shape == (4, 4)},
+               "src_objects": {k: np.asarray(v, dtype=float)[0] for k, v in src_obj.items()},
+               "src_subtask_start": 0}
+        if "robot0_eef_pos" in src_obs and quat_key in src_obs:
+            out["src_eef_pose"] = _site_pose(np.asarray(src_obs["robot0_eef_pos"])[0], np.asarray(src_obs[quat_key])[0])
+        return out
+
+    def _begin_segment(self, policy, *, first_action: np.ndarray, obs: dict | None = None) -> None:
         """A segment was just planned: record it and, with tracking, start the follower on its path."""
         path = [first_action] + [np.asarray(a, dtype=float) for a in policy.action_queue]
         n_bridge = int(policy.curr_motion_plan_steps)
@@ -183,7 +218,8 @@ class CPGenRuntime:
         self.rec.add_subtask(subtask_ind=int(policy.current_constraint_idx),
                              src_demo_ind=int(policy.current_constraint_sequence_idx),
                              constraint_name=getattr(constraint, "name", None), obj_names=list(getattr(constraint, "obj_names", []) or []),
-                             num_motion_plan_steps=n_bridge, num_constraint_steps=n_skill)
+                             num_motion_plan_steps=n_bridge, num_constraint_steps=n_skill,
+                             **self._scene_record(constraint, obs))
         self._subtasks += 1
         self._segments = SegmentTable()
         self._segments.add(n_bridge, self.rec.begin_segment(SEG_BRIDGE), SEG_BRIDGE)   # bridge opened first, as before
