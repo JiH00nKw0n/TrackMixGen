@@ -39,7 +39,8 @@ def test_decide_keeps_sources_at_or_above_the_mean_and_compatible():
     obs = {"pod_pose": pose(0.0), "robot0_eef_pos": [0, 0, 1.0], "robot0_eef_quat_site": [0, 0, 0, 1.0]}
     record, w = mixing.decide(model(4), seqs, 0, 1, obs, None)
     assert record["incompatible"] == [3]                 # gripper events differ from the primary's
-    assert w[2] == 0 and w[3] == 0 and w[0] > w[1] > 0 and w.sum() == pytest.approx(1.0)
+    # predictions 0.5, 0.27, 0.0025, 0.45 (mean 0.31): only source 0 stays; the primary (1) gives the timeline only
+    assert w[0] == pytest.approx(1.0) and w[1] == 0 and w[2] == 0 and w[3] == 0
 
 
 def test_decide_uses_inhand_features_from_the_second_constraint():
