@@ -144,6 +144,18 @@ class Graft:
         self.edits.append(f"'{name} = {code.strip()}'")
         return self
 
+    def wrap_assign_value(self, name: str, func: str, extra_args: tuple[str, ...] = (), occurrence: int = 0) -> Graft:
+        """Pass the right-hand side of the ``occurrence``-th assignment to ``name`` through ``func``: the statement
+        ``name = <value>`` becomes ``name = func(*extra_args, <value>)``. The official expression is kept as it is and is
+        evaluated after ``extra_args``, so ``func`` sees the official value."""
+        stmts, i = self._find_assign(name, occurrence)
+        original = stmts[i].value
+        call = ast.Call(func=ast.parse(func, mode="eval").body,
+                        args=[ast.parse(a, mode="eval").body for a in extra_args] + [original], keywords=[])
+        stmts[i].value = ast.copy_location(call, original)
+        self.edits.append(f"'{name} = {func}({', '.join([*extra_args, '<official value>'])})'")
+        return self
+
     def replace_for_iter(self, target_name: str, code: str) -> Graft:
         """Replace the iterable of ``for <target_name> in ...`` with expression ``code``."""
         stmts, i = self._find_for(target_name)

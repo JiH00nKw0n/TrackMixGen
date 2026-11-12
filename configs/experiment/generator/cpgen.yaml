@@ -10,7 +10,9 @@ source_repo: cpgen/datasets-src        # Hugging Face dataset repo of the source
 source_root: ${oc.env:TMG_CPGEN_SRC,/opt/src/cpgen}   # checkout: working directory of the chunk (relative config paths)
 # Source text hash (sha256 of inspect.getsource) of the grafted DemoGenerator.generate_demo at the pinned commit
 # (tests/unit/fixtures/cpgen_generate_demo.py holds that text); a changed package refuses to run.
-graft_hashes: {generate_demo: a497e9da6ef4f84624c9646fd49ee55fae1dedaa93e428c90f8fa312972b40e2}
+graft_hashes:
+  generate_demo: a497e9da6ef4f84624c9646fd49ee55fae1dedaa93e428c90f8fa312972b40e2
+  solve_constraint: efb3f236ae9e51ae2e38f98819ff2f0f5d40b5bdeda75c43df7bb6d984582711   # source mixing only
 # demo_aug.generate.Config fields applied to every task (after the task's). The authors' launcher
 # (scripts/pipeline/run_datagen_and_training.sh) sets the robot start-pose noise to Gaussian 0.06; the Config default is 0.02.
 # Its other generation flags equal the Config defaults.
@@ -26,10 +28,14 @@ config:
 action_rotation: rotation_6d
 noisy_state_replay: {enabled: true, num_retries: 6, action_noise_std: 0.03, num_processes: 12, render_processes: 12,
                      done_mode: 2, compress: true}
-# CP-Gen replays no source segment (it re-solves constraints), so source mixing has no counterpart: the mixing
-# part of every method is off. Its saved actions are already noise-free, so labels are pre_noise for every method.
+# CP-Gen re-solves constraints instead of replaying source segments, so source mixing blends the solved end-effector
+# poses of the retained sources (tmg/generation/generators/cpgen/mixing.py, logistic mixer only, selection=ours).
+# Its saved actions are already noise-free, so labels are pre_noise for every method. trackmix keeps mixing off here.
 method_overrides:
   none: {labels: pre_noise}
   tracking_only: {labels: pre_noise}
-  mixup_only: {mixing: {enabled: false}, labels: pre_noise}
+  mixup_only: {labels: pre_noise}
+  rank_top1: {labels: pre_noise}
+  rank_top3: {labels: pre_noise}
+  rank_top5: {labels: pre_noise}
   trackmix: {mixing: {enabled: false}, labels: pre_noise}
