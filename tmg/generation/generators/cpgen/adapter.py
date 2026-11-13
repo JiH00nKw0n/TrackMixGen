@@ -53,6 +53,11 @@ class CPGenGenerator(RobosuiteGenerator):
         """selection.all_sources: generate from every source demonstration (one chosen per attempt) instead of demo 0 only."""
         return bool((self.cfg.get("selection") or {}).get("all_sources"))
 
+    def per_subtask_sources(self) -> bool:
+        """selection.select_src_per_subtask with every source loaded (selection=ours): the runtime draws a new source
+        demonstration at every subtask instead of one per attempt (same rule as MimicGen's selection=ours)."""
+        return self.all_sources() and bool((self.cfg.get("selection") or {}).get("select_src_per_subtask"))
+
     def check_sources(self) -> list[str]:
         """Both the source file and its annotation must exist; with every source in use, the per-demonstration windows too."""
         source, annotation = self.source_path(), Path(str(self.task["annotation"])).expanduser()
@@ -96,7 +101,8 @@ class CPGenGenerator(RobosuiteGenerator):
             chunk, folder, scene=self.scene_chain(), generator_config="",
             expected_outputs=[str(folder / RECORDS_DIR / ATTEMPTS_JSONL)],
             extra={"cpgen_config": config, "source_root": str(self.generator_cfg["source_root"]),
-                   "graft_hashes": self.graft_hashes(), "all_sources": self.all_sources()})
+                   "graft_hashes": self.graft_hashes(), "all_sources": self.all_sources(),
+                   "per_subtask_sources": self.per_subtask_sources()})
 
     def chunk_result(self, spec: ChunkSpec) -> dict | None:
         """Validate the records and count the rendered successes; None when the chunk did not finish."""

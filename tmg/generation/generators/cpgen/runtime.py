@@ -46,6 +46,12 @@ A source rule (``method.sources``, ``RankBasedSampling``: top-K of the ranking f
 Source selection (``selection.all_sources``, ``extra["all_sources"]`` of the chunk spec): CP-Gen picks the constraint
 sequence (source demonstration) only in its reset-near-constraint mode and otherwise always uses sequence 0, so with
 every source in use :class:`SourcePicker` draws one per attempt from the chunk's private stream (``seeds.source_pick_rng``).
+With ``selection.select_src_per_subtask`` too (selection=ours, ``extra["per_subtask_sources"]``) it draws again every time
+the policy advances to the next constraint (subtask), so constraint k of the attempt is solved from a source drawn for k,
+as MimicGen's selection=ours does. Without it every subtask of an attempt came from the same source, and the coefficient
+pools never showed an in-hand pose that differs from the source's, so the in-hand terms of the success model could not
+be fitted (CP-Gen Threading, 2026-11-14). The record keeps the source of every subtask (``subtasks[k].src_demo_ind`` and
+``src_demo_inds``).
 """
 from __future__ import annotations
 
@@ -107,31 +113,59 @@ class SourcePicker:
 
     ``all_sources=False`` is the official behaviour: the policy's current sequence is left alone (sequence 0 unless
     CP-Gen's own reset-near-constraint mode picked one). ``all_sources=True`` (selection=ours) draws a sequence index
-    per attempt from the chunk's private stream and restarts that sequence at its first constraint.
+    per attempt from the chunk's private stream and restarts that sequence at its first constraint. ``per_subtask=True``
+    also draws a new sequence index each time the policy advances to the next constraint (``CPPolicy.advance_constraint``
+    wrapped on the policy instance; CP-Gen's own code is not changed).
     """
 
-    def __init__(self, all_sources: bool, chunk_seed: int, rule=None):
+    def __init__(self, all_sources: bool, chunk_seed: int, rule=None, per_subtask: bool = False):
         self.all_sources = bool(all_sources)
+        self.per_subtask = bool(per_subtask) and self.all_sources
         self._rng = source_pick_rng(chunk_seed)
         self.rule = rule
         if rule is not None and not self.all_sources:
             raise ValueError("a source rule (method.sources) needs every source loaded: use selection=ours")
 
+    def _draw(self, policy, subtask_ind: int) -> int:
+        """A source for constraint ``subtask_ind``: the method's rule when it has one, otherwise uniform over the
+        sequences that have that constraint (the private stream is drawn either way so the streams stay aligned)."""
+        sequences = policy.constraint_sequences
+        allowed = [j for j, seq in enumerate(sequences) if subtask_ind == 0 or len(seq) > subtask_ind]
+        index = allowed[int(self._rng.integers(len(allowed)))]
+        if self.rule is not None:
+            index = int(self.rule.pick(subtask_ind))
+        return index
+
+    def _wrap_advance(self, policy) -> None:
+        """Make ``policy.advance_constraint`` draw the next constraint's source (installed once per policy)."""
+        if getattr(policy, "_tmg_per_subtask", False):
+            return
+        advance = policy.advance_constraint                      # bound method of the official class
+
+        def advance_and_draw():
+            advance()
+            k = int(policy.current_constraint_idx)
+            if k < max(len(seq) for seq in policy.constraint_sequences):
+                policy.current_constraint_sequence_idx = self._draw(policy, k)
+
+        policy.advance_constraint = advance_and_draw
+        policy._tmg_per_subtask = True
+
     def pick(self, policy) -> None:
         """Set the policy's constraint sequence for the attempt that starts now (no-op in the official mode)."""
         sequences = getattr(policy, "constraint_sequences", None)
         if self.all_sources and sequences is not None and len(sequences) > 1:
-            index = int(self._rng.integers(len(sequences)))
-            if self.rule is not None:
-                index = int(self.rule.pick(0))
-            policy.current_constraint_sequence_idx = index
+            policy.current_constraint_sequence_idx = self._draw(policy, 0)
             policy.current_constraint_idx = 0
+            if self.per_subtask:
+                self._wrap_advance(policy)
 
 
 class CPGenRuntime:
     """The ``_tmg`` object the grafted ``generate_demo`` calls (anchors in the module docstring)."""
 
-    def __init__(self, method: Method, chunk_seed: int, records_dir: Path | None, all_sources: bool = False):
+    def __init__(self, method: Method, chunk_seed: int, records_dir: Path | None, all_sources: bool = False,
+                 per_subtask: bool = False):
         if method.mixer is not None and not all_sources:
             raise ValueError(f"method {method.name!r}: source mixing needs every source loaded: use selection=ours")
         if method.mixer is not None and not hasattr(method.mixer, "model"):
@@ -140,7 +174,7 @@ class CPGenRuntime:
         self._mix_plan = None                              # MultiMixPlan of the constraint being solved (mixing only)
         self._last_mix: dict | None = None                 # mix record of that constraint, written with its subtask
         self.official = None                               # demo_aug.generate (tests put a stand-in here)
-        self.picker = SourcePicker(all_sources, chunk_seed, rule=getattr(method, "sources", None))
+        self.picker = SourcePicker(all_sources, chunk_seed, rule=getattr(method, "sources", None), per_subtask=per_subtask)
         self.rec = AttemptRecorder()
         self.rec.configure(records_dir)
         self.records_dir = records_dir
@@ -158,6 +192,7 @@ class CPGenRuntime:
         self._segments = SegmentTable()                   # record segments of the current planned path (bridge, skill)
         self._pos = 0                                    # executed steps of the current path (identity mode)
         self._subtasks = 0
+        self._sources: list[int] = []                      # source demonstration of every recorded subtask
         self._gripper_states: dict = {}
         self._measured_before: np.ndarray | None = None
         self._target: np.ndarray | None = None
@@ -184,6 +219,7 @@ class CPGenRuntime:
         """Grafted before ``generate_demo`` returns: flush the attempt record (source index per segment)."""
         with record_error_guard(self.records_dir, self.rec):
             src = int(getattr(generator.policy, "current_constraint_sequence_idx", 0))
+            sources = self._sources if len(self._sources) == self._subtasks else [src] * self._subtasks
             self.rec.add_extra(elapsed_s=round(time.time() - self._attempt_t0, 3), labels="pre_noise",
                                failure_type=episode_data.get("failure_type"), executed_steps=len(self._executed))
             if self._last_mix is not None:
@@ -191,7 +227,7 @@ class CPGenRuntime:
                 self._last_mix = None
             if self._unplanned_mixes:                         # mixed constraints that never became a segment (plan failed)
                 self.rec.add_extra(unplanned_mixes=self._unplanned_mixes)
-            self.rec.flush(success=bool(episode_data.get("success", False)), src_demo_inds=[src] * self._subtasks)
+            self.rec.flush(success=bool(episode_data.get("success", False)), src_demo_inds=sources)
 
     # per step ------------------------------------------------------------------------------------
     def get_action(self, generator, obs: dict) -> dict:
@@ -261,6 +297,7 @@ class CPGenRuntime:
                              num_motion_plan_steps=n_bridge, num_constraint_steps=n_skill,
                              **scene, **mix)
         self._subtasks += 1
+        self._sources.append(int(policy.current_constraint_sequence_idx))
         self._segments = SegmentTable()
         self._segments.add(n_bridge, self.rec.begin_segment(SEG_BRIDGE), SEG_BRIDGE)   # bridge opened first, as before
         self._segments.add(n_skill, self.rec.begin_segment(SEG_SKILL), SEG_SKILL)
@@ -355,21 +392,23 @@ class CPGenRuntime:
                 self._gripper_states[EEF] = bool(g[0] > 0)
 
 
-def apply(method: Method, *, chunk_seed: int, records_dir: Path | None, graft_hashes: dict, all_sources: bool = False) -> dict:
+def apply(method: Method, *, chunk_seed: int, records_dir: Path | None, graft_hashes: dict, all_sources: bool = False,
+          per_subtask: bool = False) -> dict:
     """Install the grafted ``generate_demo``; returns a description for the chunk log."""
     global _INSTALLED
     from demo_aug.generate import CPPolicy, DemoGenerator
 
     if _INSTALLED is not None:
         raise RuntimeError("CP-Gen runtime already applied in this process")
-    runtime = CPGenRuntime(method, chunk_seed, records_dir, all_sources=all_sources)
+    runtime = CPGenRuntime(method, chunk_seed, records_dir, all_sources=all_sources, per_subtask=per_subtask)
     edits = [(DemoGenerator, "generate_demo", build_graft(DemoGenerator.generate_demo, graft_hashes.get("generate_demo")))]
     if method.mixer is not None:
         edits.append((CPPolicy, "solve_constraint", build_mix_graft(CPPolicy.solve_constraint, graft_hashes.get("solve_constraint"))))
     _INSTALLED = install_grafts(edits, {"_tmg": runtime})
     return {**_INSTALLED.info, "method": method.name, "labels": "pre_noise",
             "tracking": method.follower_factory is not None, "records_dir": None if records_dir is None else str(records_dir),
-            "all_sources": runtime.all_sources, "mixing": method.mixer is not None}
+            "all_sources": runtime.all_sources, "per_subtask_sources": runtime.picker.per_subtask,
+            "mixing": method.mixer is not None}
 
 
 def build_graft(generate_demo, expected_hash: str | None) -> Graft:

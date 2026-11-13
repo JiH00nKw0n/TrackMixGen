@@ -48,8 +48,8 @@ def test_chunk_spec_and_command(tmp_path, monkeypatch):
     assert spec.generator == "cpgen" and spec.chunk == {"index": 0, "seed": 9001, "attempts": 3} and spec.generator_config == ""
     assert spec.folder == str(folder) and spec.records_dir == str(folder / RECORDS_DIR)
     assert spec.expected_outputs == [str(folder / RECORDS_DIR / ATTEMPTS_JSONL)]
-    assert list(spec.extra) == ["cpgen_config", "source_root", "graft_hashes", "all_sources"]
-    assert spec.extra["all_sources"] is False and spec.extra["graft_hashes"] == {
+    assert list(spec.extra) == ["cpgen_config", "source_root", "graft_hashes", "all_sources", "per_subtask_sources"]
+    assert spec.extra["all_sources"] is False and spec.extra["per_subtask_sources"] is False and spec.extra["graft_hashes"] == {
         "generate_demo": "a497e9da6ef4f84624c9646fd49ee55fae1dedaa93e428c90f8fa312972b40e2",
         "solve_constraint": "efb3f236ae9e51ae2e38f98819ff2f0f5d40b5bdeda75c43df7bb6d984582711"}
     assert spec.extra["source_root"] == str(tmp_path / "cpgen_src")
@@ -193,3 +193,36 @@ def test_end_attempt_records_a_record_error_file(tmp_path):
     assert list(payload) == ["attempt", "error", "traceback", "time"]
     assert payload["attempt"] == 0 and payload["error"] == "OSError('disk full')" and "disk full" in payload["traceback"]
     assert isinstance(payload["time"], float)
+
+
+def test_source_picker_draws_a_source_per_subtask_with_selection_ours():
+    """selection=ours with select_src_per_subtask: every advance to the next constraint draws a new source; without the
+    flag the attempt keeps its first source."""
+    import types
+    from tmg.generation.generators.cpgen.runtime import SourcePicker
+
+    class Policy:
+        def __init__(self):
+            self.constraint_sequences = [[f"s{j}c{k}" for k in range(3)] for j in range(10)]
+            self.current_constraint_idx = 0
+            self.current_constraint_sequence_idx = 0
+
+        def advance_constraint(self):
+            self.current_constraint_idx += 1
+
+    seen = set()
+    for seed in range(20):
+        pol = Policy()
+        SourcePicker(True, seed, per_subtask=True).pick(pol)
+        chosen = [pol.current_constraint_sequence_idx]
+        for _ in range(2):
+            pol.advance_constraint()
+            chosen.append(pol.current_constraint_sequence_idx)
+        assert pol.current_constraint_idx == 2 and all(0 <= j < 10 for j in chosen)
+        seen.add(len(set(chosen)) > 1)
+    assert True in seen                                              # sources differ across subtasks in some attempts
+    pol = Policy()
+    SourcePicker(True, 0, per_subtask=False).pick(pol)
+    first = pol.current_constraint_sequence_idx
+    pol.advance_constraint(); pol.advance_constraint()
+    assert pol.current_constraint_sequence_idx == first

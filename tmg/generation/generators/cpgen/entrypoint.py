@@ -30,7 +30,8 @@ def main(argv=None):
         from tmg.generation.generators.cpgen import runtime
 
         register_scene_env(spec)
-        install_runtime(spec, runtime.apply, all_sources=bool(extra.get("all_sources")))
+        install_runtime(spec, runtime.apply, all_sources=bool(extra.get("all_sources")),
+                        per_subtask=bool(extra.get("per_subtask_sources")))
         import demo_aug.generate as official
 
         config = dict(extra["cpgen_config"])
