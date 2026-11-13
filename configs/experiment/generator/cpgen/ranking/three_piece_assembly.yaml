@@ -1,0 +1,31 @@
+# Source ranking of cpgen three_piece_assembly. Sources ordered from the highest to the lowest full-task generation
+# success rate per subtask (ties: lower source index first). The good/bad split is not stored here; the
+# method config chooses how many top sources count as high-success (method.mixing.good_fraction).
+generator: cpgen
+task: three_piece_assembly
+basis: Full-task generation success rate (successes / attempts) of each source demonstration, per subtask, measured by tmg
+  rank_sources on the baseline pool /data/pools/cpgen/three_piece_assembly/ours/ours/none/rank_human_demos (3000 attempts,
+  60 chunks, scene ours, generation rank_human_demos). The source of a subtask is the demonstration the generator selected
+  for that subtask.
+split_note: The ranking only orders the sources. Which prefix counts as high-success is method.mixing.good_fraction.
+subtasks:
+  0:
+    order: [8, 0, 6, 9, 3, 5, 1, 7, 4, 2]
+    attempts: {8: 314, 0: 312, 6: 312, 9: 279, 3: 260, 5: 320, 1: 289, 7: 256, 4: 348, 2: 298}
+    successes: {8: 214, 0: 212, 6: 197, 9: 171, 3: 143, 5: 98, 1: 87, 7: 68, 4: 81, 2: 42}
+    rate: {8: 0.6815, 0: 0.6795, 6: 0.6314, 9: 0.6129, 3: 0.55, 5: 0.3063, 1: 0.301, 7: 0.2656, 4: 0.2328, 2: 0.1409}
+  1:
+    order: [8, 0, 6, 9, 3, 5, 1, 7, 4, 2]
+    attempts: {8: 309, 0: 307, 6: 307, 9: 276, 3: 253, 5: 259, 1: 284, 7: 250, 4: 341, 2: 291}
+    successes: {8: 214, 0: 212, 6: 197, 9: 171, 3: 143, 5: 98, 1: 87, 7: 68, 4: 81, 2: 42}
+    rate: {8: 0.6926, 0: 0.6906, 6: 0.6417, 9: 0.6196, 3: 0.5652, 5: 0.3784, 1: 0.3063, 7: 0.272, 4: 0.2375, 2: 0.1443}
+  2:
+    order: [8, 0, 6, 9, 3, 4, 5, 7, 1, 2]
+    attempts: {8: 298, 0: 298, 6: 296, 9: 265, 3: 226, 4: 156, 5: 250, 7: 203, 1: 270, 2: 145}
+    successes: {8: 214, 0: 212, 6: 197, 9: 171, 3: 143, 4: 81, 5: 98, 7: 68, 1: 87, 2: 42}
+    rate: {8: 0.7181, 0: 0.7114, 6: 0.6655, 9: 0.6453, 3: 0.6327, 4: 0.5192, 5: 0.392, 7: 0.335, 1: 0.3222, 2: 0.2897}
+  3:
+    order: [8, 6, 9, 0, 3, 4, 5, 2, 7, 1]
+    attempts: {8: 248, 6: 231, 9: 201, 0: 261, 3: 181, 4: 123, 5: 166, 2: 100, 7: 164, 1: 217}
+    successes: {8: 214, 6: 197, 9: 171, 0: 212, 3: 143, 4: 81, 5: 98, 2: 42, 7: 68, 1: 87}
+    rate: {8: 0.8629, 6: 0.8528, 9: 0.8507, 0: 0.8123, 3: 0.7901, 4: 0.6585, 5: 0.5904, 2: 0.42, 7: 0.4146, 1: 0.4009}

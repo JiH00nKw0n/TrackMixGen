@@ -1,0 +1,20 @@
+# Source ranking of cpgen threading. Sources ordered from the highest to the lowest full-task generation
+# success rate per subtask (ties: lower source index first). The good/bad split is not stored here; the
+# method config chooses how many top sources count as high-success (method.mixing.good_fraction).
+generator: cpgen
+task: threading
+basis: Full-task generation success rate (successes / attempts) of each source demonstration, per subtask, measured by tmg
+  rank_sources on the baseline pool /data/pools/cpgen/threading/ours/ours/none/rank_human_demos (3000 attempts, 60 chunks,
+  scene ours, generation rank_human_demos). The source of a subtask is the demonstration the generator selected for that subtask.
+split_note: The ranking only orders the sources. Which prefix counts as high-success is method.mixing.good_fraction.
+subtasks:
+  0:
+    order: [1, 6, 7, 3, 5, 0, 9, 4, 2, 8]
+    attempts: {1: 289, 6: 312, 7: 258, 3: 260, 5: 318, 0: 314, 9: 184, 4: 215, 2: 298, 8: 316}
+    successes: {1: 177, 6: 144, 7: 112, 3: 39, 5: 44, 0: 31, 9: 13, 4: 1, 2: 0, 8: 0}
+    rate: {1: 0.6125, 6: 0.4615, 7: 0.4341, 3: 0.15, 5: 0.1384, 0: 0.0987, 9: 0.0707, 4: 0.0047, 2: 0.0, 8: 0.0}
+  1:
+    order: [1, 6, 7, 3, 5, 0, 9, 4, 2, 8]
+    attempts: {1: 287, 6: 312, 7: 256, 3: 254, 5: 315, 0: 310, 9: 183, 4: 215, 2: 297, 8: 313}
+    successes: {1: 177, 6: 144, 7: 112, 3: 39, 5: 44, 0: 31, 9: 13, 4: 1, 2: 0, 8: 0}
+    rate: {1: 0.6167, 6: 0.4615, 7: 0.4375, 3: 0.1535, 5: 0.1397, 0: 0.1, 9: 0.071, 4: 0.0047, 2: 0.0, 8: 0.0}

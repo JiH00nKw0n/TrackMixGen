@@ -1,0 +1,25 @@
+# Source ranking of cpgen coffee. Sources ordered from the highest to the lowest full-task generation
+# success rate per subtask (ties: lower source index first). The good/bad split is not stored here; the
+# method config chooses how many top sources count as high-success (method.mixing.good_fraction).
+generator: cpgen
+task: coffee
+basis: Full-task generation success rate (successes / attempts) of each source demonstration, per subtask, measured by tmg
+  rank_sources on the baseline pool /data/pools/cpgen/coffee/ours/ours/none/rank_human_demos (3000 attempts, 60 chunks, scene
+  ours, generation rank_human_demos). The source of a subtask is the demonstration the generator selected for that subtask.
+split_note: The ranking only orders the sources. Which prefix counts as high-success is method.mixing.good_fraction.
+subtasks:
+  0:
+    order: [0, 3, 9, 8, 1, 2, 5, 6, 7, 4]
+    attempts: {0: 310, 3: 252, 9: 280, 8: 313, 1: 283, 2: 294, 5: 319, 6: 310, 7: 250, 4: 342}
+    successes: {0: 81, 3: 60, 9: 62, 8: 69, 1: 55, 2: 55, 5: 51, 6: 44, 7: 33, 4: 16}
+    rate: {0: 0.2613, 3: 0.2381, 9: 0.2214, 8: 0.2204, 1: 0.1943, 2: 0.1871, 5: 0.1599, 6: 0.1419, 7: 0.132, 4: 0.0468}
+  1:
+    order: [3, 9, 1, 8, 5, 0, 2, 7, 6, 4]
+    attempts: {3: 144, 9: 176, 1: 161, 8: 205, 5: 152, 0: 247, 2: 178, 7: 142, 6: 203, 4: 176}
+    successes: {3: 60, 9: 62, 1: 55, 8: 69, 5: 51, 0: 81, 2: 55, 7: 33, 6: 44, 4: 16}
+    rate: {3: 0.4167, 9: 0.3523, 1: 0.3416, 8: 0.3366, 5: 0.3355, 0: 0.3279, 2: 0.309, 7: 0.2324, 6: 0.2167, 4: 0.0909}
+  2:
+    order: [5, 3, 1, 9, 8, 0, 6, 2, 7, 4]
+    attempts: {5: 107, 3: 132, 1: 124, 9: 142, 8: 177, 0: 225, 6: 125, 2: 157, 7: 102, 4: 66}
+    successes: {5: 51, 3: 60, 1: 55, 9: 62, 8: 69, 0: 81, 6: 44, 2: 55, 7: 33, 4: 16}
+    rate: {5: 0.4766, 3: 0.4545, 1: 0.4435, 9: 0.4366, 8: 0.3898, 0: 0.36, 6: 0.352, 2: 0.3503, 7: 0.3235, 4: 0.2424}
