@@ -17,3 +17,10 @@ image_size: [84, 84]
 robot_state: [robot0_eef_pos, robot0_eef_quat, robot0_gripper_qpos]
 object_state: [object]              # low-dim object observation (robosuite object-state: poses and relative positions)
 instruction: stack the three cubes on top of each other        # language instruction for π0
+mixing_symmetries:                  # logistic mixing (method.mixing.symmetries): a cube is the same after 90, 180 and 270 deg
+  cubeA: &cube                      # about its vertical z axis
+  - {rot_axis: z, rot_param: 1.5707963267948966, translation: [0, 0, 0]}
+  - {rot_axis: z, rot_param: 3.141592653589793, translation: [0, 0, 0]}
+  - {rot_axis: z, rot_param: 4.71238898038469, translation: [0, 0, 0]}
+  cubeB: *cube
+  cubeC: *cube

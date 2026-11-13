@@ -227,9 +227,15 @@ def test_logistic_mixer_records_the_distance_after_alignment():
     assert rec["symmetry"]["1"]["symmetry"] == "identity" and rec["symmetry"]["1"]["pos_cm"] == pytest.approx(8.0, abs=0.01)
 
 
-def test_mimicgen_hammer_config_declares_the_hammer_symmetry():
+def test_mimicgen_task_symmetries_name_reference_objects():
     from pathlib import Path
-    task = yaml.safe_load(Path("configs/experiment/generator/mimicgen/task/hammer_cleanup.yaml").read_text())
-    assert task["mixing_symmetries"]["hammer"][0]["rot_axis"] == "z"
+    declared = {}
+    for path in sorted(Path("configs/experiment/generator/mimicgen/task").glob("*.yaml")):
+        task = yaml.safe_load(path.read_text())
+        for obj, transforms in (task.get("mixing_symmetries") or {}).items():
+            assert obj in task["reference_objects"] and all(t["rot_axis"] in "xyz" for t in transforms)
+            declared[(path.stem, obj)] = len(transforms)
+    assert declared == {("hammer_cleanup", "hammer"): 1, ("square", "square_peg"): 3, ("stack_three", "cubeA"): 3,
+                        ("stack_three", "cubeB"): 3, ("stack_three", "cubeC"): 3}
     method = yaml.safe_load(Path("configs/experiment/method/trackmix.yaml").read_text())
     assert method["mixing"]["symmetries"] == "${oc.select:task.mixing_symmetries,null}"

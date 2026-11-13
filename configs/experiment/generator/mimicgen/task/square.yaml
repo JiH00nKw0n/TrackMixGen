@@ -15,3 +15,8 @@ image_size: [84, 84]
 robot_state: [robot0_eef_pos, robot0_eef_quat, robot0_gripper_qpos]
 object_state: [object]              # low-dim object observation (robosuite object-state: poses and relative positions)
 instruction: pick up the square nut and insert it onto the square peg        # language instruction for π0
+mixing_symmetries:                  # logistic mixing (method.mixing.symmetries): the square peg (and the nut's square hole on
+  square_peg:                       # it) is the same after 90, 180 and 270 deg about the peg's vertical z axis
+  - {rot_axis: z, rot_param: 1.5707963267948966, translation: [0, 0, 0]}
+  - {rot_axis: z, rot_param: 3.141592653589793, translation: [0, 0, 0]}
+  - {rot_axis: z, rot_param: 4.71238898038469, translation: [0, 0, 0]}
