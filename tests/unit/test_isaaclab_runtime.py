@@ -189,7 +189,7 @@ def test_mix_segment_hands_the_mixer_every_source_and_repacks_the_mixed_segment(
     eef, targets, grippers = rt.mix_segment(gen, local_vars)
     ctx = mixer.contexts[0]
     assert ctx.subtask_ind == 0 and ctx.primary == 1 and ctx.num_sources == 2 and ctx.has_reference_object is True
-    assert ctx.extra == {"eef": "robot0", "soft": False}
+    assert ctx.extra == {"eef": "robot0", "soft": False, "reference_object": "rope"}
     assert ctx.rng.random() == np.random.default_rng(0).random()                     # the mixer's stream is always default_rng(0)
     np.testing.assert_array_equal(ctx.primary_eef_start, pose(10))
     np.testing.assert_array_equal(ctx.primary_targets, infos[1].target_eef_pose["robot0"].a[0:4])
@@ -235,7 +235,7 @@ def test_mix_segment_registers_donor_segments_into_the_primary_rope(torch, monke
     rt.mix_segment(gen, soft_locals(infos, primary=1, soft=True))
     ctx = mixer.contexts[0]
     assert calls == [(10.0, 0.0, True, 0.1, 1e-3), (10.0, 20.0, True, 0.1, 1e-3)]
-    assert ctx.extra == {"eef": "robot0", "soft": True}
+    assert ctx.extra == {"eef": "robot0", "soft": True, "reference_object": "rope"}
     assert all(np.array_equal(p, np.eye(4)) for p in ctx.src_object_poses)
     assert ctx.src_segments[0][1][0, 0, 3] == 1000.5 and ctx.src_segments[1][1][0, 0, 3] == 10.5 and ctx.src_segments[2][1][0, 0, 3] == 1020.5
 

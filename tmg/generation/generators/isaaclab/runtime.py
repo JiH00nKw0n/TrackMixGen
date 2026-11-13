@@ -289,7 +289,7 @@ class IsaacLabRuntime:
         context = MixContext(subtask_ind=subtask_ind, primary=primary, primary_eef_start=_np(eef[0]),
                              primary_targets=_np(targets), primary_gripper=_np(grippers), src_object_poses=object_poses,
                              src_segments=segments, num_sources=len(infos), has_reference_object=object_name is not None,
-                             rng=np.random.default_rng(0), extra={"eef": eef_name, "soft": soft})
+                             rng=np.random.default_rng(0), extra={"eef": eef_name, "soft": soft, "reference_object": object_name})
         mixed = self.method.mixer.mix(context)
         self._last_mix = mixed.record
         if not mixed.record.get("mixed"):

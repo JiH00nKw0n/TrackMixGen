@@ -86,7 +86,7 @@ class MimicGenRuntime:
         ``eef_pose`` and ``objects`` (``tmg fit_coefficients`` reads those)."""
         from tmg.generation.method.success_model import in_hand
         current = local_vars.get("cur_object_pose")
-        extra = {"current_object_pose": None if current is None else np.array(current)}
+        extra = {"current_object_pose": None if current is None else np.array(current), "reference_object": object_name}
         carried = self._carried
         if carried is not None:
             cur = local_vars["cur_datagen_info"]

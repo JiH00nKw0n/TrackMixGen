@@ -93,7 +93,7 @@ def test_mix_segment_keeps_other_passthrough_channels_next_to_the_mixed_hand(tor
     gen = types.SimpleNamespace(src_demo_datagen_info_pool=types.SimpleNamespace(datagen_infos=infos))
     eef, targets, passthrough = rt.mix_segment(gen, local_vars)
     ctx = mixer.contexts[0]
-    assert ctx.primary == 1 and ctx.extra == {"eef": "right", "soft": False} and ctx.rng.random() == np.random.default_rng(0).random()
+    assert ctx.primary == 1 and ctx.extra == {"eef": "right", "soft": False, "reference_object": "object"} and ctx.rng.random() == np.random.default_rng(0).random()
     np.testing.assert_array_equal(ctx.primary_gripper, np.full((4, 2), 10))
     np.testing.assert_array_equal(ctx.primary_eef_start, pose(60))
     np.testing.assert_array_equal(ctx.primary_targets, infos[1].target_eef_pose["right"].a[0:4])

@@ -166,3 +166,70 @@ def test_committed_mimicgen_coefficient_files_load():
         assert set(model.subtasks[1].slopes) == {"dx", "dy", "rotation", "inhand_position", "inhand_rotation"}
         p = model.for_subtask(0).predict(np.zeros((10, 3)))
         assert p.shape == (10,) and np.all((p > 0) & (p < 1))
+
+
+# symmetry alignment ----------------------------------------------------------------------------------------------------
+HAMMER_SYM = {"hammer": [{"rot_axis": "z", "rot_param": np.pi, "translation": [0, 0, 0]}]}
+
+
+def _grasp_segment(obj, y, yaw, T=6, close_at=3):
+    """A segment that grasps at (0, y, 0.03) in the object frame (gripper pointing down, turned ``yaw``), closing at
+    step ``close_at``; world poses for the object pose ``obj``."""
+    g = np.eye(4)
+    g[:3, :3] = np.diag([1.0, -1.0, -1.0]) @ pose(yaw=yaw)[:3, :3]
+    g[:3, 3] = [0.0, y, 0.03]
+    targets = np.stack([obj @ g for _ in range(T)])
+    targets[:, 2, 3] += np.linspace(0.05, 0.0, T)      # descends onto the grasp
+    targets[close_at:, 2, 3] = targets[close_at, 2, 3]
+    grip = np.where(np.arange(T) >= close_at, 1.0, -1.0).reshape(-1, 1)
+    return (targets[0], targets, grip)
+
+
+def _hammer_context(segs, objs, primary=0):
+    return MixContext(subtask_ind=0, primary=primary, primary_eef_start=segs[primary][0], primary_targets=segs[primary][1],
+                      primary_gripper=segs[primary][2], src_object_poses=objs, src_segments=segs, num_sources=len(segs),
+                      has_reference_object=True, extra={"current_object_pose": objs[primary], "reference_object": "hammer"})
+
+
+def test_logistic_mixer_aligns_sources_held_from_the_other_side():
+    # sources 0 and 1 grasp the hammer at y=-0.06, source 2 from the other side (the hammer turned about its z axis),
+    # source 3 the same but with the gripper also turned about its approach axis
+    objs = [pose(0.0), pose(0.0, 0.01), pose(0.0, -0.01), pose(0.01)]
+    segs = [_grasp_segment(objs[0], -0.06, 0.0), _grasp_segment(objs[1], -0.055, 0.05),
+            _grasp_segment(objs[2], 0.06, np.pi), _grasp_segment(objs[3], 0.06, 0.0)]
+    model = SuccessModel(name="g/t", num_sources=4, subtasks={0: SubtaskModel(np.zeros(4), {"dx": 0.0, "dy": 0.0, "rotation": 0.0})},
+                         carried={})
+    out = LogisticMixer(model=model, symmetries=HAMMER_SYM).mix(_hammer_context(segs, objs))
+    rec = out.record
+    assert rec["mixed"] and all(w == pytest.approx(0.25) for w in rec["weights"])
+    assert rec["symmetry"]["1"]["symmetry"] == "identity"
+    assert rec["symmetry"]["2"]["symmetry"] == "obj:z180" and rec["symmetry"]["2"]["pos_cm"] < 0.1
+    assert rec["symmetry"]["3"]["symmetry"] == "obj:z180+eef:z180" and rec["symmetry"]["3"]["rot_deg"] < 0.1
+    assert rec["symmetry"]["2"]["identity_pos_cm"] == pytest.approx(12.0, abs=0.01)
+    assert rec["symmetry"]["2"]["identity_rot_deg"] == pytest.approx(180.0, abs=0.1)
+    grasp = segs[0][1][3]                                 # the primary's grasp (object 0 is the primary's frame)
+    k = int(np.argmax(np.asarray(out.gripper).reshape(-1) > 0))
+    dp = np.linalg.norm(out.targets[k][:3, 3] - grasp[:3, 3])
+    dr = np.degrees(np.arccos(np.clip((np.trace(out.targets[k][:3, :3].T @ grasp[:3, :3]) - 1) / 2, -1, 1)))
+    assert dp < 0.005 and dr < 2.0
+    # without the object symmetry only the gripper flip is available: source 2's position stays on the other side
+    rec = LogisticMixer(model=model).mix(_hammer_context(segs, objs)).record
+    assert rec["symmetry"]["2"]["symmetry"] == "eef:z180" and rec["symmetry"]["2"]["pos_cm"] == pytest.approx(12.0, abs=0.01)
+
+
+def test_logistic_mixer_records_the_distance_after_alignment():
+    objs = [pose(0.0), pose(0.0)]
+    segs = [_grasp_segment(objs[0], -0.06, 0.0), _grasp_segment(objs[1], -0.14, 0.0)]
+    model = SuccessModel(name="g/t", num_sources=2, subtasks={0: SubtaskModel(np.zeros(2), {"dx": 0.0, "dy": 0.0, "rotation": 0.0})},
+                         carried={})
+    rec = LogisticMixer(model=model, symmetries=HAMMER_SYM).mix(_hammer_context(segs, objs)).record
+    assert rec["weights"] == [0.5, 0.5]
+    assert rec["symmetry"]["1"]["symmetry"] == "identity" and rec["symmetry"]["1"]["pos_cm"] == pytest.approx(8.0, abs=0.01)
+
+
+def test_mimicgen_hammer_config_declares_the_hammer_symmetry():
+    from pathlib import Path
+    task = yaml.safe_load(Path("configs/experiment/generator/mimicgen/task/hammer_cleanup.yaml").read_text())
+    assert task["mixing_symmetries"]["hammer"][0]["rot_axis"] == "z"
+    method = yaml.safe_load(Path("configs/experiment/method/trackmix.yaml").read_text())
+    assert method["mixing"]["symmetries"] == "${oc.select:task.mixing_symmetries,null}"

@@ -6,6 +6,8 @@ mixing:
                                     # current scene and blend the sources at or above the mean prediction, weighted by it
   coefficients: ${generator.name}/${task.name}   # configs/experiment/generator/<gen>/coefficients/<task>.yaml (tmg fit_coefficients);
                                     # `make generate` builds it from scratch when missing (scripts/ensure_coefficients.sh)
+  symmetries: ${oc.select:task.mixing_symmetries,null}   # object symmetries the mixer may align sources with before blending
+                                    # (logistic_mix.py step 4; the parallel-gripper 180 deg flip needs no entry)
 tracking:
   enabled: true
   type: error_adaptive              # implementation (tmg/generation/method/tracking.py)
