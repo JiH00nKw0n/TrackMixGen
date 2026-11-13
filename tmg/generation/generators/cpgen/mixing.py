@@ -17,8 +17,18 @@ constraint of several sources, each solved for the current scene:
 2. Weights. The retained set is the sources whose prediction is at least the mean over all sources and whose gripper
    events match the primary's (only those can be put on the primary's timeline); weights are the predictions normalized
    over the retained set (``logistic_mix.above_mean_weights`` with the compatible sources).
-3. Solve. Every retained source other than the primary is solved for the current scene by the official
-   ``compute_X_W_eef_des`` at every step of its own window, with the symmetry transforms CP-Gen chose for the primary.
+3. Symmetry alignment and solve. A source can be recorded in a different but equivalent representation of the same
+   grasp: the reference object may be symmetric (the constraint's ``symmetries``, e.g. the hammer turned 180 degrees about
+   its z axis) and the parallel gripper is symmetric under 180 degrees about its approach axis (CP-Gen's ``reflect_eef``).
+   CP-Gen's ``find_best_transform`` picks one combination of these transforms for the primary (the one whose desired
+   pose at the window start is closest to the current end-effector pose). Each retained source picks its own
+   combination from the same candidate list, the one whose desired pose at the window start is closest to the primary's
+   desired pose there (same score as ``find_best_transform``: 5 per metre plus 1 per radian, reference = the primary's
+   pose), and is then solved for the current scene by the official ``compute_X_W_eef_des`` at every step of its own
+   window with that combination. Without this step two sources that hold the hammer from opposite sides are averaged
+   into a pose in the middle of the hammer, rotated 180 degrees from both (Hammer Cleanup pilot, 2026-11-13). The record
+   keeps per source the chosen combination and its distance to the primary after alignment (and with the primary's
+   combination, the old behaviour).
 4. Blend on the primary's timeline. Each retained source is time-warped onto the primary's window (gripper events moved
    to the primary's event steps, linear stretching between them, ``event_mix.align_segments``). At each step t the
    blended pose has the weighted mean position and the weighted mean rotation (``Rotation.mean`` with the weights). The
@@ -152,13 +162,93 @@ class MultiMixPlan:
         return out
 
 
+W_TRANS, W_ROT = 5.0, 1.0                    # find_best_transform's score: 5 per metre, 1 per radian
+
+
+def _rot_z180() -> np.ndarray:
+    out = np.eye(4)
+    out[:3, :3] = Rotation.from_euler("z", np.pi).as_matrix()
+    return out
+
+
+def _label(kind: str, params: dict, k: int) -> str:
+    if "rot_axis" in params and "rot_param" in params:
+        return f"{kind}:{params['rot_axis']}{int(round(np.degrees(float(params['rot_param']))))}"
+    return f"{kind}:{k}"
+
+
+def symmetry_candidates(official, constraint) -> list[tuple[str, dict]]:
+    """Every ``(X_obj0_transf, X_obj1_transf, X_eef_transf)`` combination ``find_best_transform`` tries for the
+    constraint, in its loop order (eef outer, obj1 inner), each with a label such as ``"obj0:z180+eef:z180"``."""
+    lists = {"obj0": [("", np.eye(4))], "obj1": [("", np.eye(4))], "eef": [("", np.eye(4))]}
+    for sym in getattr(constraint, "symmetries", None) or []:
+        if sym.type not in lists:
+            continue
+        if sym.type == "obj0" and getattr(sym, "skip_default", False):
+            lists["obj0"] = []
+        mats = official.generate_se3_transforms(sym.transforms)
+        lists[sym.type] += [(_label(sym.type, p, k), np.asarray(T, dtype=float))
+                            for k, (p, T) in enumerate(zip(sym.transforms, mats))]
+    if getattr(constraint, "constraint_type", None) == "robot-object" and getattr(constraint, "reflect_eef", True):
+        lists["eef"].append(("eef:z180", _rot_z180()))
+    out = []
+    for le, te in lists["eef"]:
+        for l0, t0 in lists["obj0"]:
+            for l1, t1 in lists["obj1"]:
+                out.append(("+".join(x for x in (l0, l1, le) if x) or "identity",
+                            dict(X_obj0_transf=t0, X_obj1_transf=t1, X_eef_transf=te)))
+    return out
+
+
+def pose_distance(a, b) -> tuple[float, float]:
+    """``(position distance m, rotation angle rad)`` between two 4x4 poses."""
+    a, b = np.asarray(a, dtype=float), np.asarray(b, dtype=float)
+    return float(np.linalg.norm(a[:3, 3] - b[:3, 3])), float(Rotation.from_matrix(a[:3, :3].T @ b[:3, :3]).magnitude())
+
+
+def _same(t: dict, u: dict) -> bool:
+    return all(np.allclose(np.asarray(t[k] if t[k] is not None else np.eye(4)), np.asarray(u[k] if u[k] is not None else np.eye(4)))
+               for k in ("X_obj0_transf", "X_obj1_transf", "X_eef_transf"))
+
+
+def _window_start(official, policy, c, obs: dict, transforms: dict) -> np.ndarray:
+    return np.asarray(official.compute_X_W_eef_des(c, obs, policy.robot_configuration, policy.eef_configuration, src_t_idx=0,
+                                                   ignore_scaling=policy.ignore_scaling, **transforms), dtype=float)
+
+
+def align_sources(official, policy, sequences: list, idx: int, primary: int, sources: list, obs: dict,
+                  primary_transforms: dict) -> tuple[dict, dict]:
+    """Per source, the symmetry combination whose desired pose at the window start is closest to the primary's
+    (module docstring, step 3). Returns ``(transforms per source, record per source)``."""
+    reference = _window_start(official, policy, sequences[primary][idx], obs, primary_transforms)
+    chosen, info = {}, {}
+    for j in sources:
+        c = sequences[j][idx]
+        best, before = None, None
+        for label, t in symmetry_candidates(official, c):
+            dp, dr = pose_distance(_window_start(official, policy, c, obs, t), reference)
+            score = W_TRANS * dp + W_ROT * dr
+            if best is None or score < best[0]:
+                best = (score, label, t, dp, dr)
+            if before is None and _same(t, primary_transforms):
+                before = (dp, dr)
+        _score, label, t, dp, dr = best
+        chosen[j] = t
+        info[str(j)] = {"symmetry": label, "pos_cm": round(100 * dp, 2), "rot_deg": round(float(np.degrees(dr)), 1)}
+        if before is not None:
+            info[str(j)]["primary_symmetry_pos_cm"] = round(100 * before[0], 2)
+            info[str(j)]["primary_symmetry_rot_deg"] = round(float(np.degrees(before[1])), 1)
+    return chosen, info
+
+
 def solve_sources(official, policy, sequences: list, idx: int, sources: list, obs: dict, transforms: dict) -> dict:
-    """Solve constraint ``idx`` of each source in ``sources`` for the current scene (module docstring, step 3)."""
+    """Solve constraint ``idx`` of each source in ``sources`` for the current scene (module docstring, step 3) with that
+    source's symmetry combination ``transforms[j]``."""
     out = {}
     for j in sources:
         c = sequences[j][idx]
         poses = np.stack([official.compute_X_W_eef_des(c, obs, policy.robot_configuration, policy.eef_configuration,
-                                                       src_t_idx=u, ignore_scaling=policy.ignore_scaling, **transforms)
+                                                       src_t_idx=u, ignore_scaling=policy.ignore_scaling, **transforms[j])
                           for u in range(window_length(c))])
         out[j] = (poses, gripper_series(c))
     return out

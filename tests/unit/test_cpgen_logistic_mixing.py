@@ -62,3 +62,73 @@ def test_multi_mix_plan_blends_on_the_primary_timeline():
     assert plan0.pose(n - 1, pose(0.0))[0, 3] == pytest.approx(other[-1, 0, 3])
     with pytest.raises(IndexError):
         plan.pose(n, pose(0.0))
+
+
+# symmetry alignment ----------------------------------------------------------------------------------------------------
+def _se3(transforms):
+    out = []
+    for p in transforms:
+        t = np.eye(4)
+        t[:3, :3] = Rotation.from_euler(p["rot_axis"], p["rot_param"]).as_matrix()
+        out.append(t)
+    return out
+
+
+class FakeOfficial:
+    """CP-Gen's ``compute_X_W_eef_des`` without keypoint refinement: the source grasp in the (transformed) object frame
+    put on the current object, then the end-effector transform."""
+    generate_se3_transforms = staticmethod(_se3)
+
+    @staticmethod
+    def compute_X_W_eef_des(c, obs, rc, ec, X_obj0_transf=None, X_obj1_transf=None, X_eef_transf=None, src_t_idx=0,
+                            ignore_scaling=False):
+        obj = c.obj_names[0]
+        src_obj = c.src_obj_pose[obj][src_t_idx] @ X_obj0_transf
+        src_eef = mixing.site_pose(c.src_obs["robot0_eef_pos"][src_t_idx], c.src_obs["robot0_eef_quat_site"][src_t_idx])
+        return obs[f"{obj}_pose"] @ np.linalg.inv(src_obj) @ src_eef @ X_eef_transf
+
+
+def grasp(y, yaw, n=4, obj="hammer", x=0.0):
+    """A source that grasps the hammer (at the origin, yaw 0) at (x, y) in the hammer frame with gripper yaw ``yaw``."""
+    quat = Rotation.from_euler("xz", [np.pi, yaw]).as_quat()       # pointing down, turned about the approach axis
+    sym = SimpleNamespace(type="obj0", transforms=[{"rot_axis": "z", "rot_param": np.pi, "translation": [0, 0, 0]}])
+    return SimpleNamespace(obj_names=[obj], constraint_type="robot-object", reflect_eef=True, symmetries=[sym],
+                           src_obj_pose={obj: np.stack([pose()] * n)}, timesteps=list(range(n)), src_gripper_action=np.full(n, -1.0),
+                           src_obs={"robot0_eef_pos": np.tile([x, y, 0.85], (n, 1)), "robot0_eef_quat_site": np.tile(quat, (n, 1))})
+
+
+POLICY = SimpleNamespace(robot_configuration=None, eef_configuration=None, ignore_scaling=True)
+IDENTITY = dict(X_obj0_transf=np.eye(4), X_obj1_transf=np.eye(4), X_eef_transf=np.eye(4))
+
+
+def test_symmetry_candidates_follow_find_best_transform():
+    labels = [label for label, _ in mixing.symmetry_candidates(FakeOfficial, grasp(0.0, 0.0))]
+    assert labels == ["identity", "obj0:z180", "eef:z180", "obj0:z180+eef:z180"]
+
+
+def test_sources_held_from_the_other_side_are_aligned_to_the_primary_before_blending():
+    # sources 0 and 2 hold the hammer at y=-0.06, source 1 (and 3, also turned about the approach axis) from the other
+    # side, 180 degrees about the hammer z axis: the object symmetry maps them onto the primary's side
+    seqs = [[grasp(-0.06, 0.0)], [grasp(0.06, np.pi)], [grasp(-0.05, 0.05)], [grasp(0.06, 0.0)]]
+    obs = {"hammer_pose": pose(0.1, 0.2, 0.3)}
+    chosen, info = mixing.align_sources(FakeOfficial, POLICY, seqs, 0, 0, [1, 2, 3], obs, IDENTITY)
+    assert info["1"]["symmetry"] == "obj0:z180" and info["2"]["symmetry"] == "identity"
+    assert info["3"]["symmetry"] == "obj0:z180+eef:z180"
+    assert info["1"]["pos_cm"] < 0.1 and info["1"]["rot_deg"] < 0.1
+    assert info["1"]["primary_symmetry_pos_cm"] == pytest.approx(12.0, abs=0.01)
+    assert info["1"]["primary_symmetry_rot_deg"] == pytest.approx(180.0, abs=0.1)
+    solved = mixing.solve_sources(FakeOfficial, POLICY, seqs, 0, [1, 2, 3], obs, chosen)
+    plan = mixing.MultiMixPlan(mixing.gripper_series(seqs[0][0]), solved, {"primary": 0.25, 1: 0.25, 2: 0.25, 3: 0.25})
+    primary = FakeOfficial.compute_X_W_eef_des(seqs[0][0], obs, None, None, src_t_idx=0, **IDENTITY)
+    dp, dr = mixing.pose_distance(plan.pose(0, primary), primary)
+    assert dp < 0.01 and np.degrees(dr) < 2.0             # without alignment: the hammer's middle, 180 degrees off
+
+
+def test_alignment_records_the_distance_to_the_primary():
+    seqs = [[grasp(-0.06, 0.0)], [grasp(-0.06, 0.0, x=0.08)]]
+    obs = {"hammer_pose": pose()}
+    chosen, info = mixing.align_sources(FakeOfficial, POLICY, seqs, 0, 0, [1], obs, IDENTITY)
+    assert info["1"]["symmetry"] == "identity" and info["1"]["pos_cm"] == pytest.approx(8.0, abs=0.01)
+    solved = mixing.solve_sources(FakeOfficial, POLICY, seqs, 0, [1], obs, chosen)
+    plan = mixing.MultiMixPlan(mixing.gripper_series(seqs[0][0]), solved, {"primary": 0.5, 1: 0.5})
+    assert plan.pose(0, FakeOfficial.compute_X_W_eef_des(seqs[0][0], obs, None, None, **IDENTITY))[0, 3] == pytest.approx(0.04)

@@ -165,6 +165,9 @@ class CPGenRuntime:
         self._labels: list[np.ndarray] = []
         self._executed: list[np.ndarray] = []
         self._prev_ref: str | None = None                  # reference object of the previous constraint (in-hand feature)
+        self._last_mix = None
+        self._mix_plan = None
+        self._unplanned_mixes: list[dict] = []             # mix records of solves whose motion plan failed
 
     # attempt boundaries --------------------------------------------------------------------------
     def begin_attempt(self, generator) -> None:
@@ -183,6 +186,11 @@ class CPGenRuntime:
             src = int(getattr(generator.policy, "current_constraint_sequence_idx", 0))
             self.rec.add_extra(elapsed_s=round(time.time() - self._attempt_t0, 3), labels="pre_noise",
                                failure_type=episode_data.get("failure_type"), executed_steps=len(self._executed))
+            if self._last_mix is not None:
+                self._unplanned_mixes.append(self._last_mix)
+                self._last_mix = None
+            if self._unplanned_mixes:                         # mixed constraints that never became a segment (plan failed)
+                self.rec.add_extra(unplanned_mixes=self._unplanned_mixes)
             self.rec.flush(success=bool(episode_data.get("success", False)), src_demo_inds=[src] * self._subtasks)
 
     # per step ------------------------------------------------------------------------------------
@@ -282,6 +290,8 @@ class CPGenRuntime:
     def prepare_mix(self, policy, constraint, obs: dict, X_obj0_transf, X_obj1_transf, X_eef_transf) -> None:
         """Grafted after CP-Gen chose the primary's symmetry transforms: predict every source, keep those at or above the
         mean, solve them for the current scene and prepare the blend (``mixing`` module docstring)."""
+        if self._last_mix is not None:                        # an earlier solve of this attempt never reached a segment
+            self._unplanned_mixes.append(self._last_mix)
         self._mix_plan, self._last_mix = None, None
         if self.method.mixer is None:
             return
@@ -307,7 +317,9 @@ class CPGenRuntime:
             record.update(mixed=False, identity_reason="only the primary is retained")
             return
         transforms = dict(X_obj0_transf=X_obj0_transf, X_obj1_transf=X_obj1_transf, X_eef_transf=X_eef_transf)
-        solved = mixing.solve_sources(self.official, policy, sequences, idx, others, obs, transforms)
+        chosen, symmetry = mixing.align_sources(self.official, policy, sequences, idx, primary, others, obs, transforms)
+        record["symmetry"] = symmetry                       # kept even if solving or planning fails below
+        solved = mixing.solve_sources(self.official, policy, sequences, idx, others, obs, chosen)
         weights = {"primary": float(w[primary]), **{j: float(w[j]) for j in others}}
         self._mix_plan = mixing.MultiMixPlan(mixing.gripper_series(constraint), solved, weights)
         record.update(mixed=True, alignment=self._mix_plan.meta)
