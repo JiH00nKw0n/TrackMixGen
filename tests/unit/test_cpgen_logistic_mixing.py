@@ -104,6 +104,10 @@ IDENTITY = dict(X_obj0_transf=np.eye(4), X_obj1_transf=np.eye(4), X_eef_transf=n
 def test_symmetry_candidates_follow_find_best_transform():
     labels = [label for label, _ in mixing.symmetry_candidates(FakeOfficial, grasp(0.0, 0.0))]
     assert labels == ["identity", "obj0:z180", "eef:z180", "obj0:z180+eef:z180"]
+    two = SimpleNamespace(type="obj0", transforms=[{"rot_axis": "z", "rot_param": np.pi}, {"rot_axis": "y", "rot_param": np.pi}])
+    placement = SimpleNamespace(constraint_type="object-object", symmetries=[two])
+    assert [label for label, _ in mixing.symmetry_candidates(FakeOfficial, placement)] == ["identity", "obj0:z180", "obj0:y180",
+                                                                                          "obj0:z180*y180"]
 
 
 def test_sources_held_from_the_other_side_are_aligned_to_the_primary_before_blending():

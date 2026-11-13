@@ -24,7 +24,8 @@ constraint of several sources, each solved for the current scene:
    pose at the window start is closest to the current end-effector pose). Each retained source picks its own
    combination from the same candidate list, the one whose desired pose at the window start is closest to the primary's
    desired pose there (same score as ``find_best_transform``: 5 per metre plus 1 per radian, reference = the primary's
-   pose), and is then solved for the current scene by the official ``compute_X_W_eef_des`` at every step of its own
+   pose; the compositions of two annotated object symmetries are candidates too, e.g. Hammer Cleanup's placement needs
+   the hammer turned about z and y at once), and is then solved for the current scene by the official ``compute_X_W_eef_des`` at every step of its own
    window with that combination. Without this step two sources that hold the hammer from opposite sides are averaged
    into a pose in the middle of the hammer, rotated 180 degrees from both (Hammer Cleanup pilot, 2026-11-13). The record
    keeps per source the chosen combination and its distance to the primary after alignment (and with the primary's
@@ -189,6 +190,13 @@ def symmetry_candidates(official, constraint) -> list[tuple[str, dict]]:
         mats = official.generate_se3_transforms(sym.transforms)
         lists[sym.type] += [(_label(sym.type, p, k), np.asarray(T, dtype=float))
                             for k, (p, T) in enumerate(zip(sym.transforms, mats))]
+    for kind in ("obj0", "obj1"):                    # compositions of two annotated symmetries are symmetries too
+        base = [(label, t) for label, t in lists[kind] if label]
+        for la, ta in base:
+            for lb, tb in base:
+                t = ta @ tb
+                if la != lb and not any(np.allclose(t, u, atol=1e-9) for _l, u in lists[kind]):
+                    lists[kind].append((f"{la}*{lb.split(':', 1)[1]}", t))
     if getattr(constraint, "constraint_type", None) == "robot-object" and getattr(constraint, "reflect_eef", True):
         lists["eef"].append(("eef:z180", _rot_z180()))
     out = []
