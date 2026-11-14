@@ -32,213 +32,213 @@ subtasks:
   0:
     term_signal: went on to the next subtask
     reached: 2928
-    successes: 2475
-    log_loss: 0.2104
+    successes: 2467
+    log_loss: 0.4279
     alpha:
-      0: 3.310292
-      1: 3.874466
-      2: 6.341141
-      3: 3.914311
-      4: 4.034652
-      5: 4.260338
-      6: 4.501415
-      7: -1.491653
-      8: 4.166354
-      9: 0.548264
+      0: 2.096377
+      1: 1.936267
+      2: 2.251757
+      3: 1.705048
+      4: 2.074747
+      5: 2.075111
+      6: 2.098003
+      7: 1.741337
+      8: 2.202751
+      9: 1.704115
     slopes:
-      dx: -2.41428
-      dy: -12.196957
-      rotation: 0.534824
+      dx: 0.347172
+      dy: -9.34447
+      rotation: 0.402181
     source_counts:
       0:
-        reached: 307
-        successes: 285
+        reached: 297
+        successes: 255
       1:
-        reached: 276
-        successes: 264
+        reached: 292
+        successes: 244
       2:
-        reached: 283
-        successes: 282
+        reached: 267
+        successes: 234
       3:
-        reached: 249
-        successes: 239
+        reached: 292
+        successes: 235
       4:
-        reached: 341
-        successes: 329
+        reached: 276
+        successes: 236
       5:
-        reached: 317
-        successes: 308
+        reached: 319
+        successes: 273
       6:
-        reached: 309
-        successes: 302
+        reached: 286
+        successes: 245
       7:
-        reached: 252
-        successes: 28
+        reached: 318
+        successes: 256
       8:
-        reached: 314
-        successes: 304
+        reached: 322
+        successes: 281
       9:
-        reached: 280
-        successes: 134
+        reached: 259
+        successes: 208
   1:
     term_signal: went on to the next subtask
-    reached: 2475
-    successes: 1724
-    log_loss: 0.5359
+    reached: 2467
+    successes: 1716
+    log_loss: 0.5846
     alpha:
-      0: 1.651605
-      1: -0.103895
-      2: 1.749025
-      3: 0.151368
-      4: 2.147385
-      5: 2.308082
-      6: 1.997452
-      7: 2.5248
-      8: 1.905495
-      9: 2.228025
+      0: 1.117288
+      1: 1.585468
+      2: 1.411285
+      3: 0.012082
+      4: 1.560985
+      5: 1.322023
+      6: 1.322973
+      7: 2.092694
+      8: 1.633459
+      9: 1.621124
     slopes:
-      dx: -1.820021
-      dy: 2.576359
-      rotation: -0.222268
+      dx: -1.782107
+      dy: 0.708321
+      rotation: -0.086717
       inhand_position: 0.0
       inhand_rotation: 0.0
     source_counts:
       0:
-        reached: 285
-        successes: 207
-      1:
-        reached: 264
-        successes: 86
-      2:
         reached: 282
-        successes: 209
+        successes: 189
+      1:
+        reached: 291
+        successes: 220
+      2:
+        reached: 267
+        successes: 193
       3:
-        reached: 239
-        successes: 91
-      4:
-        reached: 329
-        successes: 267
-      5:
-        reached: 308
-        successes: 257
-      6:
-        reached: 302
-        successes: 238
-      7:
-        reached: 28
-        successes: 24
-      8:
-        reached: 304
-        successes: 235
-      9:
-        reached: 134
+        reached: 273
         successes: 110
+      4:
+        reached: 307
+        successes: 231
+      5:
+        reached: 284
+        successes: 201
+      6:
+        reached: 301
+        successes: 213
+      7:
+        reached: 62
+        successes: 52
+      8:
+        reached: 258
+        successes: 199
+      9:
+        reached: 142
+        successes: 108
     carried_object: CabinetObject_main
   2:
     term_signal: went on to the next subtask
-    reached: 1724
-    successes: 1569
-    log_loss: 0.2774
+    reached: 1716
+    successes: 1551
+    log_loss: 0.3101
     alpha:
-      0: 2.566552
-      1: 9.997391
-      2: 2.705691
-      3: 2.590612
-      4: 3.602417
-      5: 2.99087
-      6: 5.017801
-      7: 4.139923
-      8: 3.736604
-      9: 3.313413
+      0: 1.762289
+      1: 2.363056
+      2: 2.813305
+      3: 2.339329
+      4: 2.504363
+      5: 2.163657
+      6: 2.48577
+      7: 2.23732
+      8: 2.736525
+      9: 2.393309
     slopes:
-      dx: -2.899828
-      dy: -8.427401
-      rotation: -0.299884
-      inhand_position: 1.574672
-      inhand_rotation: -0.079446
+      dx: 0.306108
+      dy: -3.457113
+      rotation: 0.125226
+      inhand_position: 19.865691
+      inhand_rotation: -0.085116
     source_counts:
       0:
-        reached: 207
-        successes: 172
+        reached: 202
+        successes: 169
       1:
-        reached: 86
-        successes: 86
+        reached: 67
+        successes: 63
       2:
-        reached: 209
-        successes: 179
+        reached: 177
+        successes: 166
       3:
-        reached: 91
-        successes: 76
+        reached: 185
+        successes: 168
       4:
-        reached: 267
-        successes: 249
+        reached: 188
+        successes: 172
       5:
-        reached: 257
-        successes: 228
+        reached: 196
+        successes: 173
       6:
-        reached: 238
-        successes: 234
+        reached: 190
+        successes: 174
       7:
-        reached: 24
-        successes: 23
+        reached: 149
+        successes: 133
       8:
-        reached: 235
-        successes: 221
+        reached: 173
+        successes: 162
       9:
-        reached: 110
-        successes: 101
+        reached: 189
+        successes: 171
     carried_object: hammer_root
   3:
     term_signal: task success
-    reached: 1569
-    successes: 1226
-    log_loss: 0.2774
+    reached: 1551
+    successes: 1237
+    log_loss: 0.4763
     alpha:
-      0: 4.777855
-      1: 6.354262
-      2: -3.497374
-      3: 2.926558
-      4: 4.769449
-      5: 3.375651
-      6: 5.805129
-      7: 3.625695
-      8: 5.300617
-      9: 6.933166
+      0: 3.101634
+      1: 3.36034
+      2: 2.67185
+      3: 2.948969
+      4: 3.097861
+      5: 2.408066
+      6: 3.643024
+      7: 3.264842
+      8: 3.582313
+      9: 3.527132
     slopes:
-      dx: -8.201393
-      dy: 3.911584
-      rotation: -3.030249
-      inhand_position: -8.378661
-      inhand_rotation: 0.709503
+      dx: -3.937804
+      dy: 0.804707
+      rotation: -2.726656
+      inhand_position: -5.177922
+      inhand_rotation: 0.463521
     source_counts:
       0:
-        reached: 172
-        successes: 147
+        reached: 165
+        successes: 124
       1:
-        reached: 86
-        successes: 82
+        reached: 157
+        successes: 119
       2:
-        reached: 179
-        successes: 1
+        reached: 160
+        successes: 126
       3:
-        reached: 76
-        successes: 55
+        reached: 125
+        successes: 102
       4:
-        reached: 249
-        successes: 232
+        reached: 166
+        successes: 140
       5:
-        reached: 228
-        successes: 181
+        reached: 152
+        successes: 108
       6:
-        reached: 234
-        successes: 214
+        reached: 182
+        successes: 150
       7:
-        reached: 23
-        successes: 19
+        reached: 136
+        successes: 116
       8:
-        reached: 221
-        successes: 196
+        reached: 161
+        successes: 132
       9:
-        reached: 101
-        successes: 99
+        reached: 147
+        successes: 120
     carried_object: CabinetObject_main

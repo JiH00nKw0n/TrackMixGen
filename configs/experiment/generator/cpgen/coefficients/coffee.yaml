@@ -30,160 +30,160 @@ subtask_term_signals:
 subtasks:
   0:
     term_signal: went on to the next subtask
-    reached: 2953
-    successes: 1784
-    log_loss: 0.6503
+    reached: 2960
+    successes: 1724
+    log_loss: 0.6721
     alpha:
-      0: 1.527933
-      1: 0.492481
-      2: 0.609713
-      3: 0.425385
-      4: 0.213841
-      5: 0.067988
-      6: 0.779428
-      7: 0.39808
-      8: 0.77787
-      9: 0.674479
+      0: 0.44876
+      1: 0.584176
+      2: 0.479506
+      3: 0.506142
+      4: 0.396966
+      5: 0.461975
+      6: 0.391299
+      7: 0.52891
+      8: 0.647214
+      9: 0.37331
     slopes:
-      dx: -0.177363
-      dy: -0.446771
-      rotation: -52.098486
+      dx: -0.696127
+      dy: 0.979563
+      rotation: -58.206615
     source_counts:
       0:
-        reached: 310
-        successes: 247
+        reached: 312
+        successes: 181
       1:
-        reached: 283
-        successes: 161
+        reached: 296
+        successes: 175
       2:
-        reached: 294
-        successes: 178
+        reached: 275
+        successes: 158
       3:
-        reached: 252
-        successes: 144
+        reached: 301
+        successes: 176
       4:
-        reached: 342
-        successes: 176
-      5:
-        reached: 319
-        successes: 152
-      6:
-        reached: 310
-        successes: 203
-      7:
-        reached: 250
-        successes: 142
-      8:
         reached: 313
-        successes: 205
+        successes: 179
+      5:
+        reached: 315
+        successes: 181
+      6:
+        reached: 302
+        successes: 170
+      7:
+        reached: 258
+        successes: 154
+      8:
+        reached: 311
+        successes: 194
       9:
-        reached: 280
-        successes: 176
+        reached: 277
+        successes: 156
   1:
     term_signal: went on to the next subtask
-    reached: 1784
-    successes: 1357
-    log_loss: 0.4813
+    reached: 1724
+    successes: 1307
+    log_loss: 0.5421
     alpha:
-      0: 2.561748
-      1: 1.45944
-      2: 2.335711
-      3: 2.692884
-      4: -0.249195
-      5: 1.139702
-      6: 0.713978
-      7: 1.205763
-      8: 2.082603
-      9: 1.688126
+      0: 0.845543
+      1: 1.436575
+      2: 1.061353
+      3: 1.551826
+      4: 1.364915
+      5: 2.056143
+      6: 0.735633
+      7: 1.233433
+      8: 1.300663
+      9: 1.034342
     slopes:
-      dx: -1.939896
-      dy: -2.285931
-      rotation: 0.016908
-      inhand_position: -2.458718
-      inhand_rotation: 0.929254
+      dx: -0.385505
+      dy: -1.494611
+      rotation: 0.042039
+      inhand_position: 0.722356
+      inhand_rotation: 0.851598
     source_counts:
       0:
-        reached: 247
-        successes: 225
+        reached: 221
+        successes: 153
       1:
-        reached: 161
-        successes: 124
+        reached: 150
+        successes: 120
       2:
-        reached: 178
-        successes: 157
+        reached: 163
+        successes: 120
       3:
-        reached: 144
-        successes: 132
+        reached: 137
+        successes: 112
       4:
-        reached: 176
-        successes: 66
+        reached: 182
+        successes: 143
       5:
-        reached: 152
-        successes: 107
+        reached: 137
+        successes: 121
       6:
-        reached: 203
-        successes: 125
-      7:
-        reached: 142
-        successes: 102
-      8:
-        reached: 205
-        successes: 177
-      9:
-        reached: 176
+        reached: 213
         successes: 142
+      7:
+        reached: 157
+        successes: 121
+      8:
+        reached: 186
+        successes: 145
+      9:
+        reached: 178
+        successes: 130
     carried_object: coffee_pod_main
   2:
     term_signal: task success
-    reached: 1357
-    successes: 526
-    log_loss: 0.6588
+    reached: 1307
+    successes: 467
+    log_loss: 0.6371
     alpha:
-      0: -0.732507
-      1: -0.37477
-      2: -0.742913
-      3: -0.314797
-      4: -1.274248
-      5: -0.232342
-      6: -0.743441
-      7: -0.89047
-      8: -0.56228
-      9: -0.38264
+      0: -0.756935
+      1: -0.18955
+      2: -1.310083
+      3: -0.546416
+      4: -1.648915
+      5: -0.545924
+      6: -1.005451
+      7: -0.883866
+      8: -0.695734
+      9: -0.591674
     slopes:
-      dx: -0.43097
-      dy: -0.563775
-      rotation: 0.269734
+      dx: -0.61056
+      dy: 0.232306
+      rotation: 0.266329
       inhand_position: 0.0
       inhand_rotation: 0.0
     source_counts:
       0:
-        reached: 225
-        successes: 81
+        reached: 171
+        successes: 61
       1:
-        reached: 124
-        successes: 55
+        reached: 129
+        successes: 64
       2:
-        reached: 157
-        successes: 55
+        reached: 158
+        successes: 38
       3:
-        reached: 132
-        successes: 60
+        reached: 150
+        successes: 61
       4:
-        reached: 66
-        successes: 16
+        reached: 54
+        successes: 10
       5:
-        reached: 107
-        successes: 51
-      6:
-        reached: 125
+        reached: 108
         successes: 44
+      6:
+        reached: 115
+        successes: 35
       7:
-        reached: 102
-        successes: 33
+        reached: 129
+        successes: 42
       8:
-        reached: 177
-        successes: 69
+        reached: 154
+        successes: 57
       9:
-        reached: 142
-        successes: 62
+        reached: 139
+        successes: 55
     carried_object: coffee_machine_pod_holder_cup_body_root

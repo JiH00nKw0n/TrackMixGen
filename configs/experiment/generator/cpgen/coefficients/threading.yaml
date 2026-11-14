@@ -29,106 +29,106 @@ subtask_term_signals:
 subtasks:
   0:
     term_signal: went on to the next subtask
-    reached: 2764
-    successes: 2742
-    log_loss: 0.0431
+    reached: 2749
+    successes: 2723
+    log_loss: 0.0518
     alpha:
-      0: 4.386294
-      1: 5.161116
-      2: 5.749107
-      3: 3.981392
-      4: 10.150608
-      5: 4.836437
-      6: 10.339776
-      7: 4.940368
-      8: 4.901072
-      9: 5.418546
+      0: 3.87202
+      1: 4.688799
+      2: 5.110588
+      3: 5.789908
+      4: 5.240215
+      5: 5.050868
+      6: 5.144158
+      7: 5.660865
+      8: 4.42021
+      9: 4.039213
     slopes:
-      dx: -3.681043
-      dy: 8.2643
-      rotation: -0.037317
+      dx: 0.124485
+      dy: -1.435711
+      rotation: -0.036827
     source_counts:
       0:
-        reached: 314
+        reached: 317
         successes: 310
       1:
-        reached: 289
-        successes: 287
+        reached: 304
+        successes: 301
       2:
-        reached: 298
-        successes: 297
+        reached: 307
+        successes: 305
       3:
-        reached: 260
-        successes: 254
+        reached: 304
+        successes: 303
       4:
-        reached: 215
-        successes: 215
+        reached: 175
+        successes: 174
       5:
-        reached: 318
-        successes: 315
+        reached: 291
+        successes: 289
       6:
-        reached: 312
-        successes: 312
+        reached: 313
+        successes: 311
       7:
-        reached: 258
-        successes: 256
+        reached: 266
+        successes: 265
       8:
-        reached: 316
-        successes: 313
+        reached: 312
+        successes: 308
       9:
-        reached: 184
-        successes: 183
+        reached: 160
+        successes: 157
   1:
     term_signal: task success
-    reached: 2742
-    successes: 561
-    log_loss: 0.3523
+    reached: 2723
+    successes: 557
+    log_loss: 0.4568
     alpha:
-      0: -1.834152
-      1: 0.881234
-      2: -9.959454
-      3: -1.358243
-      4: -4.996272
-      5: -1.445875
-      6: 0.215198
-      7: 0.127533
-      8: -9.989615
-      9: -2.201554
+      0: -2.34072
+      1: -0.305849
+      2: -9.803878
+      3: -1.344763
+      4: -0.172131
+      5: -0.879643
+      6: -0.305004
+      7: -1.178818
+      8: -0.785823
+      9: -1.11772
     slopes:
-      dx: -2.976896
-      dy: -3.222942
-      rotation: 0.052431
-      inhand_position: 0.378455
-      inhand_rotation: -0.094287
+      dx: -1.275311
+      dy: -5.128366
+      rotation: 0.022223
+      inhand_position: -27.94281
+      inhand_rotation: 0.952281
     source_counts:
       0:
-        reached: 310
-        successes: 31
+        reached: 259
+        successes: 16
       1:
-        reached: 287
-        successes: 177
+        reached: 259
+        successes: 83
       2:
-        reached: 297
+        reached: 256
         successes: 0
       3:
-        reached: 254
+        reached: 263
         successes: 39
       4:
-        reached: 215
-        successes: 1
+        reached: 307
+        successes: 111
       5:
-        reached: 315
-        successes: 44
+        reached: 289
+        successes: 61
       6:
-        reached: 312
-        successes: 144
+        reached: 289
+        successes: 95
       7:
-        reached: 256
-        successes: 112
+        reached: 252
+        successes: 42
       8:
-        reached: 313
-        successes: 0
+        reached: 285
+        successes: 65
       9:
-        reached: 183
-        successes: 13
+        reached: 264
+        successes: 45
     carried_object: needle_obj_root

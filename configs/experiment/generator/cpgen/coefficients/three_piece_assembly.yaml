@@ -31,214 +31,214 @@ subtask_term_signals:
 subtasks:
   0:
     term_signal: went on to the next subtask
-    reached: 2988
-    successes: 2877
-    log_loss: 0.1341
+    reached: 2986
+    successes: 2865
+    log_loss: 0.1365
     alpha:
-      0: 4.51978
-      1: 4.392581
-      2: 4.034767
-      3: 3.946426
-      4: 4.280715
-      5: 1.773783
-      6: 4.49338
-      7: 4.108108
-      8: 4.484722
-      9: 4.872783
+      0: 4.573502
+      1: 4.733353
+      2: 4.160924
+      3: 4.589604
+      4: 4.746076
+      5: 1.745586
+      6: 5.11265
+      7: 4.282537
+      8: 4.602121
+      9: 4.05098
     slopes:
-      dx: -0.337711
-      dy: 0.319919
-      rotation: -0.836679
+      dx: -0.681132
+      dy: -1.167913
+      rotation: -0.448067
     source_counts:
       0:
-        reached: 312
-        successes: 307
+        reached: 305
+        successes: 300
       1:
-        reached: 289
-        successes: 284
+        reached: 277
+        successes: 273
       2:
-        reached: 298
-        successes: 291
+        reached: 270
+        successes: 263
       3:
-        reached: 260
-        successes: 253
+        reached: 303
+        successes: 298
       4:
-        reached: 348
-        successes: 341
+        reached: 291
+        successes: 287
       5:
-        reached: 320
-        successes: 259
+        reached: 317
+        successes: 244
       6:
-        reached: 312
-        successes: 307
+        reached: 305
+        successes: 302
       7:
-        reached: 256
-        successes: 250
+        reached: 322
+        successes: 315
       8:
-        reached: 314
-        successes: 309
+        reached: 298
+        successes: 293
       9:
-        reached: 279
-        successes: 276
+        reached: 298
+        successes: 290
   1:
     term_signal: went on to the next subtask
-    reached: 2877
-    successes: 2407
-    log_loss: 0.3164
+    reached: 2865
+    successes: 2553
+    log_loss: 0.3238
     alpha:
-      0: 3.149462
-      1: 2.545333
-      2: -0.444951
-      3: 1.759312
-      4: -0.783049
-      5: 2.898141
-      6: 3.037018
-      7: 0.934356
-      8: 2.716401
-      9: 2.720385
+      0: 2.649101
+      1: 1.72027
+      2: 0.821592
+      3: 2.308633
+      4: 1.321382
+      5: 2.517467
+      6: 2.055044
+      7: 1.89021
+      8: 2.106507
+      9: 2.453157
     slopes:
-      dx: 1.009613
-      dy: -2.504528
-      rotation: 1.408794
-      inhand_position: 12.820288
-      inhand_rotation: 5.970417
+      dx: 0.484722
+      dy: -2.530718
+      rotation: 0.392248
+      inhand_position: 15.713956
+      inhand_rotation: 1.403313
     source_counts:
       0:
-        reached: 307
-        successes: 298
+        reached: 321
+        successes: 305
       1:
-        reached: 284
-        successes: 270
+        reached: 290
+        successes: 252
       2:
-        reached: 291
-        successes: 145
+        reached: 286
+        successes: 213
       3:
-        reached: 253
-        successes: 226
+        reached: 282
+        successes: 261
       4:
-        reached: 341
-        successes: 156
+        reached: 318
+        successes: 262
       5:
-        reached: 259
-        successes: 250
+        reached: 303
+        successes: 286
       6:
-        reached: 307
-        successes: 296
-      7:
-        reached: 250
-        successes: 203
-      8:
-        reached: 309
-        successes: 298
-      9:
-        reached: 276
+        reached: 290
         successes: 265
+      7:
+        reached: 277
+        successes: 248
+      8:
+        reached: 249
+        successes: 228
+      9:
+        reached: 249
+        successes: 233
     carried_object: piece_1_root
   2:
     term_signal: went on to the next subtask
-    reached: 2407
-    successes: 1892
-    log_loss: 0.5076
+    reached: 2553
+    successes: 2013
+    log_loss: 0.5088
     alpha:
-      0: 1.710349
-      1: 1.1826
-      2: 0.537875
-      3: 1.154118
-      4: 1.065241
-      5: 0.438561
-      6: 1.023978
-      7: 1.183394
-      8: 1.385723
-      9: 0.889627
+      0: 1.429446
+      1: 1.153648
+      2: 1.305879
+      3: 1.682402
+      4: 2.352665
+      5: 1.490015
+      6: 1.2511
+      7: 1.257605
+      8: 1.244919
+      9: 1.623076
     slopes:
-      dx: 0.509155
-      dy: 0.707677
-      rotation: 0.031391
+      dx: -0.524016
+      dy: -0.122981
+      rotation: 0.002099
       inhand_position: 0.0
       inhand_rotation: 0.0
     source_counts:
       0:
-        reached: 298
-        successes: 261
-      1:
         reached: 270
-        successes: 217
+        successes: 213
+      1:
+        reached: 267
+        successes: 197
       2:
-        reached: 145
-        successes: 100
+        reached: 254
+        successes: 194
       3:
-        reached: 226
-        successes: 181
+        reached: 241
+        successes: 199
       4:
-        reached: 156
-        successes: 123
+        reached: 219
+        successes: 198
       5:
-        reached: 250
-        successes: 166
+        reached: 256
+        successes: 204
       6:
-        reached: 296
-        successes: 231
+        reached: 279
+        successes: 211
       7:
-        reached: 203
-        successes: 164
+        reached: 205
+        successes: 155
       8:
-        reached: 298
-        successes: 248
+        reached: 287
+        successes: 217
       9:
-        reached: 265
-        successes: 201
+        reached: 275
+        successes: 225
     carried_object: base_root
   3:
     term_signal: task success
-    reached: 1892
-    successes: 1313
-    log_loss: 0.4495
+    reached: 2013
+    successes: 1430
+    log_loss: 0.4652
     alpha:
-      0: 4.29595
-      1: 3.241548
-      2: 4.673372
-      3: 4.721394
-      4: 4.000612
-      5: 5.27812
-      6: 7.115614
-      7: 4.583061
-      8: 5.928715
-      9: 7.015911
+      0: 4.038223
+      1: 2.570203
+      2: 3.908418
+      3: 4.281946
+      4: 4.093316
+      5: 3.867368
+      6: 3.946925
+      7: 3.892397
+      8: 3.957922
+      9: 4.326282
     slopes:
-      dx: -1.492864
-      dy: -0.479212
-      rotation: -5.888714
-      inhand_position: -43.393107
-      inhand_rotation: -55.287279
+      dx: -0.567961
+      dy: -0.320572
+      rotation: -7.39771
+      inhand_position: -52.039408
+      inhand_rotation: 0.273485
     source_counts:
       0:
-        reached: 261
-        successes: 212
-      1:
         reached: 217
-        successes: 87
+        successes: 161
+      1:
+        reached: 211
+        successes: 88
       2:
-        reached: 100
-        successes: 42
+        reached: 200
+        successes: 146
       3:
-        reached: 181
-        successes: 143
+        reached: 191
+        successes: 155
       4:
-        reached: 123
-        successes: 81
+        reached: 195
+        successes: 153
       5:
-        reached: 166
-        successes: 98
+        reached: 193
+        successes: 132
       6:
-        reached: 231
-        successes: 197
+        reached: 209
+        successes: 155
       7:
-        reached: 164
-        successes: 68
+        reached: 190
+        successes: 141
       8:
-        reached: 248
-        successes: 214
+        reached: 218
+        successes: 155
       9:
-        reached: 201
-        successes: 171
+        reached: 189
+        successes: 144
     carried_object: piece_2_root
