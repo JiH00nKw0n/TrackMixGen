@@ -12,6 +12,7 @@ chunk normally once every attempt is recorded.
 """
 from __future__ import annotations
 
+import os
 import traceback
 from pathlib import Path
 
@@ -33,6 +34,16 @@ def main(argv=None):
         install_runtime(spec, runtime.apply, all_sources=bool(extra.get("all_sources")),
                         per_subtask=bool(extra.get("per_subtask_sources")))
         import demo_aug.generate as official
+
+        if os.environ.get("TMG_CPGEN_FAILURE_VIDEOS", "1") == "0":
+            # CP-Gen's main() always replays every failed attempt into a 3-camera mp4 ("always save failure videos"),
+            # about 1.2-1.3 min per failure; the videos are not part of the generated data, so pools that do not need them
+            # (coefficient pools, large mixing pools) turn the replay off. main() imports the replay function locally from
+            # demo_aug.utils.robomimic_utils, and that is its only use there, so replacing it there skips the videos only.
+            import demo_aug.utils.robomimic_utils as _rmu
+
+            _rmu.playback_trajectory_with_env = lambda *args, **kwargs: None
+            print("[tmg] CP-Gen failure videos off (TMG_CPGEN_FAILURE_VIDEOS=0)", flush=True)
 
         config = dict(extra["cpgen_config"])
         config["save_dir"] = Path(config["save_dir"])
