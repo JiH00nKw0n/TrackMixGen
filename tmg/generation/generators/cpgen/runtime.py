@@ -55,6 +55,8 @@ be fitted (CP-Gen Threading, 2026-11-14). The record keeps the source of every s
 """
 from __future__ import annotations
 
+import math
+
 import time
 from pathlib import Path
 
@@ -237,17 +239,18 @@ class CPGenRuntime:
         self._track = None
         if self.follower is not None:
             if not self.follower.finished():
-                return self._follower_action(policy)
+                return self._follower_action(policy, obs)
             self.follower = None
             policy.action_queue = []
             policy.check_constraint = True
+        _resolve_after_bridge(policy, obs)  # re-solve the constraint after the bridge (TMG_CPGEN_RESOLVE_AFTER_BRIDGE)
         result = policy.get_action(obs)
         if result.get("action") is None:
             return result
         if getattr(policy, "new_constraint", False):
             self._begin_segment(policy, first_action=np.asarray(result["action"], dtype=float), obs=obs)
             if self.follower is not None:
-                return self._follower_action(policy)
+                return self._follower_action(policy, obs)
         self._target = action_to_pose(result["action"])
         return result
 
@@ -308,9 +311,11 @@ class CPGenRuntime:
         eef = EndEffectorPath(EEF, np.stack([action_to_pose(a) for a in path]), np.stack([a[6:] for a in path]))
         self.follower = self.method.follower_factory()
         self.follower.start_path([eef], [None] * len(path), kinds, self._gripper_states or None)
+        self._n_bridge, self._skill_resolved = n_bridge, False
 
-    def _follower_action(self, policy) -> dict:
+    def _follower_action(self, policy, obs: dict | None = None) -> dict:
         """Next target of the follower as a CP-Gen action; keeps the policy's queue consistent with it."""
+        self._resolve_skill_after_settle(policy, obs)
         poses, grippers, _noise, record = self.follower.next_target({EEF: self._measured_before})
         self._target, self._track = np.asarray(poses[EEF]), record
         self._pos = int(record["k"])
@@ -322,6 +327,42 @@ class CPGenRuntime:
             policy.action_queue = []
             policy.check_constraint = True
         return {"action": pose_to_action(self._target, grippers[EEF]), "failure_type": None}
+
+    def _resolve_skill_after_settle(self, policy, obs: dict | None) -> None:
+        """Transit Pacing on CP-Gen (``tracking.type: transit_pacing``): once the follower has settled at the bridge end
+        (error within its settle bound), solve the skill constraint again from the state actually reached when the robot
+        carries an object, and put the new skill waypoints into the follower's path. CP-Gen solves a skill before its
+        bridge; re-solving it from the reached state raised Threading's success from 6 % to 65 % on the same scenes
+        (2026-11-17). Constraints that carry nothing (grasps) keep their plan."""
+        f = self.follower
+        if obs is None or self._skill_resolved or not hasattr(f, "eps_settle_pos") or f.s is None:
+            return
+        k = int(math.floor(f.s + 1e-9))
+        if not (f._bridge_end(k) and abs(f.s - k) < 1e-9):
+            return
+        e_pos, e_rot = f.error(f.s, {EEF: self._measured_before})
+        if e_pos > f.eps_settle_pos or e_rot > f.eps_settle_rot:
+            return
+        self._skill_resolved = True
+        if not _carried_in_hand(policy, obs):
+            return
+        saved = self._last_mix
+        try:
+            res = policy.solve_constraint(policy.current_constraint, obs)
+        finally:
+            self._last_mix, self._mix_plan = saved, None
+        if not res.success:
+            return
+        acts = [np.asarray(a, dtype=float) for a in res.actions]
+        if getattr(policy.current_constraint, "duplicate_actions", False):
+            acts = [a for a in acts for _ in (0, 1)]
+        nb = self._n_bridge
+        if len(acts) != len(self._path) - nb:
+            return
+        self._path[nb:] = acts
+        eef = f.eefs[0]
+        eef.poses[nb:] = np.stack([action_to_pose(a) for a in acts])
+        eef.grippers[nb:] = np.stack([a[6:] for a in acts]).reshape(len(acts), -1)
 
     # source mixing (grafted into CPPolicy.solve_constraint) ----------------------------------------------------------
     def prepare_mix(self, policy, constraint, obs: dict, X_obj0_transf, X_obj1_transf, X_eef_transf) -> None:
@@ -438,3 +479,64 @@ def restore() -> None:
         return
     _INSTALLED.restore()
     _INSTALLED = None
+
+
+def _resolve_after_bridge(policy, obs):
+    """TMG_CPGEN_RESOLVE_AFTER_BRIDGE=1 (2026-11-17): when the bridge of the current constraint has just been
+    executed (the queue holds exactly the constraint actions), solve the constraint again from the current observation
+    (the in-hand pose now) and replace the queued constraint actions if the new plan has the same length."""
+    import os as _os
+    if not _os.environ.get("TMG_CPGEN_RESOLVE_AFTER_BRIDGE"):
+        return
+    q = getattr(policy, "action_queue", None)
+    n = getattr(policy, "curr_constraint_steps", 0)
+    if not q or getattr(policy, "curr_motion_plan_steps", 0) <= 0 or len(q) != n:
+        return
+    if getattr(policy, "_resolve_after_bridged_q", None) is q:
+        return
+    policy._resolve_after_bridged_q = q
+    c = policy.current_constraint
+    # only when an object the robot carries has moved in the hand since the constraint was solved (2026-11-17: re-solving
+    # every constraint made attempts 1.4-1.7x slower without changing the success of the tasks where nothing moves)
+    # re-solve every constraint that carries an object (insertion, placing); skip the ones that carry nothing (grasps).
+    # 2026-11-17 18:3x: a rule that also skipped carried objects that had not moved in the hand (> 1 mm / 0.01 rad)
+    # skipped nearly every Threading insertion and its success fell back from 65 % to 7 %, so the gain does not come from
+    # in-hand slip alone (re-solving from the arm configuration reached after the bridge matters too).
+    now = _carried_in_hand(policy, obs)
+    if not now:
+        print("[resolve-after-bridge] skipped (carries nothing)", flush=True)
+        return
+    res = policy.solve_constraint(c, obs)
+    if not res.success:
+        print("[resolve-after-bridge] re-solve failed, keeping the old plan", flush=True)
+        return
+    acts = list(res.actions)
+    if c.duplicate_actions:
+        acts = [x for x in acts for _ in [0, 1]]
+    if len(acts) == n:
+        q[:] = acts
+        print(f"[resolve-after-bridge] replaced {n} constraint actions", flush=True)
+    else:
+        print(f"[resolve-after-bridge] length {len(acts)} != {n}, keeping the old plan", flush=True)
+
+
+
+def _carried_in_hand(policy, obs) -> dict:
+    """Pose in the end-effector frame of every object the current constraint carries (its attached objects)."""
+    import numpy as _np
+    from robosuite.utils.transform_utils import quat2mat
+    c = getattr(policy, "current_constraint", None)
+    names = list(getattr(c, "attached_object_names", None) or [])
+    if not names or "robot0_eef_pos" not in obs or "robot0_eef_quat_site" not in obs:
+        return {}
+    E = _np.eye(4)
+    E[:3, 3] = _np.asarray(obs["robot0_eef_pos"], dtype=float)
+    E[:3, :3] = quat2mat(_np.asarray(obs["robot0_eef_quat_site"], dtype=float))
+    out = {}
+    for n in names:
+        key = f"{n}_pose"
+        if key in obs:
+            out[n] = _np.linalg.inv(E) @ _np.asarray(obs[key], dtype=float)
+    return out
+
+

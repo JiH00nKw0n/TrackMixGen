@@ -1,0 +1,19 @@
+# TrackMix with Transit Pacing (2026-11-17): logistic source mixing (task-success label) + Transit Pacing, pre-noise
+# labels. Transit Pacing paces only the bridge (transit) waypoints so the predicted next tracking error stays within
+# 0.1 m / 0.1 rad, waits at the bridge end until the error is within 0.01 m / 0.1 rad, then starts the skill from the state
+# actually reached: MimicGen's skill is object-relative and starts as is; CP-Gen, whose skill is solved ahead of the
+# bridge, solves the skill constraint again at that moment when the robot carries an object
+# (tmg/generation/generators/cpgen/runtime.py). tmg/generation/method/transit_pacing.py (TransitPacingFollower).
+defaults:
+  - trackmix
+  - _self_
+name: trackmix_transit
+tracking:
+  type: transit_pacing
+  k_pos: 0.05                       # one-step position response x_{t+1} - x_t = k (u_t - x_t), fitted 2026-11-17
+  k_rot: 0.1                        # same for the rotation vector
+  eps_pos: 0.1                      # m: bound on the predicted next error on the bridge
+  eps_rot: 0.1                      # rad
+  eps_settle_pos: 0.01              # m: the skill starts only when the error is within this bound
+  eps_settle_rot: 0.1               # rad
+  extra_steps_cap: segment
