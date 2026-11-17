@@ -1,9 +1,10 @@
 """Per-subtask success model of the logistic mixer, and its coefficient file.
 
-Given that an attempt has reached subtask k, the probability that subtask k succeeds when source demonstration j is
-adapted to the current scene is a linear logistic regression (paper, Method, "Success model"):
+Given that an attempt has reached subtask k, the probability that the whole task then succeeds when source
+demonstration j is adapted to the current scene for subtask k is a linear logistic regression (paper, Method, "Success
+model"):
 
-    P(Y_k = 1 | j, scene) = sigmoid( alpha_kj + a_k |dx_kj| + b_k |dy_kj| + c_k rot_kj
+    P(Y = 1 | reached k, j, scene) = sigmoid( alpha_kj + a_k |dx_kj| + b_k |dy_kj| + c_k rot_kj
                                      + [k >= 1] ( d_k inhand_pos_kj + e_k inhand_rot_kj ) )
 
 - ``dx_kj``, ``dy_kj`` (m): the x and y offsets (world frame, the table plane) between the reference object of subtask k
@@ -17,11 +18,14 @@ adapted to the current scene is a linear logistic regression (paper, Method, "Su
 shared by all sources of the subtask. Subtask k therefore has J + 3 coefficients if k = 0 and J + 5 otherwise.
 
 Fit: maximum likelihood (Newton's method) on the attempts of a uniform-source baseline pool (the 3,000-attempt
-``rank_human_demos`` pool that ``tmg rank_sources`` also reads) that reached subtask k, with Y = subtask k's success.
+``rank_human_demos`` pool that ``tmg rank_sources`` also reads) that reached subtask k, with Y = the attempt's task success.
+The label is the task success, not subtask k's own success: a subtask that almost always succeeds by itself (a grasp)
+can still decide whether a later subtask succeeds (the in-hand pose it leaves), and only the task label sees that. For
+the last subtask the two labels are the same.
 A tiny fixed L2 term (``STABILIZER``, the same for every task and coefficient, never tuned) keeps the estimate finite
 when a source never (or always) succeeds; it changes the other coefficients by far less than their standard errors.
 
-Subtask success comes from the records (MimicGen): for every subtask but the last, the subtask's termination signal
+Which subtasks an attempt reached comes from the subtask successes in the records (MimicGen): for every subtask but the last, the subtask's termination signal
 (``task.subtask_term_signals``, MimicGen's ``subtask_term_signal`` of the task template, recorded per step as
 ``term__<signal>``) turned on at some step up to the end of that subtask's execution; the last subtask succeeds when the
 attempt succeeds. An attempt reaches subtask k when every earlier subtask succeeded. CP-Gen stops an attempt at its first
@@ -240,8 +244,8 @@ def reached_outcomes(attempt: Mapping, num_subtasks: int) -> list[bool]:
 
 def design_rows(attempts: Sequence[Mapping], outcomes: Sequence[Sequence[bool]], k: int, num_sources: int,
                 source_infos: Sequence[Mapping] | None) -> tuple[np.ndarray, np.ndarray, str | None]:
-    """The design matrix and labels of subtask k: one row per attempt that reached it.
-    Columns: J source indicators, the three scene features, and for k >= 1 the two in-hand features."""
+    """The design matrix and labels of subtask k: one row per attempt that reached it, labelled with the attempt's task
+    success. Columns: J source indicators, the three scene features, and for k >= 1 the two in-hand features."""
     rows, ys, carried = [], [], None
     for a, out in zip(attempts, outcomes):
         if not all(out[:k]):
@@ -258,7 +262,7 @@ def design_rows(attempts: Sequence[Mapping], outcomes: Sequence[Sequence[bool]],
             carried = str(subs[k - 1]["object_name"])
             parts.append(_inhand_row(s, j, carried, source_infos))
         rows.append(np.concatenate(parts))
-        ys.append(float(out[k]))
+        ys.append(float(bool(a["success"])))           # label: task success of an attempt that reached subtask k
     return np.array(rows), np.array(ys), carried
 
 

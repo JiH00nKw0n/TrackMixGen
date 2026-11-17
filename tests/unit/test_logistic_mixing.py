@@ -81,6 +81,14 @@ def test_design_rows_keep_only_attempts_that_reached_the_subtask():
     assert set(block["slopes"]) == {"dx", "dy", "rotation", "inhand_position", "inhand_rotation"}
 
 
+def test_design_rows_label_is_task_success_not_the_subtask_success():
+    objects = {"a": pose(z=-0.12), "b": pose(0.5)}
+    ok = _attempt(0, 1, pose(0.1), pose(0.5), pose(), pose(0.4), pose(), objects)
+    failed = dict(ok, success=False)                       # the grasp (subtask 0) succeeded, the task did not
+    X, y, _ = design_rows([ok, failed], [[True, True], [True, False]], 0, 2, None)
+    assert X.shape == (2, 2 + 3) and y.tolist() == [1.0, 0.0]
+
+
 def test_above_mean_weights():
     w = above_mean_weights(np.array([0.9, 0.1, 0.5, 0.3]), [0, 1, 2, 3])
     assert np.allclose(w, [0.9 / 1.4, 0, 0.5 / 1.4, 0])

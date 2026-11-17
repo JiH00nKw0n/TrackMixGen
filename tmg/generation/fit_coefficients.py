@@ -45,7 +45,7 @@ def read_source_infos(path) -> list[dict]:
 def write_coefficients(path: Path, *, generator: str, task: str, basis: str, num_sources: int, signals, blocks: dict) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     head = (f"# Success-model coefficients of {generator} {task} (tmg fit_coefficients). Per subtask k:\n"
-            f"#   P(subtask k succeeds | reached, source j) = sigmoid(alpha[j] + dx*|dx| + dy*|dy| + rotation*rot\n"
+            f"#   P(task succeeds | reached subtask k, source j for k) = sigmoid(alpha[j] + dx*|dx| + dy*|dy| + rotation*rot\n"
             f"#                                            + inhand_position*dpos + inhand_rotation*drot)  (in-hand terms k >= 1)\n"
             f"# Units: {UNITS}. The source ranking is a separate file (../ranking/{task}.yaml).\n")
     data = {"generator": generator, "task": task, "basis": basis, "num_sources": int(num_sources),
@@ -97,7 +97,7 @@ def fit_coefficients(cfg) -> dict:
     basis = (f"Maximum-likelihood fit (Newton, stabilizer {STABILIZER}) on the uniform-source baseline pool {pool} "
              f"({len(attempts)} attempts, {len(chunks)} chunks, scene {plain['scene']['name']}, selection "
              f"{plain['selection']['name']}, generation {plain['generation']['name']}); one fit per subtask on the attempts "
-             f"that reached it, label = that subtask's success.")
+             f"that reached it, label = the attempt's task success.")
     written = [str(write_coefficients(output / COEFFICIENT_FILE, generator=generator["name"], task=task["name"], basis=basis,
                                       num_sources=num_sources, signals=signals, blocks=blocks))]
     if plain.get("write_config", True):
