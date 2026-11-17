@@ -1,0 +1,15 @@
+# Mixup exploration, signed scene-adaptive convex mixing (user request 2026-11-08): like mx_convex_adaptive_inhand, but
+# the logistic success model's scene terms are the signed (dx, dy, dyaw) of the current reference object against each
+# source's, with coefficients shared by all sources plus a penalized per-source deviation
+# (configs/experiment/generator/<gen>/transform_model_signed_inhand/<task>.yaml, fitted with --signed --source), instead of
+# per-source coefficients on the object's absolute (x, y, sin yaw, cos yaw). Rule above_mean, in-hand distance kept.
+defaults:
+  - mx_none
+  - _self_
+name: mx_convex_signed_inhand
+mixing:
+  enabled: true
+  type: convex
+  rule: above_mean
+  model: ${generator.name}/${task.name}
+  model_dir: transform_model_signed_inhand

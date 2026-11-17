@@ -1,0 +1,10 @@
+# Question 6 (user proposal 2026-11-07): the per-source Gaussian success model of mx_resp (one bump per source over
+# displacement, rotation and in-hand gap, with its own amplitude and widths; transform_model --link gauss), but the
+# "above_mean" rule of mx_convex_above: only the compatible sources whose predicted success is above the scene mean are
+# blended, with weights proportional to the prediction.
+defaults:
+  - mx_resp
+  - _self_
+name: mx_resp_above
+mixing:
+  rule: above_mean

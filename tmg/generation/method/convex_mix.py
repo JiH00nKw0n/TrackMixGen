@@ -14,7 +14,11 @@ For one subtask of one attempt:
    - ``proportional``: ``w_k = p_k / sum p`` over the compatible sources;
    - ``above_mean``: the same, over the compatible sources whose ``p_k`` lies above the mean ``p`` of the compatible
      sources (the anchor always stays);
-   - ``best``: the anchor alone (no blend), the single-source control of the rule.
+   - ``best``: the anchor alone (no blend), the single-source control of the rule;
+   - ``dirichlet`` (question 6, 2026-11-07): random weights over the compatible sources, drawn from a symmetric
+     Dirichlet with concentration ``mixing.alpha`` (default 1) by a private generator seeded with
+     ``SeedSequence([chunk_seed, call, 6])``. The weights do not depend on the scene, so pools made with this rule
+     identify the causal effect of the weights on success (the other rules set them from the scene).
 4. The segments are blended with ``event_mix.mix_many`` in their own reference-object frames (events at the weighted
    mean of the event steps, weighted mean positions, weighted rotation mean) and the result is expressed in the frame of
    the source the generator selected, so the generator's own transform moves it to the current scene unchanged.
@@ -32,14 +36,15 @@ from tmg.core.poses import invert, transform_all
 from tmg.generation.method.event_mix import _matching_events, mix_many
 from tmg.generation.method.guided_mix import GuidedMixConfig, GuidedMixer
 from tmg.generation.method.interfaces import MixContext, MixedSegment
-from tmg.generation.method.transform_model import TransformSuccessModel, transform_size
+from tmg.generation.method.transform_model import TransformSuccessModel, signed_displacement, transform_size
 from tmg.generation.simulators.scenes import generator_config_dir
 
-RULES = ("proportional", "above_mean", "best")
+RULES = ("proportional", "above_mean", "best", "dirichlet")
 MODEL_DIR = "transform_model"
 
 
-def convex_weights(p: np.ndarray, compatible: list[int], rule: str) -> np.ndarray:
+def convex_weights(p: np.ndarray, compatible: list[int], rule: str, rng: np.random.Generator | None = None,
+                   alpha: float = 1.0) -> np.ndarray:
     """The weights of step 3 of the module docstring (one per source, non-negative, summing to 1)."""
     if rule not in RULES:
         raise ValueError(f"mixing.rule must be one of {RULES}, got {rule!r}")
@@ -48,6 +53,9 @@ def convex_weights(p: np.ndarray, compatible: list[int], rule: str) -> np.ndarra
     anchor = max(compatible, key=lambda k: (p[k], -k))
     if rule == "best":
         w[anchor] = 1.0
+        return w
+    if rule == "dirichlet":
+        w[list(compatible)] = rng.dirichlet(np.full(len(compatible), float(alpha)))
         return w
     keep = list(compatible)
     if rule == "above_mean":
@@ -64,12 +72,13 @@ def convex_weights(p: np.ndarray, compatible: list[int], rule: str) -> np.ndarra
 class ConvexMixer(GuidedMixer):
     """The ``SegmentMixer`` of the module docstring."""
 
-    def __init__(self, *, model: TransformSuccessModel, rule: str, chunk_seed: int = 0, gripper_events: Mapping | None = None):
+    def __init__(self, *, model: TransformSuccessModel, rule: str, chunk_seed: int = 0, gripper_events: Mapping | None = None,
+                 alpha: float = 1.0):
         if rule not in RULES:
             raise ValueError(f"mixing.rule must be one of {RULES}, got {rule!r}")
         super().__init__(ranking=None, chunk_seed=chunk_seed,
                          config=GuidedMixConfig(weight_a=0.5, max_anchor_rotation_deg=1e9, gripper_events=gripper_events))
-        self.model, self.rule = model, rule
+        self.model, self.rule, self.alpha = model, rule, float(alpha)
 
     @classmethod
     def from_config(cls, cfg: Mapping, *, chunk_seed: int) -> ConvexMixer:
@@ -81,7 +90,7 @@ class ConvexMixer(GuidedMixer):
             generator, task = ref.split("/", 1)
             path = generator_config_dir(generator) / str(cfg.get("model_dir", MODEL_DIR)) / f"{task}.yaml"
         return cls(model=TransformSuccessModel.load(path), rule=str(cfg.get("rule", "proportional")), chunk_seed=chunk_seed,
-                   gripper_events=cfg.get("gripper_events"))
+                   gripper_events=cfg.get("gripper_events"), alpha=float(cfg.get("alpha", 1.0)))
 
     def describe(self) -> dict:
         return {"type": "convex", "rule": self.rule, "num_sources": self.model.num_sources, "gripper_events": self.detector.name}
@@ -98,12 +107,14 @@ class ConvexMixer(GuidedMixer):
         n = context.num_sources
         sizes = [transform_size(current, context.src_object_poses[k]) for k in range(n)]
         gaps = context.extra.get("inhand_gaps")
+        signed = [signed_displacement(current, context.src_object_poses[k]) for k in range(n)]
         p = self.model.predict(int(context.subtask_ind), [s[0] for s in sizes], [s[1] for s in sizes], current_pose=current,
-                               inhand_gaps=gaps)
+                               inhand_gaps=gaps, signed=signed)
         series = [self._event_series(np.asarray(context.src_segments[k][2], dtype=float)) for k in range(n)]
         anchor = max(range(n), key=lambda k: (p[k], -k))
         compatible = [k for k in range(n) if k == anchor or _matching_events(series[anchor], series[k]) is not None]
-        w = convex_weights(p, compatible, self.rule)
+        rng = np.random.default_rng(np.random.SeedSequence([self.chunk_seed, int(record["call"]), 6]))
+        w = convex_weights(p, compatible, self.rule, rng=rng, alpha=self.alpha)
         record.update(predicted=[round(float(v), 4) for v in p], weights=[round(float(v), 4) for v in w], anchor=int(anchor),
                       compatible=compatible, displacement=[round(s[0], 4) for s in sizes], rotation=[round(s[1], 4) for s in sizes])
         if gaps is not None:

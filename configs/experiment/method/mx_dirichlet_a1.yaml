@@ -1,0 +1,14 @@
+# Question 6 (2026-11-07), random-ratio pool R1 of the mixing-ratio experiment: every subtask segment blends the
+# compatible sources (gripper events matching the anchor's, the anchor being the source of highest predicted success) with
+# weights drawn from a symmetric Dirichlet of concentration 1.0 (tmg/generation/method/convex_mix.py, rule "dirichlet").
+# The weights do not depend on the scene, so the pool identifies how the weights change generation success.
+defaults:
+  - mx_none
+  - _self_
+name: mx_dirichlet_a1
+mixing:
+  enabled: true
+  type: convex
+  rule: dirichlet
+  alpha: 1.0
+  model: ${generator.name}/${task.name}

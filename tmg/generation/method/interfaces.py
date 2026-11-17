@@ -118,9 +118,10 @@ def _mixer_types() -> dict[str, MixerType]:
         from tmg.generation.method.convex_mix import ConvexMixer
         from tmg.generation.method.geometric_mix import JunctionMixer, TransformMixer
         from tmg.generation.method.guided_mix import FixedPairMixer, GuidedMixer
+        from tmg.generation.method.smooth_mix import SmoothMixer
 
         _MIXERS.update(guided=GuidedMixer, transform=TransformMixer, junction=JunctionMixer, fixed=FixedPairMixer,
-                       convex=ConvexMixer)
+                       convex=ConvexMixer, smooth=SmoothMixer)
     return _MIXERS
 
 

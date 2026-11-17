@@ -1,0 +1,8 @@
+# Question 6 experiment A pilot (2026-11-07): mx_top1_smooth with sigma 2 steps, to pick the sigma whose position jerk
+# matches the blended conditions.
+defaults:
+  - mx_top1_smooth
+  - _self_
+name: mx_top1_smooth_s2
+mixing:
+  sigma: 2

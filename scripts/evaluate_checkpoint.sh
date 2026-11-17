@@ -37,12 +37,29 @@ for p in $PORTS; do
     [ "$i" = 90 ] && { echo "[evaluate] server on port $p did not come up"; exit 1; }
   done
 done
+# one Isaac Sim per GPU by default: two on one T4 made the driver time out a context switch (Xid 109) and the simulator exit
+# with code 139 (2026-11-01, AWS). ISAAC_SIMS_PER_GPU allows more on larger cards (2026-11-02: two per 96 GB card on the
+# Isaac server, as a test). Every rollout run of the GPU in ISAAC_GPU takes one of the GPU's slot locks, slot 1 being the
+# old single lock file; the policy servers above do not take one (they hold only the checkpoint).
+SLOTS=${ISAAC_SIMS_PER_GPU:-1}
+sim() {
+  [ -n "${ISAAC_GPU:-}" ] || { "$@"; return; }
+  local i l rc
+  while :; do
+    for ((i = 1; i <= SLOTS; i++)); do
+      l=/tmp/tmg_isaacsim_gpu$ISAAC_GPU.lock; [ $i -gt 1 ] && l=$l$i
+      rc=0; flock -n -E 75 "$l" "$@" || rc=$?   # under set -e a bare failing flock would end the script before the next slot
+      [ $rc -ne 75 ] && return $rc
+    done
+    sleep 15
+  done
+}
 APPEND=""
 [ "$SPLIT" = val ] && APPEND="append_validation=$RUN_C"
 if [ "$SHARDS" -gt 1 ]; then
   k=0; pids=""
   for p in $PORTS; do
-    make -s -C "$REPO" eval CLUSTER="$CLUSTER" IMAGE="$IMAGE" GENERATOR="$GENERATOR" TASK="$TASK" SCENE="$SCENE" OBSERVATION="$OBSERVATION" \
+    sim make -s -C "$REPO" eval CLUSTER="$CLUSTER" IMAGE="$IMAGE" GENERATOR="$GENERATOR" TASK="$TASK" SCENE="$SCENE" OBSERVATION="$OBSERVATION" \
       OVERRIDES="checkpoint=$CKPT_C split=$SPLIT training_seed=$TRAINING_SEED evaluation.server.port=$p shard=[$k,$SHARDS] $EXTRA" &
     pids="$pids $!"; k=$((k + 1))
   done
@@ -50,5 +67,5 @@ if [ "$SHARDS" -gt 1 ]; then
   [ "$fail" = 0 ] || { echo "[evaluate] a shard failed"; exit 1; }
 fi
 # the merge run (every scene already played when sharded) writes the summary and the validation row
-make -s -C "$REPO" eval CLUSTER="$CLUSTER" IMAGE="$IMAGE" GENERATOR="$GENERATOR" TASK="$TASK" SCENE="$SCENE" OBSERVATION="$OBSERVATION" \
+sim make -s -C "$REPO" eval CLUSTER="$CLUSTER" IMAGE="$IMAGE" GENERATOR="$GENERATOR" TASK="$TASK" SCENE="$SCENE" OBSERVATION="$OBSERVATION" \
   OVERRIDES="checkpoint=$CKPT_C split=$SPLIT training_seed=$TRAINING_SEED evaluation.server.port=$PORT $APPEND $EXTRA"

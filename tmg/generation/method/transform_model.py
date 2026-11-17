@@ -39,7 +39,22 @@ at the start of this subtask) and in source k's demonstration at the start of it
 assumes the object sits in the hand where it does now is predicted to succeed more. The generator passes the gaps of the
 current attempt in ``MixContext.extra["inhand_gaps"]``.
 
-    python -m tmg.generation.method.transform_model --pool <ranking pool dir> --out <model.yaml> [--location | --link decay] [--source <hdf5>]
+With ``--link gauss`` (user proposal 2026-11-07, "responsibility" mixing) each subtask's success with source k is a
+Gaussian bump in the transform size, with an amplitude and widths of its own for every source:
+
+    P(success) = prod over subtasks s of a_s[k] * exp(-1/2 * (prec_d_s[k] * displacement_s^2 + prec_r_s[k] * rotation_s^2
+                                                              + prec_h_s[k] * gap_s^2)),   0 < a_s[k] <= 1
+
+``a`` is the source's success at zero transform (not forced to 1, unlike the decay model) and the precisions (inverse
+squared widths) say how far its success reaches. Each precision is a shared value per subtask and feature times
+``exp(dev_k)``; the deviations carry an L2 penalty chosen by five-fold cross-validated log loss over ``GAUSS_PENALTIES``.
+Read as a mixture with one Gaussian component per source over the transform (relative scene) space, the normalised
+predictions ``p_k / sum_j p_j`` are the components' responsibilities for a success in the current scene; the convex
+mixer's ``proportional`` rule uses exactly these as mixing weights (condition ``mx_resp``). On the four 3,000-attempt
+MimicGen ranking pools its five-fold AUC equals the logistic model's (2026-11-07: 0.706-0.790 against 0.703-0.914, with
+the in-hand gap 0.771-0.911).
+
+    python -m tmg.generation.method.transform_model --pool <ranking pool dir> --out <model.yaml> [--location | --link decay | --link gauss] [--source <hdf5>]
 """
 from __future__ import annotations
 
@@ -84,6 +99,13 @@ def location_features(pose) -> np.ndarray:
     pose = np.asarray(pose, dtype=float)
     yaw = np.arctan2(pose[1, 0], pose[0, 0])
     return np.array([pose[0, 3], pose[1, 3], np.sin(yaw), np.cos(yaw)])
+
+
+def signed_displacement(current_pose, source_pose) -> np.ndarray:
+    """(dx m, dy m, dyaw rad) of the current object pose relative to a source's, world frame, yaw wrapped to [-pi, pi)."""
+    c, s = np.asarray(current_pose, dtype=float), np.asarray(source_pose, dtype=float)
+    dyaw = np.arctan2(c[1, 0], c[0, 0]) - np.arctan2(s[1, 0], s[0, 0])
+    return np.array([c[0, 3] - s[0, 3], c[1, 3] - s[1, 3], (dyaw + np.pi) % (2 * np.pi) - np.pi])
 
 
 def _logistic(X: np.ndarray, y: np.ndarray, penalty: np.ndarray | None = None) -> np.ndarray:
@@ -218,17 +240,20 @@ def shared_subtasks(attempts: list[dict]) -> bool:
     return True
 
 
-def fit(attempts: list[dict], num_sources: int, link: str = "logistic", location: bool = False, gaps: np.ndarray | None = None) -> dict:
+def fit(attempts: list[dict], num_sources: int, link: str = "logistic", location: bool = False, gaps: np.ndarray | None = None,
+        signed: bool = False) -> dict:
     """The model mapping of the module docstring, with the fit's size and its in-sample R^2 (of the probabilities).
     When ``shared_subtasks`` holds, the subtask-0 terms are fitted once and every subtask gets them (plus its in-hand term)."""
     if link not in ("logistic", "linear"):
         raise ValueError(f"link must be logistic or linear, got {link!r}")
-    if location and link != "logistic":
-        raise ValueError("location terms need the logistic link")
+    if (location or signed) and link != "logistic":
+        raise ValueError("location and signed terms need the logistic link")
+    if location and signed:
+        raise ValueError("choose location or signed terms, not both")
     num_subtasks = len(attempts[0]["subtasks"])
     if num_subtasks > 1 and shared_subtasks(attempts):
         one = [{**a, "subtasks": [s for s in a["subtasks"] if int(s["subtask_ind"]) == 0]} for a in attempts]
-        model = fit(one, num_sources, link, location)
+        model = fit(one, num_sources, link, location, signed=signed)
         y = np.array([float(a["success"]) for a in attempts])
         base0 = model["subtasks"][0]
         if gaps is not None:            # the in-hand terms on top of the shared linear predictor
@@ -254,12 +279,16 @@ def fit(attempts: list[dict], num_sources: int, link: str = "logistic", location
         return model
     base = num_sources - 1 + 2                        # source dummies (source 0 is the reference) + displacement + rotation
     nloc = 4 * num_sources if location else 0         # source-by-location terms (standardized x, y, sin yaw, cos yaw)
+    # signed terms (user proposal 2026-11-08): standardized signed (dx, dy, dyaw) of the current object against the
+    # selected source's, with shared coefficients plus a penalized per-source deviation
+    nsig = 3 + 3 * num_sources if signed else 0
     ninh = 1 if gaps is not None else 0               # the in-hand term (constant 0 for the first subtask, so dropped there)
-    width = base + nloc + ninh
+    width = base + nloc + nsig + ninh
     X = np.zeros((len(attempts), 1 + num_subtasks * width))
     X[:, 0] = 1.0
     y = np.zeros(len(attempts))
     raw_loc = np.zeros((len(attempts), num_subtasks, 4))
+    raw_sig = np.zeros((len(attempts), num_subtasks, 3))
     src_of = np.zeros((len(attempts), num_subtasks), dtype=int)
     for i, a in enumerate(attempts):
         y[i] = float(a["success"])
@@ -271,23 +300,36 @@ def fit(attempts: list[dict], num_sources: int, link: str = "logistic", location
                 X[i, o + k - 1] = 1.0
             X[i, o + base - 2], X[i, o + base - 1] = transform_size(_pose12(s["cur_obj_pose"]), _pose12(s["src_obj_pose"]))
             raw_loc[i, si] = location_features(_pose12(s["cur_obj_pose"]))
+            raw_sig[i, si] = signed_displacement(_pose12(s["cur_obj_pose"]), _pose12(s["src_obj_pose"]))
             src_of[i, si] = k
             if ninh:
-                X[i, o + base + nloc] = gaps[i, si]
+                X[i, o + base + nloc + nsig] = gaps[i, si]
     loc_mean = raw_loc.mean(axis=0)
     loc_std = raw_loc.std(axis=0) + 1e-9
+    sig_mean = raw_sig.mean(axis=0)
+    sig_std = raw_sig.std(axis=0) + 1e-9
     if location:
         for si in range(num_subtasks):
             z = (raw_loc[:, si] - loc_mean[si]) / loc_std[si]
             for i in range(len(y)):
                 o = 1 + si * width + base + 4 * src_of[i, si]
                 X[i, o:o + 4] = z[i]
+    if signed:
+        for si in range(num_subtasks):
+            z = (raw_sig[:, si] - sig_mean[si]) / sig_std[si]
+            for i in range(len(y)):
+                o = 1 + si * width + base
+                X[i, o:o + 3] = z[i]
+                X[i, o + 3 + 3 * src_of[i, si]:o + 6 + 3 * src_of[i, si]] = z[i]
     varies = [0] + [j for j in range(1, X.shape[1]) if X[:, j].std() > 1e-9]
     beta = np.zeros(X.shape[1])
     chosen_penalty = None
     if link == "logistic":
-        is_loc = np.array([base <= ((j - 1) % width) < base + nloc if j > 0 else False for j in range(X.shape[1])])[varies]
         if location:
+            is_loc = np.array([base <= ((j - 1) % width) < base + nloc if j > 0 else False for j in range(X.shape[1])])[varies]
+        else:                                         # signed: only the per-source deviations are penalized
+            is_loc = np.array([base + 3 <= ((j - 1) % width) < base + nsig if j > 0 else False for j in range(X.shape[1])])[varies]
+        if location or signed:
             scores = {lam: _cv_log_loss(X[:, varies], y, lam * is_loc) for lam in LOCATION_PENALTIES}
             chosen_penalty = min(scores, key=scores.get)
             beta[varies] = _logistic(X[:, varies], y, chosen_penalty * is_loc)
@@ -310,9 +352,16 @@ def fit(attempts: list[dict], num_sources: int, link: str = "logistic", location
                                        "std": [round(float(v), 6) for v in loc_std[s]],
                                        "coef": [[round(float(v), 6) for v in beta[o + base + 4 * k:o + base + 4 * k + 4]]
                                                 for k in range(num_sources)]}
+        if signed:                                    # per-source coefficient = shared + that source's deviation
+            shared = beta[o + base:o + base + 3]
+            subtasks[s]["signed"] = {"mean": [round(float(v), 6) for v in sig_mean[s]],
+                                     "std": [round(float(v), 6) for v in sig_std[s]],
+                                     "shared": [round(float(v), 6) for v in shared],
+                                     "coef": [[round(float(v), 6) for v in shared + beta[o + base + 3 + 3 * k:o + base + 6 + 3 * k]]
+                                              for k in range(num_sources)]}
         if ninh and s > 0:
-            subtasks[s]["inhand"] = round(float(beta[o + base + nloc]), 6)
-    extra = {"location_penalty": chosen_penalty} if location else {}
+            subtasks[s]["inhand"] = round(float(beta[o + base + nloc + nsig]), 6)
+    extra = {"location_penalty": chosen_penalty} if location else {"signed_penalty": chosen_penalty} if signed else {}
     return {"link": link, **extra, "attempts": len(y), "success_rate": round(float(y.mean()), 4), "num_sources": num_sources,
             "r2": round(float(1 - resid @ resid / ((y - y.mean()) @ (y - y.mean()))), 4), "subtasks": subtasks}
 
@@ -326,6 +375,9 @@ def _shared_z(c: dict, sub: dict, num_sources: int) -> float:
     if "location" in c:
         loc = c["location"]
         z += np.asarray(loc["coef"][k]) @ ((location_features(cur) - np.asarray(loc["mean"])) / np.asarray(loc["std"]))
+    if "signed" in c:
+        sg = c["signed"]
+        z += np.asarray(sg["coef"][k]) @ ((signed_displacement(cur, _pose12(sub["src_obj_pose"])) - np.asarray(sg["mean"])) / np.asarray(sg["std"]))
     return float(z)
 
 
@@ -335,6 +387,9 @@ def _scaled(c: dict, scale: float) -> dict:
            "displacement": round(c["displacement"] * scale, 6), "rotation": round(c["rotation"] * scale, 6)}
     if "location" in c:
         out["location"] = {**c["location"], "coef": [[round(v * scale, 6) for v in row] for row in c["location"]["coef"]]}
+    if "signed" in c:
+        out["signed"] = {**c["signed"], "shared": [round(v * scale, 6) for v in c["signed"]["shared"]],
+                         "coef": [[round(v * scale, 6) for v in row] for row in c["signed"]["coef"]]}
     return out
 
 
@@ -394,6 +449,120 @@ def fit_decay(attempts: list[dict], num_sources: int, gaps: np.ndarray | None = 
             "subtasks": subtasks}
 
 
+GAUSS_PENALTIES = (0.3, 1.0, 3.0, 10.0, 30.0)
+
+
+def _gauss_arrays(attempts: list[dict], gaps: np.ndarray | None):
+    """Per attempt and subtask: the source, and the standardised features (displacement, rotation[, in-hand gap])."""
+    num_subtasks = len(attempts[0]["subtasks"])
+    n = len(attempts)
+    src = np.zeros((n, num_subtasks), dtype=int)
+    disp = np.zeros((n, num_subtasks))
+    rot = np.zeros((n, num_subtasks))
+    for i, a in enumerate(attempts):
+        for s in a["subtasks"]:
+            si = int(s["subtask_ind"])
+            src[i, si] = int(s["src_demo_ind"])
+            disp[i, si], rot[i, si] = transform_size(_pose12(s["cur_obj_pose"]), _pose12(s["src_obj_pose"]))
+    shared = num_subtasks > 1 and shared_subtasks(attempts)
+    if shared:                                  # one copy of the transform terms (see shared_subtasks)
+        disp[:, 1:], rot[:, 1:] = 0.0, 0.0
+    feats = []
+    for si in range(num_subtasks):
+        cols = [disp[:, si], rot[:, si]] + ([np.asarray(gaps, dtype=float)[:, si]] if gaps is not None and si > 0 else [])
+        feats.append(np.column_stack(cols))
+    return src, feats, shared
+
+
+def _gauss_logp(theta, src, feats, scale, num_sources):
+    """log P(success) of every attempt, and the pieces the gradient needs."""
+    i = 0
+    S = len(feats)
+    u = theta[:S * num_sources].reshape(S, num_sources)
+    i = S * num_sources
+    om, de = [], []
+    for f in feats:
+        om.append(theta[i:i + f.shape[1]])
+        i += f.shape[1]
+    for f in feats:
+        de.append(theta[i:i + num_sources * f.shape[1]].reshape(num_sources, f.shape[1]))
+        i += num_sources * f.shape[1]
+    logp = np.zeros(len(src))
+    parts = []
+    for si, f in enumerate(feats):
+        k = src[:, si]
+        x2 = (f / scale[si]) ** 2
+        prec = np.exp(om[si][None, :] + de[si][k])
+        logp += -np.logaddexp(0.0, -u[si])[k] - 0.5 * (x2 * prec).sum(1)
+        parts.append((k, x2, prec))
+    return logp, parts, u, om, de
+
+
+def _gauss_fit(src, feats, y, num_sources, lam):
+    from scipy.optimize import minimize
+    scale = [np.maximum(f.std(0), 1e-6) for f in feats]
+    S = len(feats)
+
+    def loss(theta):
+        logp, parts, u, om, de = _gauss_logp(theta, src, feats, scale, num_sources)
+        logp = np.minimum(logp, -1e-9)
+        p = np.exp(logp)
+        nll = -(y * logp + (1 - y) * np.log(-np.expm1(logp))).sum()
+        g = -(y - (1 - y) * p / (1 - p))
+        gu = np.zeros_like(u)
+        gom, gde = [], []
+        for si, (k, x2, prec) in enumerate(parts):
+            np.add.at(gu[si], k, g / (1 + np.exp(u[si][k])))           # d log sigmoid(u) / du = 1 - sigmoid(u)
+            t = -0.5 * x2 * prec * g[:, None]
+            gom.append(t.sum(0))
+            d = np.zeros_like(de[si])
+            np.add.at(d, k, t)
+            gde.append(d + 2 * lam * de[si])
+        reg = lam * sum((d ** 2).sum() for d in de)
+        return nll + reg, np.concatenate([gu.ravel()] + gom + [d.ravel() for d in gde])
+
+    theta0 = np.concatenate([np.full(S * num_sources, 2.0)] + [np.zeros(f.shape[1]) for f in feats]
+                            + [np.zeros(num_sources * f.shape[1]) for f in feats])
+    theta = minimize(loss, theta0, jac=True, method="L-BFGS-B", options={"maxiter": 5000, "gtol": 1e-7}).x
+    return theta, scale
+
+
+def fit_gauss(attempts: list[dict], num_sources: int, gaps: np.ndarray | None = None) -> dict:
+    """The ``gauss`` model of the module docstring, with the chosen penalty, the fit's size and in-sample R^2."""
+    src, feats, shared = _gauss_arrays(attempts, gaps)
+    y = np.array([float(a["success"]) for a in attempts])
+    folds = np.random.default_rng(0).permutation(len(y)) % 5
+
+    def cv_loss(lam):
+        total = 0.0
+        for f in range(5):
+            tr, te = folds != f, folds == f
+            theta, scale = _gauss_fit(src[tr], [x[tr] for x in feats], y[tr], num_sources, lam)
+            p = np.clip(np.exp(_gauss_logp(theta, src[te], [x[te] for x in feats], scale, num_sources)[0]), 1e-6, 1 - 1e-6)
+            total -= (y[te] * np.log(p) + (1 - y[te]) * np.log(1 - p)).sum()
+        return total
+
+    lam = min(GAUSS_PENALTIES, key=cv_loss)
+    theta, scale = _gauss_fit(src, feats, y, num_sources, lam)
+    logp, _parts, u, om, de = _gauss_logp(theta, src, feats, scale, num_sources)
+    resid = y - np.exp(logp)
+    names = ("prec_displacement", "prec_rotation", "prec_inhand")
+    subtasks = {}
+    for si, f in enumerate(feats):
+        block = {"log_amplitude": [round(float(-np.logaddexp(0.0, -v)), 6) for v in u[si]]}
+        for j in range(f.shape[1]):
+            # precision per original unit (1/m^2, 1/rad^2): exp(om + dev) / scale^2
+            block[names[j]] = [round(float(np.exp(om[si][j] + de[si][k, j]) / scale[si][j] ** 2), 6) for k in range(num_sources)]
+        if shared and si > 0:
+            block["prec_displacement"] = [0.0] * num_sources
+            block["prec_rotation"] = [0.0] * num_sources
+        subtasks[si] = block
+    extra = {"shared_subtasks": True} if shared else {}
+    return {"link": "gauss", **extra, "penalty": lam, "attempts": len(y), "success_rate": round(float(y.mean()), 4),
+            "num_sources": num_sources, "r2": round(float(1 - resid @ resid / ((y - y.mean()) @ (y - y.mean()))), 4),
+            "subtasks": subtasks}
+
+
 @dataclass(frozen=True)
 class TransformSuccessModel:
     """The fitted model of one task (module docstring)."""
@@ -407,16 +576,25 @@ class TransformSuccessModel:
         return cls(subtasks={int(k): v for k, v in m["subtasks"].items()}, num_sources=int(m["num_sources"]),
                    link=str(m.get("link", "linear")))
 
-    def predict(self, subtask: int, displacements, rotations, current_pose=None, inhand_gaps=None) -> np.ndarray:
+    def predict(self, subtask: int, displacements, rotations, current_pose=None, inhand_gaps=None, signed=None) -> np.ndarray:
         """Predicted full-task success of every source for one subtask (a probability). ``current_pose`` (the current
         reference-object pose) feeds the source-by-location terms of a model fitted with ``--location``; ``inhand_gaps``
-        (per source, m) the in-hand term of a model fitted with ``--source``."""
+        (per source, m) the in-hand term of a model fitted with ``--source``; ``signed`` (per source, ``signed_displacement``
+        of the current pose against that source's) the signed terms of a model fitted with ``--signed``."""
         c = self.subtasks[int(subtask)]
         inhand = 0.0
         if "inhand" in c:
             if inhand_gaps is None:
                 raise ValueError("this model has an in-hand term: pass inhand_gaps")
             inhand = c["inhand"] * np.asarray(inhand_gaps, dtype=float)
+        if self.link == "gauss":
+            q = (np.asarray(c["prec_displacement"], dtype=float) * np.asarray(displacements, dtype=float) ** 2
+                 + np.asarray(c["prec_rotation"], dtype=float) * np.asarray(rotations, dtype=float) ** 2)
+            if "prec_inhand" in c:
+                if inhand_gaps is None:
+                    raise ValueError("this model has an in-hand term: pass inhand_gaps")
+                q = q + np.asarray(c["prec_inhand"], dtype=float) * np.asarray(inhand_gaps, dtype=float) ** 2
+            return np.exp(np.asarray(c["log_amplitude"], dtype=float) - 0.5 * q)
         if self.link == "decay":
             return np.exp(-(np.asarray(c["decay_displacement"], dtype=float) * np.asarray(displacements, dtype=float)
                             + np.asarray(c["decay_rotation"], dtype=float) * np.asarray(rotations, dtype=float) + inhand))
@@ -428,6 +606,12 @@ class TransformSuccessModel:
             loc = c["location"]
             zf = (location_features(current_pose) - np.asarray(loc["mean"])) / np.asarray(loc["std"])
             z = z + np.asarray(loc["coef"], dtype=float) @ zf
+        if "signed" in c:
+            if signed is None:
+                raise ValueError("this model has signed terms: pass signed")
+            sg = c["signed"]
+            zs = (np.asarray(signed, dtype=float) - np.asarray(sg["mean"])) / np.asarray(sg["std"])
+            z = z + np.einsum("kj,kj->k", np.asarray(sg["coef"], dtype=float), zs)
         z = z + inhand
         return 1 / (1 + np.exp(-z)) if self.link == "logistic" else np.clip(z, 0.0, 1.0)
 
@@ -437,8 +621,9 @@ def main(argv=None):
     p.add_argument("--pool", required=True, help="baseline ranking pool folder (chunks/*/records/attempts.jsonl)")
     p.add_argument("--out", required=True)
     p.add_argument("--num-sources", type=int, default=10)
-    p.add_argument("--link", choices=("logistic", "linear", "decay"), default="logistic")
+    p.add_argument("--link", choices=("logistic", "linear", "decay", "gauss"), default="logistic")
     p.add_argument("--location", action="store_true", help="add source-by-location terms (scene-adaptive weights)")
+    p.add_argument("--signed", action="store_true", help="add signed (dx, dy, dyaw) terms with per-source coefficients")
     p.add_argument("--source", help="the task's source hdf5 (MimicGen datagen_info): add the in-hand term")
     p.add_argument("--isaaclab-source", help="an Isaac Lab generator's source hdf5 (obs/datagen_info): read the pool's records "
                    "with isaaclab_rows")
@@ -449,7 +634,12 @@ def main(argv=None):
         rows, gaps = isaaclab_rows(rows, a.isaaclab_source, Path(a.pool), inhand=a.inhand)
     else:
         gaps = inhand_gaps(rows, source_inhand(a.source)) if a.source else None
-    model = fit_decay(rows, a.num_sources, gaps) if a.link == "decay" else fit(rows, a.num_sources, a.link, a.location, gaps)
+    if a.link == "decay":
+        model = fit_decay(rows, a.num_sources, gaps)
+    elif a.link == "gauss":
+        model = fit_gauss(rows, a.num_sources, gaps)
+    else:
+        model = fit(rows, a.num_sources, a.link, a.location, gaps, signed=a.signed)
     model = {"basis": f"tmg.generation.method.transform_model fit on {a.pool}", **model}
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     Path(a.out).write_text(yaml.safe_dump(model, sort_keys=False))

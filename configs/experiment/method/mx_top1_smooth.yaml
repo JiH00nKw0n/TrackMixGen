@@ -1,0 +1,12 @@
+# Question 6 experiment A (2026-11-07): the top-1 source of mx_top1, its target positions low-pass filtered over time
+# (tmg/generation/method/smooth_mix.py) and no other source mixed in. sigma (steps) is set from a pilot so that the
+# pre-noise position jerk matches the blended conditions (about 0.06): the 100-attempt pilots gave jerk 0.058 (sigma 1),
+# 0.050 (2) and 0.048 (4) against 0.063 for mx_convex_above, so sigma is 1 (2026-11-07).
+defaults:
+  - mx_top1
+  - _self_
+name: mx_top1_smooth
+mixing:
+  enabled: true
+  type: smooth
+  sigma: 1.0

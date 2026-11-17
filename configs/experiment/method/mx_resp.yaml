@@ -1,0 +1,15 @@
+# Question 6 (user proposal 2026-11-07), responsibility mixing (tmg/generation/method/convex_mix.py, rule "proportional"):
+# every subtask segment blends the compatible sources with weights p_k / sum p, where p_k comes from the Gaussian success
+# model (transform_model --link gauss): one Gaussian bump per source over displacement, rotation and in-hand gap, with a
+# source-specific amplitude and widths. The normalised p_k are the responsibilities of the per-source components for a
+# success in the current scene (configs/experiment/generator/<gen>/transform_model_gauss_inhand/<task>.yaml).
+defaults:
+  - mx_none
+  - _self_
+name: mx_resp
+mixing:
+  enabled: true
+  type: convex
+  rule: proportional
+  model: ${generator.name}/${task.name}
+  model_dir: transform_model_gauss_inhand
