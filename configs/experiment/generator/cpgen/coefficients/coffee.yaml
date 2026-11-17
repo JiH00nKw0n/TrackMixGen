@@ -1,12 +1,12 @@
 # Success-model coefficients of cpgen coffee (tmg fit_coefficients). Per subtask k:
-#   P(subtask k succeeds | reached, source j) = sigmoid(alpha[j] + dx*|dx| + dy*|dy| + rotation*rot
+#   P(task succeeds | reached subtask k, source j for k) = sigmoid(alpha[j] + dx*|dx| + dy*|dy| + rotation*rot
 #                                            + inhand_position*dpos + inhand_rotation*drot)  (in-hand terms k >= 1)
 # Units: {'dx': 'm', 'dy': 'm', 'rotation': 'rad', 'inhand_position': 'm', 'inhand_rotation': 'rad'}. The source ranking is a separate file (../ranking/coffee.yaml).
 generator: cpgen
 task: coffee
 basis: Maximum-likelihood fit (Newton, stabilizer 0.001) on the uniform-source baseline pool /data/pools/cpgen/coffee/ours/ours/none/rank_human_demos
   (3000 attempts, 60 chunks, scene ours, selection ours, generation rank_human_demos); one fit per subtask on the attempts
-  that reached it, label = that subtask's success.
+  that reached it, label = the attempt's task success.
 num_sources: 10
 features:
   scene:
@@ -31,107 +31,107 @@ subtasks:
   0:
     term_signal: went on to the next subtask
     reached: 2960
-    successes: 1724
-    log_loss: 0.6721
+    successes: 467
+    log_loss: 0.4168
     alpha:
-      0: 0.44876
-      1: 0.584176
-      2: 0.479506
-      3: 0.506142
-      4: 0.396966
-      5: 0.461975
-      6: 0.391299
-      7: 0.52891
-      8: 0.647214
-      9: 0.37331
+      0: -1.748198
+      1: -1.17777
+      2: -1.182395
+      3: -1.555668
+      4: -1.575251
+      5: -1.296954
+      6: -1.489206
+      7: -1.555099
+      8: -1.594951
+      9: -1.561726
     slopes:
-      dx: -0.696127
-      dy: 0.979563
-      rotation: -58.206615
+      dx: 0.568803
+      dy: 0.413524
+      rotation: -181.582154
     source_counts:
       0:
         reached: 312
-        successes: 181
+        successes: 41
       1:
         reached: 296
-        successes: 175
+        successes: 50
       2:
         reached: 275
-        successes: 158
+        successes: 52
       3:
         reached: 301
-        successes: 176
+        successes: 44
       4:
         reached: 313
-        successes: 179
+        successes: 48
       5:
         reached: 315
-        successes: 181
+        successes: 55
       6:
         reached: 302
-        successes: 170
+        successes: 48
       7:
         reached: 258
-        successes: 154
+        successes: 40
       8:
         reached: 311
-        successes: 194
+        successes: 46
       9:
         reached: 277
-        successes: 156
+        successes: 43
   1:
     term_signal: went on to the next subtask
     reached: 1724
-    successes: 1307
-    log_loss: 0.5421
+    successes: 467
+    log_loss: 0.5559
     alpha:
-      0: 0.845543
-      1: 1.436575
-      2: 1.061353
-      3: 1.551826
-      4: 1.364915
-      5: 2.056143
-      6: 0.735633
-      7: 1.233433
-      8: 1.300663
-      9: 1.034342
+      0: -0.860095
+      1: -0.324727
+      2: -0.425944
+      3: -0.398915
+      4: -0.185833
+      5: 0.079183
+      6: -0.345124
+      7: 0.052377
+      8: -0.194638
+      9: -0.048589
     slopes:
-      dx: -0.385505
-      dy: -1.494611
-      rotation: 0.042039
-      inhand_position: 0.722356
-      inhand_rotation: 0.851598
+      dx: -2.459709
+      dy: -0.887307
+      rotation: 0.186852
+      inhand_position: -122.675854
+      inhand_rotation: -0.755404
     source_counts:
       0:
         reached: 221
-        successes: 153
+        successes: 40
       1:
         reached: 150
-        successes: 120
+        successes: 40
       2:
         reached: 163
-        successes: 120
+        successes: 38
       3:
         reached: 137
-        successes: 112
+        successes: 37
       4:
         reached: 182
-        successes: 143
+        successes: 55
       5:
         reached: 137
-        successes: 121
+        successes: 46
       6:
         reached: 213
-        successes: 142
+        successes: 53
       7:
         reached: 157
-        successes: 121
+        successes: 53
       8:
         reached: 186
-        successes: 145
+        successes: 57
       9:
         reached: 178
-        successes: 130
+        successes: 48
     carried_object: coffee_pod_main
   2:
     term_signal: task success

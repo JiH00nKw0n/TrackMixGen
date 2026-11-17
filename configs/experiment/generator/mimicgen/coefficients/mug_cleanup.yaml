@@ -1,12 +1,12 @@
 # Success-model coefficients of mimicgen mug_cleanup (tmg fit_coefficients). Per subtask k:
-#   P(subtask k succeeds | reached, source j) = sigmoid(alpha[j] + dx*|dx| + dy*|dy| + rotation*rot
+#   P(task succeeds | reached subtask k, source j for k) = sigmoid(alpha[j] + dx*|dx| + dy*|dy| + rotation*rot
 #                                            + inhand_position*dpos + inhand_rotation*drot)  (in-hand terms k >= 1)
 # Units: {'dx': 'm', 'dy': 'm', 'rotation': 'rad', 'inhand_position': 'm', 'inhand_rotation': 'rad'}. The source ranking is a separate file (../ranking/mug_cleanup.yaml).
 generator: mimicgen
 task: mug_cleanup
 basis: Maximum-likelihood fit (Newton, stabilizer 0.001) on the uniform-source baseline pool /data/pools/mimicgen/mug_cleanup/ours/ours/none/rank_human_demos
   (3000 attempts, 24 chunks, scene ours, selection ours, generation rank_human_demos); one fit per subtask on the attempts
-  that reached it, label = that subtask's success.
+  that reached it, label = the attempt's task success.
 num_sources: 10
 features:
   scene:
@@ -31,107 +31,107 @@ subtasks:
   0:
     term_signal: open
     reached: 3000
-    successes: 2816
-    log_loss: 0.193
+    successes: 446
+    log_loss: 0.4145
     alpha:
-      0: 6.831904
-      1: 4.09263
-      2: 7.086479
-      3: 5.854609
-      4: 4.407474
-      5: 4.186942
-      6: 5.033515
-      7: 4.580171
-      8: 3.40786
-      9: 6.722961
+      0: -1.51307
+      1: -1.259037
+      2: -1.517709
+      3: -1.223738
+      4: -1.681961
+      5: -1.367663
+      6: -1.4509
+      7: -1.652104
+      8: -1.752525
+      9: -1.511383
     slopes:
-      dx: -8.596506
-      dy: -5.049921
-      rotation: -3.566482
+      dx: -0.682595
+      dy: 6.854927
+      rotation: -1.536474
     source_counts:
       0:
         reached: 283
-        successes: 281
+        successes: 42
       1:
         reached: 277
-        successes: 248
+        successes: 50
       2:
         reached: 305
-        successes: 303
+        successes: 44
       3:
         reached: 295
-        successes: 289
+        successes: 55
       4:
         reached: 341
-        successes: 313
+        successes: 42
       5:
         reached: 290
-        successes: 262
+        successes: 48
       6:
         reached: 280
-        successes: 267
+        successes: 43
       7:
         reached: 319
-        successes: 297
+        successes: 41
       8:
         reached: 285
-        successes: 234
+        successes: 34
       9:
         reached: 325
-        successes: 322
+        successes: 47
   1:
     term_signal: grasp
     reached: 2816
-    successes: 1510
-    log_loss: 0.6094
+    successes: 433
+    log_loss: 0.3644
     alpha:
-      0: 0.313863
-      1: 0.89575
-      2: 2.306989
-      3: 1.356815
-      4: 0.726513
-      5: 0.508304
-      6: 1.588188
-      7: -0.876514
-      8: 1.642649
-      9: 1.064805
+      0: -0.577359
+      1: -0.375719
+      2: 0.917214
+      3: -0.613956
+      4: -0.664941
+      5: -0.399666
+      6: 0.565766
+      7: -3.142305
+      8: 0.590033
+      9: 0.549336
     slopes:
-      dx: -0.049913
-      dy: -2.110505
-      rotation: -0.289621
-      inhand_position: 0.020808
-      inhand_rotation: -0.739248
+      dx: -1.675478
+      dy: -3.365186
+      rotation: -0.762086
+      inhand_position: 0.336602
+      inhand_rotation: -0.981301
     source_counts:
       0:
         reached: 269
-        successes: 106
+        successes: 26
       1:
         reached: 296
-        successes: 159
+        successes: 36
       2:
         reached: 274
-        successes: 225
+        successes: 85
       3:
         reached: 303
-        successes: 190
+        successes: 28
       4:
         reached: 266
-        successes: 129
+        successes: 24
       5:
         reached: 273
-        successes: 117
+        successes: 29
       6:
         reached: 265
-        successes: 181
+        successes: 64
       7:
         reached: 294
-        successes: 41
+        successes: 2
       8:
         reached: 284
-        successes: 198
+        successes: 71
       9:
         reached: 292
-        successes: 164
+        successes: 68
     carried_object: drawer
   2:
     term_signal: task success

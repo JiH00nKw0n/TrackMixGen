@@ -1,12 +1,12 @@
 # Success-model coefficients of cpgen threading (tmg fit_coefficients). Per subtask k:
-#   P(subtask k succeeds | reached, source j) = sigmoid(alpha[j] + dx*|dx| + dy*|dy| + rotation*rot
+#   P(task succeeds | reached subtask k, source j for k) = sigmoid(alpha[j] + dx*|dx| + dy*|dy| + rotation*rot
 #                                            + inhand_position*dpos + inhand_rotation*drot)  (in-hand terms k >= 1)
 # Units: {'dx': 'm', 'dy': 'm', 'rotation': 'rad', 'inhand_position': 'm', 'inhand_rotation': 'rad'}. The source ranking is a separate file (../ranking/threading.yaml).
 generator: cpgen
 task: threading
 basis: Maximum-likelihood fit (Newton, stabilizer 0.001) on the uniform-source baseline pool /data/pools/cpgen/threading/ours/ours/none/rank_human_demos
   (3000 attempts, 60 chunks, scene ours, selection ours, generation rank_human_demos); one fit per subtask on the attempts
-  that reached it, label = that subtask's success.
+  that reached it, label = the attempt's task success.
 num_sources: 10
 features:
   scene:
@@ -30,54 +30,54 @@ subtasks:
   0:
     term_signal: went on to the next subtask
     reached: 2749
-    successes: 2723
-    log_loss: 0.0518
+    successes: 557
+    log_loss: 0.4321
     alpha:
-      0: 3.87202
-      1: 4.688799
-      2: 5.110588
-      3: 5.789908
-      4: 5.240215
-      5: 5.050868
-      6: 5.144158
-      7: 5.660865
-      8: 4.42021
-      9: 4.039213
+      0: -1.013606
+      1: -0.330066
+      2: -1.170607
+      3: -1.221585
+      4: -4.392377
+      5: -2.474157
+      6: -0.711365
+      7: -0.461299
+      8: -5.684892
+      9: -3.172003
     slopes:
-      dx: 0.124485
-      dy: -1.435711
-      rotation: -0.036827
+      dx: 0.867966
+      dy: -0.794734
+      rotation: -0.128961
     source_counts:
       0:
         reached: 317
-        successes: 310
+        successes: 79
       1:
         reached: 304
-        successes: 301
+        successes: 121
       2:
         reached: 307
-        successes: 305
+        successes: 68
       3:
         reached: 304
-        successes: 303
+        successes: 66
       4:
         reached: 175
-        successes: 174
+        successes: 2
       5:
         reached: 291
-        successes: 289
+        successes: 21
       6:
         reached: 313
-        successes: 311
+        successes: 96
       7:
         reached: 266
-        successes: 265
+        successes: 97
       8:
         reached: 312
-        successes: 308
+        successes: 1
       9:
         reached: 160
-        successes: 157
+        successes: 6
   1:
     term_signal: task success
     reached: 2723

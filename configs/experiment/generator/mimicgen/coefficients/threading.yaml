@@ -1,12 +1,12 @@
 # Success-model coefficients of mimicgen threading (tmg fit_coefficients). Per subtask k:
-#   P(subtask k succeeds | reached, source j) = sigmoid(alpha[j] + dx*|dx| + dy*|dy| + rotation*rot
+#   P(task succeeds | reached subtask k, source j for k) = sigmoid(alpha[j] + dx*|dx| + dy*|dy| + rotation*rot
 #                                            + inhand_position*dpos + inhand_rotation*drot)  (in-hand terms k >= 1)
 # Units: {'dx': 'm', 'dy': 'm', 'rotation': 'rad', 'inhand_position': 'm', 'inhand_rotation': 'rad'}. The source ranking is a separate file (../ranking/threading.yaml).
 generator: mimicgen
 task: threading
 basis: Maximum-likelihood fit (Newton, stabilizer 0.001) on the uniform-source baseline pool /data/pools/mimicgen/threading/ours/ours/none/rank_human_demos
   (3000 attempts, 24 chunks, scene ours, selection ours, generation rank_human_demos); one fit per subtask on the attempts
-  that reached it, label = that subtask's success.
+  that reached it, label = the attempt's task success.
 num_sources: 10
 features:
   scene:
@@ -30,54 +30,54 @@ subtasks:
   0:
     term_signal: grasp
     reached: 3000
-    successes: 2966
-    log_loss: 0.0462
+    successes: 589
+    log_loss: 0.487
     alpha:
-      0: 8.6181
-      1: 9.695237
-      2: 8.132478
-      3: 9.35217
-      4: 8.499476
-      5: 8.746494
-      6: 13.100214
-      7: 7.241602
-      8: 8.682943
-      9: 9.829025
+      0: -1.86313
+      1: -2.316353
+      2: -1.429044
+      3: -1.225441
+      4: -1.279978
+      5: -1.448817
+      6: -1.406441
+      7: -1.504743
+      8: -1.913801
+      9: -1.43603
     slopes:
-      dx: -25.84856
-      dy: -6.748223
-      rotation: 0.244962
+      dx: -0.638667
+      dy: 0.555815
+      rotation: 0.168866
     source_counts:
       0:
         reached: 282
-        successes: 281
+        successes: 43
       1:
         reached: 323
-        successes: 321
+        successes: 33
       2:
         reached: 315
-        successes: 313
+        successes: 69
       3:
         reached: 301
-        successes: 296
+        successes: 75
       4:
         reached: 308
-        successes: 301
+        successes: 75
       5:
         reached: 282
-        successes: 279
+        successes: 60
       6:
         reached: 294
-        successes: 294
+        successes: 66
       7:
         reached: 302
-        successes: 297
+        successes: 61
       8:
         reached: 279
-        successes: 272
+        successes: 40
       9:
         reached: 314
-        successes: 312
+        successes: 67
   1:
     term_signal: task success
     reached: 2966

@@ -1,12 +1,12 @@
 # Success-model coefficients of cpgen hammer_cleanup (tmg fit_coefficients). Per subtask k:
-#   P(subtask k succeeds | reached, source j) = sigmoid(alpha[j] + dx*|dx| + dy*|dy| + rotation*rot
+#   P(task succeeds | reached subtask k, source j for k) = sigmoid(alpha[j] + dx*|dx| + dy*|dy| + rotation*rot
 #                                            + inhand_position*dpos + inhand_rotation*drot)  (in-hand terms k >= 1)
 # Units: {'dx': 'm', 'dy': 'm', 'rotation': 'rad', 'inhand_position': 'm', 'inhand_rotation': 'rad'}. The source ranking is a separate file (../ranking/hammer_cleanup.yaml).
 generator: cpgen
 task: hammer_cleanup
 basis: Maximum-likelihood fit (Newton, stabilizer 0.001) on the uniform-source baseline pool /data/pools/cpgen/hammer_cleanup/ours/ours/none/rank_human_demos
   (3000 attempts, 60 chunks, scene ours, selection ours, generation rank_human_demos); one fit per subtask on the attempts
-  that reached it, label = that subtask's success.
+  that reached it, label = the attempt's task success.
 num_sources: 10
 features:
   scene:
@@ -32,161 +32,161 @@ subtasks:
   0:
     term_signal: went on to the next subtask
     reached: 2928
-    successes: 2467
-    log_loss: 0.4279
+    successes: 1237
+    log_loss: 0.6242
     alpha:
-      0: 2.096377
-      1: 1.936267
-      2: 2.251757
-      3: 1.705048
-      4: 2.074747
-      5: 2.075111
-      6: 2.098003
-      7: 1.741337
-      8: 2.202751
-      9: 1.704115
+      0: 0.542737
+      1: 0.410401
+      2: -5.121828
+      3: 0.215196
+      4: 0.42426
+      5: 0.374968
+      6: 0.153421
+      7: 0.401403
+      8: 0.258423
+      9: 0.320597
     slopes:
-      dx: 0.347172
-      dy: -9.34447
-      rotation: 0.402181
+      dx: -1.746738
+      dy: -4.389287
+      rotation: -0.440247
     source_counts:
       0:
         reached: 297
-        successes: 255
+        successes: 152
       1:
         reached: 292
-        successes: 244
+        successes: 139
       2:
         reached: 267
-        successes: 234
+        successes: 1
       3:
         reached: 292
-        successes: 235
+        successes: 126
       4:
         reached: 276
-        successes: 236
+        successes: 134
       5:
         reached: 319
-        successes: 273
+        successes: 151
       6:
         reached: 286
-        successes: 245
+        successes: 119
       7:
         reached: 318
-        successes: 256
+        successes: 152
       8:
         reached: 322
-        successes: 281
+        successes: 143
       9:
         reached: 259
-        successes: 208
+        successes: 120
   1:
     term_signal: went on to the next subtask
     reached: 2467
-    successes: 1716
-    log_loss: 0.5846
+    successes: 1237
+    log_loss: 0.662
     alpha:
-      0: 1.117288
-      1: 1.585468
-      2: 1.411285
-      3: 0.012082
-      4: 1.560985
-      5: 1.322023
-      6: 1.322973
-      7: 2.092694
-      8: 1.633459
-      9: 1.621124
+      0: -0.048118
+      1: 0.58525
+      2: 0.295299
+      3: -1.018864
+      4: 0.546956
+      5: 0.218842
+      6: 0.418943
+      7: 1.067257
+      8: 0.597392
+      9: 0.722584
     slopes:
-      dx: -1.782107
-      dy: 0.708321
-      rotation: -0.086717
+      dx: -1.560177
+      dy: 2.446446
+      rotation: -0.065361
       inhand_position: 0.0
       inhand_rotation: 0.0
     source_counts:
       0:
         reached: 282
-        successes: 189
+        successes: 121
       1:
         reached: 291
-        successes: 220
+        successes: 168
       2:
         reached: 267
-        successes: 193
+        successes: 134
       3:
         reached: 273
-        successes: 110
+        successes: 60
       4:
         reached: 307
-        successes: 231
+        successes: 174
       5:
         reached: 284
-        successes: 201
+        successes: 139
       6:
         reached: 301
-        successes: 213
+        successes: 161
       7:
         reached: 62
-        successes: 52
+        successes: 43
       8:
         reached: 258
-        successes: 199
+        successes: 151
       9:
         reached: 142
-        successes: 108
+        successes: 86
     carried_object: CabinetObject_main
   2:
     term_signal: went on to the next subtask
     reached: 1716
-    successes: 1551
-    log_loss: 0.3101
+    successes: 1237
+    log_loss: 0.57
     alpha:
-      0: 1.762289
-      1: 2.363056
-      2: 2.813305
-      3: 2.339329
-      4: 2.504363
-      5: 2.163657
-      6: 2.48577
-      7: 2.23732
-      8: 2.736525
-      9: 2.393309
+      0: 1.782637
+      1: 4.151978
+      2: 2.027651
+      3: 2.136728
+      4: 2.17533
+      5: 1.95137
+      6: 1.967852
+      7: 2.178738
+      8: 2.002098
+      9: 1.873418
     slopes:
-      dx: 0.306108
-      dy: -3.457113
-      rotation: 0.125226
-      inhand_position: 19.865691
-      inhand_rotation: -0.085116
+      dx: -2.697864
+      dy: -0.582739
+      rotation: -1.748391
+      inhand_position: -34.748365
+      inhand_rotation: 0.014827
     source_counts:
       0:
         reached: 202
-        successes: 169
+        successes: 135
       1:
         reached: 67
-        successes: 63
+        successes: 60
       2:
         reached: 177
-        successes: 166
+        successes: 127
       3:
         reached: 185
-        successes: 168
+        successes: 133
       4:
         reached: 188
-        successes: 172
+        successes: 142
       5:
         reached: 196
-        successes: 173
+        successes: 141
       6:
         reached: 190
-        successes: 174
+        successes: 135
       7:
         reached: 149
-        successes: 133
+        successes: 113
       8:
         reached: 173
-        successes: 162
+        successes: 119
       9:
         reached: 189
-        successes: 171
+        successes: 132
     carried_object: hammer_root
   3:
     term_signal: task success

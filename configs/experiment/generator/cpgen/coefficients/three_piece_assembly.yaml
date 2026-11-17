@@ -1,12 +1,12 @@
 # Success-model coefficients of cpgen three_piece_assembly (tmg fit_coefficients). Per subtask k:
-#   P(subtask k succeeds | reached, source j) = sigmoid(alpha[j] + dx*|dx| + dy*|dy| + rotation*rot
+#   P(task succeeds | reached subtask k, source j for k) = sigmoid(alpha[j] + dx*|dx| + dy*|dy| + rotation*rot
 #                                            + inhand_position*dpos + inhand_rotation*drot)  (in-hand terms k >= 1)
 # Units: {'dx': 'm', 'dy': 'm', 'rotation': 'rad', 'inhand_position': 'm', 'inhand_rotation': 'rad'}. The source ranking is a separate file (../ranking/three_piece_assembly.yaml).
 generator: cpgen
 task: three_piece_assembly
 basis: Maximum-likelihood fit (Newton, stabilizer 0.001) on the uniform-source baseline pool /data/pools/cpgen/three_piece_assembly/ours/ours/none/rank_human_demos
   (3000 attempts, 60 chunks, scene ours, selection ours, generation rank_human_demos); one fit per subtask on the attempts
-  that reached it, label = that subtask's success.
+  that reached it, label = the attempt's task success.
 num_sources: 10
 features:
   scene:
@@ -32,161 +32,161 @@ subtasks:
   0:
     term_signal: went on to the next subtask
     reached: 2986
-    successes: 2865
-    log_loss: 0.1365
+    successes: 1430
+    log_loss: 0.6855
     alpha:
-      0: 4.573502
-      1: 4.733353
-      2: 4.160924
-      3: 4.589604
-      4: 4.746076
-      5: 1.745586
-      6: 5.11265
-      7: 4.282537
-      8: 4.602121
-      9: 4.05098
+      0: 0.157142
+      1: -0.14282
+      2: -0.245524
+      3: 0.073139
+      4: -0.318372
+      5: -0.487168
+      6: 0.137443
+      7: -0.020952
+      8: -0.267037
+      9: -0.511691
     slopes:
-      dx: -0.681132
-      dy: -1.167913
-      rotation: -0.448067
+      dx: -0.037664
+      dy: 0.419672
+      rotation: 0.03954
     source_counts:
       0:
         reached: 305
-        successes: 300
+        successes: 169
       1:
         reached: 277
-        successes: 273
+        successes: 134
       2:
         reached: 270
-        successes: 263
+        successes: 125
       3:
         reached: 303
-        successes: 298
+        successes: 163
       4:
         reached: 291
-        successes: 287
+        successes: 127
       5:
         reached: 317
-        successes: 244
+        successes: 128
       6:
         reached: 305
-        successes: 302
+        successes: 168
       7:
         reached: 322
-        successes: 315
+        successes: 164
       8:
         reached: 298
-        successes: 293
+        successes: 136
       9:
         reached: 298
-        successes: 290
+        successes: 116
   1:
     term_signal: went on to the next subtask
     reached: 2865
-    successes: 2553
-    log_loss: 0.3238
+    successes: 1430
+    log_loss: 0.6486
     alpha:
-      0: 2.649101
-      1: 1.72027
-      2: 0.821592
-      3: 2.308633
-      4: 1.321382
-      5: 2.517467
-      6: 2.055044
-      7: 1.89021
-      8: 2.106507
-      9: 2.453157
+      0: 0.807848
+      1: -0.068175
+      2: -0.262035
+      3: 0.507857
+      4: 0.187332
+      5: 1.106505
+      6: 0.384282
+      7: -1.077253
+      8: 1.044014
+      9: 0.611745
     slopes:
-      dx: 0.484722
-      dy: -2.530718
-      rotation: 0.392248
-      inhand_position: 15.713956
-      inhand_rotation: 1.403313
+      dx: -1.271687
+      dy: -0.106792
+      rotation: 0.007175
+      inhand_position: -32.541372
+      inhand_rotation: 1.251285
     source_counts:
       0:
         reached: 321
-        successes: 305
+        successes: 203
       1:
         reached: 290
-        successes: 252
+        successes: 119
       2:
         reached: 286
-        successes: 213
+        successes: 102
       3:
         reached: 282
-        successes: 261
+        successes: 154
       4:
         reached: 318
-        successes: 262
+        successes: 149
       5:
         reached: 303
-        successes: 286
+        successes: 195
       6:
         reached: 290
-        successes: 265
+        successes: 155
       7:
         reached: 277
-        successes: 248
+        successes: 57
       8:
         reached: 249
-        successes: 228
+        successes: 155
       9:
         reached: 249
-        successes: 233
+        successes: 141
     carried_object: piece_1_root
   2:
     term_signal: went on to the next subtask
     reached: 2553
-    successes: 2013
-    log_loss: 0.5088
+    successes: 1430
+    log_loss: 0.6824
     alpha:
-      0: 1.429446
-      1: 1.153648
-      2: 1.305879
-      3: 1.682402
-      4: 2.352665
-      5: 1.490015
-      6: 1.2511
-      7: 1.257605
-      8: 1.244919
-      9: 1.623076
+      0: 0.31789
+      1: 0.173348
+      2: 0.292322
+      3: 0.499751
+      4: 0.709695
+      5: 0.346039
+      6: 0.122849
+      7: 0.379366
+      8: 0.375216
+      9: 0.415921
     slopes:
-      dx: -0.524016
-      dy: -0.122981
-      rotation: 0.002099
+      dx: -0.446408
+      dy: 0.117479
+      rotation: -0.132041
       inhand_position: 0.0
       inhand_rotation: 0.0
     source_counts:
       0:
         reached: 270
-        successes: 213
+        successes: 149
       1:
         reached: 267
-        successes: 197
+        successes: 138
       2:
         reached: 254
-        successes: 194
+        successes: 138
       3:
         reached: 241
-        successes: 199
+        successes: 143
       4:
         reached: 219
-        successes: 198
+        successes: 142
       5:
         reached: 256
-        successes: 204
+        successes: 143
       6:
         reached: 279
-        successes: 211
+        successes: 140
       7:
         reached: 205
-        successes: 155
+        successes: 116
       8:
         reached: 287
-        successes: 217
+        successes: 162
       9:
         reached: 275
-        successes: 225
+        successes: 159
     carried_object: base_root
   3:
     term_signal: task success
