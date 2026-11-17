@@ -123,11 +123,15 @@ def _mixer_types() -> dict[str, MixerType]:
 
 def _follower_types() -> dict[str, FollowerType]:
     """Follower implementations by ``method.tracking.type``: ``adaptive_pacing`` (alias ``error_adaptive``, slows the path
-    progress by the tracking error) and ``adaptive_command`` (corrects the next command within the one-step reach)."""
+    progress by the tracking error), ``adaptive_command`` (corrects the next command within the one-step reach) and
+    ``transit_pacing`` (error-bounded progress on the bridge waypoints only, settle before each skill)."""
     if "adaptive_command" not in _FOLLOWERS:
         from tmg.generation.method.adaptive_command import AdaptiveCommandFollower
 
-        _FOLLOWERS.update(adaptive_pacing=ErrorAdaptiveFollower, adaptive_command=AdaptiveCommandFollower)
+        from tmg.generation.method.transit_pacing import TransitPacingFollower
+
+        _FOLLOWERS.update(adaptive_pacing=ErrorAdaptiveFollower, adaptive_command=AdaptiveCommandFollower,
+                          transit_pacing=TransitPacingFollower)
     return _FOLLOWERS
 
 

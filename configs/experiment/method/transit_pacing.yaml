@@ -1,0 +1,18 @@
+# Transit Pacing (2026-11-17): error-bounded path following on the bridge (transit) waypoints only; skills run at the
+# official speed. tmg/generation/method/transit_pacing.py (TransitPacingFollower). No mixing, pre-noise labels (the
+# label is the reference path point, as in Adaptive Pacing). The response gains are fitted on the bridge steps of the
+# 2026-11-17 MimicGen Adaptive Pacing pools (k_pos 0.048-0.071, k_rot 0.078-0.146 over Coffee, Square, Stack Three,
+# Threading); the bounds are powers of ten (the bridge target ran 93-173 mm ahead of the hand).
+defaults:
+  - tracking_only
+  - _self_
+name: transit_pacing
+tracking:
+  type: transit_pacing
+  k_pos: 0.05                       # one-step position response x_{t+1} - x_t = k (u_t - x_t)
+  k_rot: 0.1                        # same for the rotation vector
+  eps_pos: 0.1                      # m: bound on the predicted next error while on the bridge
+  eps_rot: 0.1                      # rad
+  eps_settle_pos: 0.01              # m: the skill starts only when the error is within this bound
+  eps_settle_rot: 0.1               # rad
+  extra_steps_cap: segment
