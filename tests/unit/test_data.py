@@ -141,6 +141,10 @@ def test_loader_stacks_with_padding_and_computes_stats(tmp_path):
     stats = compute_stats(store)
     assert stats["action"]["mean"].shape == (7,) and stats["observation.images.agentview"]["mean"].shape == (3, 1, 1)
     assert 0.0 <= float(stats["observation.images.agentview"]["mean"].max()) <= 1.0
+    actions = np.concatenate(store.actions)   # q01/q99 for π0.5's QUANTILES normalization
+    assert np.allclose(stats["action"]["q01"], np.percentile(actions, 1, axis=0), atol=1e-6)
+    assert np.allclose(stats["action"]["q99"], np.percentile(actions, 99, axis=0), atol=1e-6)
+    assert (stats["action"]["min"] <= stats["action"]["q01"]).all() and (stats["action"]["q99"] <= stats["action"]["max"]).all()
     dropped = FrameDataset(store, drop_n_last_frames=2)
     assert len(dropped) == store.num_frames - 2 * store.num_demos
     batches = ds.batches(3, np.random.default_rng(0))

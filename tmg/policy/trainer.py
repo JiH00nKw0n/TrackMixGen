@@ -58,7 +58,7 @@ from tmg.core.features import ACTION
 from tmg.data.loader import FrameDataset, TrajectoryStore, collate, compute_stats
 from tmg.policy import rotation
 from tmg.policy.ema import EMA
-from tmg.policy.io import PolicyIO, make_io
+from tmg.policy.io import PolicyIO, make_io, uses_pipeline
 from tmg.policy.lerobot_policies import build_optimizer, build_policy, normalization_modes, task_policy_overrides
 from tmg.policy.normalize import exceeds_unit_range, global_min_max
 
@@ -85,6 +85,15 @@ def dataset_features(store: TrajectoryStore, observation: str = "image") -> dict
         shape = (c, h, w)
     return {"cameras": list(store.cameras), "image_shape": shape, "state_dim": store.state_dim,
             "env_state_dim": store.env_state_dim, "action_dim": store.action_dim}
+
+
+def policy_setting(training: dict, policy_name: str, key: str, default=None):
+    """``training.by_policy.<policy>.<key>`` when the policy sets it (π0.5: ``grad_clip_norm`` 1.0, ``selection`` last,
+    ``validation`` off), else ``training.<key>``, else ``default``."""
+    block = (training.get("by_policy") or {}).get(policy_name) or {}
+    if key in block:
+        return block[key]
+    return training.get(key, default)
 
 
 def policy_budget(training: dict, policy_name: str, observation: str, override) -> tuple[int, int]:
@@ -209,7 +218,11 @@ def _setup(cfg) -> TrainSetup:
     policy.train()
     config = policy.config
     stats = compute_stats(store)
-    if action_rotation == rotation.ROTATION_6D:
+    if uses_pipeline(str(policy_cfg["name"])):
+        # π0 / π0.5: LeRobot's pipeline normalizes with the config's own mapping (π0.5: q01/q99 quantiles of state and
+        # action, the 6D rotation of CP-Gen included); the two rewrites below are for our normalizer
+        pass
+    elif action_rotation == rotation.ROTATION_6D:
         # as the authors: the position min-max to [-1, 1], the 6D rotation and the gripper unchanged. This also holds for
         # BC-RNN, whose identity action mode suits MimicGen's delta actions but whose tanh means cannot reach CP-Gen's
         # absolute positions (heights 0.83-1.17 m)
@@ -236,12 +249,12 @@ def _setup(cfg) -> TrainSetup:
     scheduler_preset = config.get_scheduler_preset()
     scheduler = scheduler_preset.build(optimizer, updates) if scheduler_preset is not None else None
     ema = EMA(policy) if policy_cfg.get("ema", False) else None
-    clip = float(training.get("grad_clip_norm", 0) or 0)
+    clip = float(policy_setting(training, str(policy_cfg["name"]), "grad_clip_norm", 0) or 0)
     per_epoch = int(training["updates_per_epoch"])
     ckpt_every = int(training["checkpoint_every_epochs"]) * per_epoch
     use_amp = bool(training.get("amp", False)) and device.startswith("cuda")
     scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
-    validation_cmd = (training.get("validation") or {}).get("command")
+    validation_cmd = (policy_setting(training, str(policy_cfg["name"]), "validation", {}) or {}).get("command")
 
     start = 0
     existing = list_checkpoints(run_dir)
@@ -340,7 +353,7 @@ def train(cfg) -> dict:
               "checkpoints": s.checkpoints, "dataset": s.plain["dataset"]["path"], "demos": s.store.num_demos,
               "frames": s.store.num_frames,
               "features": {k: (list(v) if isinstance(v, tuple) else v) for k, v in s.features.items()},
-              "selection": s.training.get("selection", "best_validation")}
+              "selection": policy_setting(s.training, str(s.policy_cfg["name"]), "selection", "best_validation")}
     write_json(s.run_dir / TRAIN_RESULT, result)
     print(f"[tmg] training done: {len(s.checkpoints)} checkpoints in {s.run_dir}", flush=True)
     return result
@@ -383,9 +396,10 @@ def select_checkpoint(run_dir: Path, rule: str = "best_validation") -> dict:
 
 def select_checkpoint_cmd(cfg) -> dict:
     """``tmg select_checkpoint``: ``select_checkpoint`` of the composed config's run folder (``output``) with its
-    ``training.selection`` rule."""
+    ``training.selection`` rule (or the policy's own, ``training.by_policy.<policy>.selection``)."""
     plain = resolved(cfg)
-    return select_checkpoint(plain["output"], str(plain["training"].get("selection", "best_validation")))
+    policy_name = str((plain.get("policy") or {}).get("name", ""))
+    return select_checkpoint(plain["output"], str(policy_setting(plain["training"], policy_name, "selection", "best_validation")))
 
 
 def validation_rows(run_dir: Path) -> list[dict]:

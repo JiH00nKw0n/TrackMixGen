@@ -23,6 +23,18 @@ export GENERATOR IMAGE
 # CP-Gen evaluates in the generation environment rebuilt from its dataset's env_args (robosuite 1.5); the Isaac Lab
 # generators build their environment from the task id and need nothing from the dataset
 [ "$GENERATOR" = cpgen ] && export EXTRA="dataset=$DATASET_C ${EXTRA:-}"
+# per-policy protocol (π0.5, decision 2026-11-20): `training.by_policy.<policy>.selection: last` skips the checkpoint
+# validation, and `evaluation.test_scenes_by_policy.<policy>: n` plays only the first n test scenes
+policy_key() {  # policy_key <yaml> <top-level block> [key]: under <block>, the value of <POLICY> (no key) or of
+                #   <POLICY>.<key> (two-space indented yaml, one value per line)
+  awk -v blk="$2:" -v pol="$POLICY:" -v key="${3:+$3:}" '
+    /^[^ #]/ {inb = ($1 == blk); inp = 0; next}
+    inb && /^  [^ #]/ {inp = ($1 == pol); if (inp && key == "") {print $2; exit}; next}
+    inb && inp && key != "" && $1 == key {print $2; exit}' "$1"
+}
+SELECT_RULE=$(policy_key "$REPO/configs/experiment/training/default.yaml" by_policy selection)
+TEST_LIMIT=$(policy_key "$REPO/configs/experiment/evaluation/default.yaml" test_scenes_by_policy)
+[ -n "$TEST_LIMIT" ] && export EXTRA="max_scenes=$TEST_LIMIT ${EXTRA:-}"
 C="GENERATOR=$GENERATOR TASK=$TASK SCENE=$SCENE SELECTION=$SELECTION METHOD=$METHOD GENERATION=$GENERATION OBSERVATION=$OBSERVATION POLICY=$POLICY SEED=$SEED CLUSTER=$CLUSTER OVERRIDES=dataset.size=$SIZE"
 log() { echo "[$TASK $(date +%H:%M:%S)] $*"; }
 validated() { [ -f "$RUN/validation.jsonl" ] && grep -q "/$1\"" "$RUN/validation.jsonl"; }
@@ -35,6 +47,7 @@ make -s -C "$REPO" train GENERATOR=$GENERATOR TASK=$TASK SCENE=$SCENE SELECTION=
 fi
 # two passes: the second validates again the checkpoints whose first validation failed (an evaluation with an error
 # writes no row), so one lost server or crashed simulator does not stop the run at the check below (2026-11-02)
+if [ "$SELECT_RULE" = last ]; then log "selection rule last: checkpoints are not validated"; else
 for pass in 1 2; do
 log "validate checkpoints ($VAL_PARALLEL at a time, pass $pass)"
 i=0; pids=""
@@ -54,6 +67,7 @@ done
 wait
 done
 for d in "$RUN"/checkpoints/[0-9]*/; do d=${d%/}; [ -f "$d/checkpoint.json" ] && ! validated "$(basename "$d")" && { log "checkpoint $(basename "$d") has no validation row"; exit 1; }; done
+fi
 log "select checkpoint"
 make -s -C "$REPO" select-checkpoint $C || { log "SELECT FAILED"; exit 1; }
 SEL=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['checkpoint'])" "$RUN/SELECTED.json")
@@ -61,7 +75,7 @@ SEL_HOST="${SEL/#$RUNTIME_DATA_ROOT/$DATA_ROOT}"
 # the test shards need TEST_SHARDS consecutive free ports from PORT0+20
 tport=$((PORT0 + 20))
 while :; do ok=1; for p in $(seq "$tport" $((tport + TEST_SHARDS - 1))); do port_busy "$p" && { ok=0; break; }; done; [ "$ok" = 1 ] && break; tport=$((tport + 1)); done
-log "evaluate $(basename "$SEL_HOST") on the test scenes ($TEST_SHARDS shards, ports $tport..$((tport + TEST_SHARDS - 1)))"
+log "evaluate $(basename "$SEL_HOST") on the test scenes${TEST_LIMIT:+ (first $TEST_LIMIT)} ($TEST_SHARDS shards, ports $tport..$((tport + TEST_SHARDS - 1)))"
 make -s -C "$REPO" evaluate RUN="$RUN" CKPT="$SEL_HOST" GENERATOR=$GENERATOR TASK=$TASK SCENE=$SCENE OBSERVATION=$OBSERVATION CLUSTER=$CLUSTER SPLIT=test \
   PORT=$tport SHARDS=$TEST_SHARDS || { log "evaluate failed once, retrying the scenes without a result"; \
   make -s -C "$REPO" evaluate RUN="$RUN" CKPT="$SEL_HOST" GENERATOR=$GENERATOR TASK=$TASK SCENE=$SCENE OBSERVATION=$OBSERVATION CLUSTER=$CLUSTER SPLIT=test \

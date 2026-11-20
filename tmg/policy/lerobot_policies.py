@@ -5,10 +5,12 @@
 - ``bc_rnn``: ``tmg.policy.bc_rnn.BCRNNPolicy``;
 - ``diffusion_policy``: LeRobot's ``DiffusionPolicy`` with the official image U-Net values written into
   ``DiffusionConfig`` (the config file lists only the fields that differ from LeRobot's defaults);
-- ``pi0``: LeRobot's ``PI0Policy`` from the hub weights (stage 6).
+- ``pi0``: LeRobot's ``PI0Policy`` from the hub weights (stage 6);
+- ``pi05``: LeRobot's ``PI05Policy`` from the DROID hub weights ``lerobot/pi05_droid`` with the parameters named in the
+  policy config's ``freeze`` list frozen (DiscoDemo's scheme, decision 2026-11-20).
 
 The three are one table, ``POLICY_SPECS``: our policy name, the LeRobot config type that ``config.json`` stores
-(``tmg_bc_rnn``, ``diffusion``, ``pi0``; what ``load_policy`` reads back), the config and policy classes (imported
+(``tmg_bc_rnn``, ``diffusion``, ``pi0``, ``pi05``; what ``load_policy`` reads back), the config and policy classes (imported
 only when used, since the LeRobot modules are heavy), and whether the policy needs LeRobot's processor pipelines
 (``tmg.policy.io``). ``POLICIES`` is the tuple of names in table order.
 
@@ -63,8 +65,11 @@ POLICY_SPECS: dict[str, PolicySpec] = {
                                    optimizer="adamw", per_sample_crop=True),
     "pi0": PolicySpec("pi0", "pi0", "lerobot.policies.pi0.configuration_pi0:PI0Config",
                       "lerobot.policies.pi0.modeling_pi0:PI0Policy", uses_pipeline=True),
+    "pi05": PolicySpec("pi05", "pi05", "lerobot.policies.pi05.configuration_pi05:PI05Config",
+                       "lerobot.policies.pi05.modeling_pi05:PI05Policy", tuple_params=("optimizer_betas",),
+                       uses_pipeline=True),
 }
-POLICIES = tuple(POLICY_SPECS)      # ("bc_rnn", "diffusion_policy", "pi0")
+POLICIES = tuple(POLICY_SPECS)      # ("bc_rnn", "diffusion_policy", "pi0", "pi05")
 
 
 def policy_spec(name: str) -> PolicySpec:
@@ -157,7 +162,8 @@ def policy_class(name: str):
 
 
 def build_policy(policy_cfg: dict, features: dict, device: str, observation: str = "image", overrides: dict | None = None):
-    """A freshly initialized policy (or, for π0, the pretrained hub weights named by ``params.pretrained_path``)."""
+    """A freshly initialized policy (or, for π0 and π0.5, the pretrained hub weights named by ``pretrained_path``),
+    with the parameters of the config's ``freeze`` list frozen."""
     name = str(policy_cfg["name"])
     config = build_config(policy_cfg, features, device, observation, overrides)
     cls = policy_class(name)
@@ -167,25 +173,96 @@ def build_policy(policy_cfg: dict, features: dict, device: str, observation: str
         from tmg.policy.augment import use_per_sample_crop
 
         use_per_sample_crop(policy)
+    freeze = list(policy_cfg.get("freeze") or ())
+    if pretrained and policy_spec(name).config_type == "pi05" and widen_pi05(policy, int(features["state_dim"]),
+                                                                              int(features["action_dim"])):
+        # the widened action projections hold new weights and must train even when the config freezes them
+        freeze = [p for p in freeze if p not in ("model.action_in_proj.", "model.action_out_proj.")]
+    freeze_parameters(policy, freeze)
     return policy.to(device)
+
+
+def widen_pi05(policy, state_dim: int, action_dim: int) -> bool:
+    """Let pretrained π0.5 weights take a state or action longer than their 32 values (DexMimicGen GR1: 36 and 36,
+    decision 2026-11-20). π0.5 writes the state into the prompt as text, so a longer state only raises
+    ``max_state_dim``. The action enters and leaves the action expert through two linear layers sized to
+    ``max_action_dim``; both are widened to ``action_dim``, the pretrained weights are copied into the first 32 input
+    columns of ``action_in_proj`` and the first 32 output rows (and bias) of ``action_out_proj``, and the extra columns
+    and rows keep PyTorch's default initialization. The widened layers are then trained like the rest. Nothing changes
+    when both dimensions fit (MimicGen, CP-Gen and SoftMimicGen). Returns whether the action projections were widened."""
+    import torch
+
+    config, model = policy.config, policy.model
+    if state_dim > int(config.max_state_dim):
+        config.max_state_dim = state_dim
+    old = int(config.max_action_dim)
+    if action_dim <= old:
+        return False
+    with torch.no_grad():
+        src_in, src_out = model.action_in_proj, model.action_out_proj
+        new_in = torch.nn.Linear(action_dim, src_in.out_features).to(src_in.weight.device, src_in.weight.dtype)
+        new_out = torch.nn.Linear(src_out.in_features, action_dim).to(src_out.weight.device, src_out.weight.dtype)
+        new_in.weight[:, :old] = src_in.weight
+        new_in.bias.copy_(src_in.bias)
+        new_out.weight[:old] = src_out.weight
+        new_out.bias[:old] = src_out.bias
+    model.action_in_proj, model.action_out_proj = new_in, new_out
+    config.max_action_dim = action_dim
+    if getattr(model, "config", None) is not None and model.config is not config:
+        model.config.max_action_dim = action_dim
+        model.config.max_state_dim = config.max_state_dim
+    print(f"[tmg] pi05 action projections widened from {old} to {action_dim} values (first {old} copied)", flush=True)
+    return True
+
+
+def freeze_parameters(policy, prefixes) -> dict:
+    """Set ``requires_grad = False`` on every parameter whose name starts with one of ``prefixes`` (π0.5: DiscoDemo's
+    frozen projections and output head). Returns ``{"frozen": n, "trainable": n}`` parameter counts.
+
+    Raises:
+        ValueError: a prefix matches no parameter (a renamed module would otherwise silently stay trainable).
+    """
+    prefixes = tuple(str(p) for p in prefixes)
+    hits = dict.fromkeys(prefixes, 0)
+    frozen = trainable = 0
+    for pname, param in policy.named_parameters():
+        match = next((p for p in prefixes if pname.startswith(p)), None)
+        if match is not None:
+            param.requires_grad = False
+            hits[match] += 1
+        if param.requires_grad:
+            trainable += param.numel()
+        else:
+            frozen += param.numel()
+    unmatched = [p for p, n in hits.items() if n == 0]
+    if unmatched:
+        raise ValueError(f"freeze prefixes match no parameter: {unmatched}")
+    if prefixes:
+        print(f"[tmg] frozen {frozen:,} parameters ({len(prefixes)} modules), trainable {trainable:,}", flush=True)
+    return {"frozen": frozen, "trainable": trainable}
 
 
 def build_optimizer(name: str, config, policy):
     """The policy's optimizer: the config's LeRobot preset, or AdamW with the preset's learning rate, betas, eps and
     weight decay when the spec says ``adamw`` (the official Diffusion Policy's optimizer)."""
     preset = config.get_optimizer_preset()
+    params = policy.get_optim_params()
+    if not isinstance(params, dict):
+        # frozen parameters (``freeze``) stay out of the optimizer, so weight decay never touches them
+        params = [p for p in params if p.requires_grad]
     if policy_spec(name).optimizer != "adamw":
-        return preset.build(policy.get_optim_params())
+        return preset.build(params)
     import torch
 
-    return torch.optim.AdamW(policy.get_optim_params(), lr=preset.lr, betas=tuple(preset.betas), eps=preset.eps,
+    return torch.optim.AdamW(params, lr=preset.lr, betas=tuple(preset.betas), eps=preset.eps,
                              weight_decay=preset.weight_decay)
 
 
 def normalization_modes(config: PreTrainedConfig) -> dict[str, str]:
     """``{"VISUAL"|"STATE"|"ENV"|"ACTION": "identity"|"mean_std"|"min_max"}`` from a LeRobot config's mapping
     (``ENV``, the object state, falls back to the ``STATE`` mode in ``tmg.policy.normalize`` when the mapping has none)."""
-    table = {"IDENTITY": "identity", "MEAN_STD": "mean_std", "MIN_MAX": "min_max"}
+    table = {"IDENTITY": "identity", "MEAN_STD": "mean_std", "MIN_MAX": "min_max",
+             "QUANTILES": "quantiles"}   # quantiles: π0.5, normalized by LeRobot's pipeline (tmg.policy.io.PipelineIO)
     out = {}
     for key, mode in getattr(config, "normalization_mapping", {}).items():
         value = getattr(mode, "value", str(mode))
