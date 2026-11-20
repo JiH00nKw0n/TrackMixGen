@@ -231,11 +231,14 @@ def compute_stats(store: TrajectoryStore, *, max_image_frames: int = 20000, seed
 
     Returns:
         ``{key: {"min", "max", "mean", "std"}}`` as float32 arrays; vector keys have shape (D,), images (3, 1, 1)
-        on the [0, 1] scale.
+        on the [0, 1] scale. Vector keys also carry ``q01`` and ``q99``, their 1st and 99th percentiles over all
+        frames, which LeRobot's QUANTILES normalization reads (π0.5 maps q01..q99 to [-1, 1]).
     """
     def vec_stats(arr: np.ndarray) -> dict:
+        q01, q99 = np.percentile(arr, [1.0, 99.0], axis=0)
         return {"min": arr.min(0).astype(np.float32), "max": arr.max(0).astype(np.float32),
-                "mean": arr.mean(0).astype(np.float32), "std": arr.std(0).astype(np.float32)}
+                "mean": arr.mean(0).astype(np.float32), "std": arr.std(0).astype(np.float32),
+                "q01": q01.astype(np.float32), "q99": q99.astype(np.float32)}
 
     stats = {STATE: vec_stats(np.concatenate(store.state)), ACTION: vec_stats(np.concatenate(store.actions))}
     if store.env_state is not None:

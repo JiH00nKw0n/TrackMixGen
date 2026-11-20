@@ -345,7 +345,8 @@ def test_crop_shape_auto_follows_the_image_side():
 
 def test_policy_specs_keep_the_old_names_types_and_pipeline_rule():
     """Read from the source text (the module imports lerobot): the table's names in the order of the old ``POLICIES``
-    tuple, the ``config.json`` types the old ``build_config`` branches wrote, and the pipeline flag only on pi0."""
+    tuple (π0.5 appended), the ``config.json`` types the old ``build_config`` branches wrote, and the pipeline flag only on
+    π0 and π0.5."""
     import ast
     import importlib.util
     from pathlib import Path
@@ -357,7 +358,7 @@ def test_policy_specs_keep_the_old_names_types_and_pipeline_rule():
     table = next(node.value for node in tree.body if isinstance(node, (ast.Assign, ast.AnnAssign))
                  and getattr(target(node), "id", None) == "POLICY_SPECS")
     names = [k.value for k in table.keys]
-    assert names == ["bc_rnn", "diffusion_policy", "pi0"]
+    assert names == ["bc_rnn", "diffusion_policy", "pi0", "pi05"]
     specs = {}
     for key, call in zip(names, table.values):
         args = [a.value for a in call.args]
@@ -369,16 +370,85 @@ def test_policy_specs_keep_the_old_names_types_and_pipeline_rule():
                                          {"tuple_params": ("crop_shape", "down_dims"), "optimizer": "adamw", "per_sample_crop": True})
     assert specs["pi0"] == (["pi0", "pi0", "lerobot.policies.pi0.configuration_pi0:PI0Config", "lerobot.policies.pi0.modeling_pi0:PI0Policy"],
                             {"uses_pipeline": True})
+    assert specs["pi05"] == (["pi05", "pi05", "lerobot.policies.pi05.configuration_pi05:PI05Config",
+                              "lerobot.policies.pi05.modeling_pi05:PI05Policy"],
+                             {"tuple_params": ("optimizer_betas",), "uses_pipeline": True})
 
 
-def test_uses_pipeline_only_for_pi0():
+def test_uses_pipeline_only_for_pi0_and_pi05():
     pytest.importorskip("lerobot")
     from tmg.policy.io import NormalizerIO, PipelineIO, io_class, uses_pipeline
     from tmg.policy.lerobot_policies import POLICIES, POLICY_SPECS, policy_spec
 
-    assert POLICIES == ("bc_rnn", "diffusion_policy", "pi0") == tuple(POLICY_SPECS)
-    assert [uses_pipeline(n) for n in POLICIES] == [False, False, True] and uses_pipeline("unknown") is False
+    assert POLICIES == ("bc_rnn", "diffusion_policy", "pi0", "pi05") == tuple(POLICY_SPECS)
+    assert [uses_pipeline(n) for n in POLICIES] == [False, False, True, True] and uses_pipeline("unknown") is False
     assert io_class("pi0") is PipelineIO and io_class("bc_rnn") is NormalizerIO
-    assert [policy_spec(n).config_type for n in POLICIES] == ["tmg_bc_rnn", "diffusion", "pi0"]
+    assert [policy_spec(n).config_type for n in POLICIES] == ["tmg_bc_rnn", "diffusion", "pi0", "pi05"]
     with pytest.raises(ValueError):
         policy_spec("unknown")
+
+
+def test_policy_setting_prefers_the_policy_block():
+    """``training.by_policy.<policy>.<key>`` overrides ``training.<key>`` (π0.5: clip 1.0, final checkpoint, no
+    validation); other policies keep the shared values."""
+    pytest.importorskip("lerobot")
+    from tmg.policy.trainer import policy_setting
+
+    training = {"grad_clip_norm": 1000.0, "selection": "best_validation", "validation": {"command": "make validate"},
+                "by_policy": {"pi05": {"image": {"batch_size": 16, "updates": 20000}, "grad_clip_norm": 1.0,
+                                       "selection": "last", "validation": {"enabled": False, "command": None}},
+                              "bc_rnn": {"image": {"batch_size": 16, "updates": 100000}}}}
+    assert policy_setting(training, "pi05", "grad_clip_norm") == 1.0
+    assert policy_setting(training, "pi05", "selection") == "last"
+    assert policy_setting(training, "pi05", "validation")["command"] is None
+    assert policy_setting(training, "bc_rnn", "grad_clip_norm") == 1000.0
+    assert policy_setting(training, "bc_rnn", "selection") == "best_validation"
+    assert policy_setting(training, "unknown", "missing", "x") == "x"
+
+
+def test_freeze_parameters_freezes_by_prefix_and_rejects_unknown_prefixes():
+    torch = pytest.importorskip("torch")
+    pytest.importorskip("lerobot")
+    from tmg.policy.lerobot_policies import freeze_parameters
+
+    class Net(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.model = torch.nn.Module()
+            self.model.action_in_proj = torch.nn.Linear(4, 3)     # 15 parameters
+            self.model.expert = torch.nn.Linear(3, 3)             # 12 parameters
+
+    net = Net()
+    counts = freeze_parameters(net, ["model.action_in_proj."])
+    assert counts == {"frozen": 15, "trainable": 12}
+    assert not net.model.action_in_proj.weight.requires_grad and net.model.expert.weight.requires_grad
+    with pytest.raises(ValueError):
+        freeze_parameters(Net(), ["model.lm_head."])
+
+
+def test_widen_pi05_copies_the_pretrained_32_values_and_leaves_short_vectors_alone():
+    """DexMimicGen GR1 (state 36, action 36): the action projections grow to 36 with the pretrained 32 columns/rows
+    copied; MimicGen-sized vectors (9, 7) change nothing."""
+    torch = pytest.importorskip("torch")
+    pytest.importorskip("lerobot")
+    from types import SimpleNamespace
+
+    from tmg.policy.lerobot_policies import widen_pi05
+
+    def fake():
+        config = SimpleNamespace(max_state_dim=32, max_action_dim=32)
+        model = torch.nn.Module()
+        model.config = config
+        model.action_in_proj, model.action_out_proj = torch.nn.Linear(32, 8), torch.nn.Linear(8, 32)
+        return SimpleNamespace(config=config, model=model)
+
+    small = fake()
+    assert widen_pi05(small, 9, 7) is False and small.model.action_in_proj.in_features == 32
+    dex = fake()
+    w_in, w_out, b_out = (dex.model.action_in_proj.weight.clone(), dex.model.action_out_proj.weight.clone(),
+                          dex.model.action_out_proj.bias.clone())
+    assert widen_pi05(dex, 36, 36) is True
+    assert dex.config.max_action_dim == 36 and dex.config.max_state_dim == 36
+    assert dex.model.action_in_proj.in_features == 36 and dex.model.action_out_proj.out_features == 36
+    assert torch.equal(dex.model.action_in_proj.weight[:, :32], w_in)
+    assert torch.equal(dex.model.action_out_proj.weight[:32], w_out) and torch.equal(dex.model.action_out_proj.bias[:32], b_out)

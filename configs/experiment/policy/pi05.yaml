@@ -1,0 +1,56 @@
+# π0.5 (decision 2026-11-20, paper Method and Appendix): LeRobot 0.6.1 PI05Policy started from the DROID fine-tuned
+# hub weights lerobot/pi05_droid (openpi pi05_droid: Franka Panda + Robotiq gripper, exterior and wrist cameras,
+# 15-step action chunks). Settings:
+# - parameters: every parameter trains (decision 2026-11-20, openpi's fine-tuning default; DiscoDemo's freezing scheme
+#   was dropped). Our actions mean something else than DROID's joint velocities (MimicGen and SoftMimicGen end-effector
+#   deltas, CP-Gen absolute poses with a 6D rotation, DexMimicGen GR1 poses and hand joints), so the action projections
+#   must train, and with the vision encoder and the language model trained there is no reason to hold the projector
+#   between them fixed.
+# - optimizer: LeRobot's PI05 preset = openpi's: AdamW, lr 2.5e-5, betas (0.9, 0.95), eps 1e-8, weight decay 0.01;
+#   cosine schedule with 1,000 linear warmup updates to 2.5e-5, then cosine decay to 2.5e-6 at update 20,000.
+#   scheduler_decay_steps must equal the training budget: LeRobot shrinks warmup AND decay by updates/decay_steps when
+#   the budget is shorter (20,000 / 30,000 would turn the 1,000 warmup updates into 667).
+# - gradient-norm clip 1.0, batch 16, 20,000 updates, final checkpoint, 100 test scenes: configs/experiment/training/
+#   default.yaml (by_policy.pi05) and configs/experiment/evaluation/default.yaml (test_scenes_by_policy).
+# - bfloat16 weights and compute; images resized with padding to 224x224 inside the policy; no image augmentation
+#   (no crop: crop_shape is not a PI05 field); state and action normalized by their 1st and 99th percentiles
+#   (QUANTILES, q01/q99 from tmg.data.loader.compute_stats); the state is discretized into 256 bins and written into
+#   the prompt (PI05 has no state projection).
+# - 15 predicted actions per inference, all 15 executed before the next inference; 10 flow-matching integration steps.
+# - cameras: our front camera takes the place of DROID's exterior camera and our wrist camera that of the wrist
+#   camera (dataset camera order), and the third image slot is an empty (zero) image as in openpi's DroidInputs.
+# - state/action of at most 32 values (max_state_dim / max_action_dim of the hub weights): MimicGen, CP-Gen and
+#   SoftMimicGen give state 9 and action 7. DexMimicGen GR1 gives 36 and 36 (measured 2026-11-20): the builder
+#   (tmg.policy.lerobot_policies.widen_pi05, decision 2026-11-20) raises max_state_dim to 36 (the state is prompt
+#   text, no layer changes) and widens action_in_proj / action_out_proj to 36 with the pretrained 32 values copied
+#   and 4 newly initialized; the widened projections always train, even if `freeze` lists them.
+# The task instruction comes from the task config (`instruction`) and is tokenized by LeRobot's pipeline.
+name: pi05
+pretrained_path: lerobot/pi05_droid
+params:
+  chunk_size: 15                 # predicted action steps (openpi pi05_droid action_horizon)
+  n_action_steps: 15             # all executed before the next prediction
+  num_inference_steps: 10        # flow-matching integration steps per prediction
+  dtype: bfloat16
+  gradient_checkpointing: true   # memory only; the result is the same
+  empty_cameras: 1               # third image slot left empty, as openpi feeds DROID
+  freeze_vision_encoder: false
+  train_expert_only: false
+  scheduler_warmup_steps: 1000
+  scheduler_decay_steps: 20000   # = training.by_policy.pi05.image.updates
+  scheduler_decay_lr: 2.5e-6
+  optimizer_lr: 2.5e-5
+  optimizer_betas: [0.9, 0.95]
+  optimizer_eps: 1.0e-8
+  optimizer_weight_decay: 0.01
+  optimizer_grad_clip_norm: 1.0  # recorded in config.json; the loop clips with training.by_policy.pi05.grad_clip_norm
+  # normalization: PI05Config's default mapping is already VISUAL identity, STATE and ACTION QUANTILES (q01/q99)
+# parameter-name prefixes to freeze inside PI05Policy (tmg.policy.lerobot_policies.freeze_parameters); empty = full
+# fine-tuning. DiscoDemo's scheme, kept here for reference, would be: model.action_in_proj., model.action_out_proj.,
+# model.time_mlp_in., model.time_mlp_out., model.paligemma_with_expert.paligemma.model.multi_modal_projector.,
+# model.paligemma_with_expert.paligemma.lm_head.
+freeze: []
+by_observation:
+  image: {}
+  low_dim: null                  # π0.5 is a vision-language policy; observation=low_dim is an error
+ema: false

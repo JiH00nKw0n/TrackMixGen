@@ -13,6 +13,11 @@ by_policy:
     image:   {batch_size: 32, updates: 30000}   # π0 is not used yet. Its checkpoint is selected by validation like every
                                                 # other policy (`selection` below). The openpi rule (validation off, last
                                                 # checkpoint) is NOT implemented. π0 is aligned with openpi before it runs
+  pi05:                           # π0.5 from pi05_droid (decision 2026-11-20, paper Method and Appendix)
+    image:   {batch_size: 16, updates: 20000}   # 20,000 = configs/experiment/policy/pi05.yaml scheduler_decay_steps
+    grad_clip_norm: 1.0           # openpi's clip, instead of the shared 1000 below
+    selection: last               # the final checkpoint at 20,000 updates, no validation-based selection
+    validation: {enabled: false, scenes: 25, command: null}   # checkpoints are not validated
 updates_per_epoch: 500            # one logging epoch
 checkpoint_every_epochs: 20       # write a checkpoint (and request validation) every 10,000 updates
 keep_checkpoints: all             # all | last (the selection needs all of them)
