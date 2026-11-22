@@ -26,8 +26,8 @@ from tmg.config import resolved
 from tmg.core.features import ENV_STATE, STATE, TASK, camera_of, image_feature
 from tmg.core.layout import PRETRAINED_DIR
 from tmg.core.wire import MAX_MESSAGE, pack, unpack
-from tmg.policy import rotation
 from tmg.policy.io import load_io
+from tmg.policy import rotation
 from tmg.policy.lerobot_policies import load_policy, policy_name_of
 
 

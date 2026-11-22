@@ -39,7 +39,6 @@ import numpy as np
 import torch
 
 from tmg.config import dump_yaml, resolved
-from tmg.core.features import ACTION
 from tmg.core.io_json import append_jsonl, read_jsonl, write_json
 from tmg.core.layout import (  # noqa: F401  re-exported: server, tests and scripts import the names from here
     CHECKPOINT_JSON,
@@ -55,16 +54,12 @@ from tmg.core.layout import (  # noqa: F401  re-exported: server, tests and scri
 )
 from tmg.core.provenance import write_provenance
 from tmg.core.seeding import seed_all
+from tmg.core.features import ACTION
 from tmg.data.loader import FrameDataset, TrajectoryStore, collate, compute_stats
 from tmg.policy import rotation
 from tmg.policy.ema import EMA
 from tmg.policy.io import PolicyIO, make_io, uses_pipeline
-from tmg.policy.lerobot_policies import (
-    build_optimizer,
-    build_policy,
-    normalization_modes,
-    task_policy_overrides,
-)
+from tmg.policy.lerobot_policies import build_optimizer, build_policy, normalization_modes, task_policy_overrides
 from tmg.policy.normalize import exceeds_unit_range, global_min_max
 
 

@@ -54,10 +54,7 @@ def register() -> str:
     from isaaclab.sensors import CameraCfg
     from isaaclab.utils import configclass
     from isaaclab_mimic.envs.pickplace_gr1t2_mimic_env_cfg import PickPlaceGR1T2MimicEnvCfg
-    from isaaclab_tasks.contrib.pick_place.pickplace_gr1t2_env_cfg import (
-        ObservationsCfg,
-        PickPlaceGR1T2SceneCfg,
-    )
+    from isaaclab_tasks.contrib.pick_place.pickplace_gr1t2_env_cfg import ObservationsCfg, PickPlaceGR1T2SceneCfg
 
     def camera(name: str, eye, target) -> CameraCfg:
         return CameraCfg(prim_path="{ENV_REGEX_NS}/" + name, update_period=0.0, height=IMAGE_SIZE[0], width=IMAGE_SIZE[1],
