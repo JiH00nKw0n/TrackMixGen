@@ -12,7 +12,8 @@
 SHELL := /bin/bash
 .DEFAULT_GOAL := help
 REPO       := $(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
-IMAGE      ?= robosuite
+# CP-Gen runs (and renders) in its own image, so GENERATOR=cpgen picks it unless IMAGE is given
+IMAGE      ?= $(if $(filter cpgen,$(GENERATOR)),cpgen,robosuite)
 GENERATOR  ?= mimicgen
 TAG        ?= latest
 CLUSTER    ?= local
@@ -77,7 +78,8 @@ endif
 PREP_EXTRA = $(foreach p,$(CPGEN_WRITABLE),&& { test -n "$$(ls -A $(call host_dir,$(p)) 2>/dev/null)" || { mkdir -p $(call host_dir,$(p)) && $(call writable_fill,$(p)); }; })
 endif
 # Offscreen rendering of the robosuite images (robosuite: MimicGen, cpgen: CP-Gen) in every stage that runs them
-# (sources, generate, dataset, resets, eval, check-scene). RENDER (cluster `render`, default egl):
+# (sources, generate, dataset, resets, eval, check-scene; for CP-Gen also the noisy-state replay and re-rendering of
+# `make dataset`, which runs in the same container and inherits these variables). RENDER (cluster `render`, default egl):
 #   egl   renders on the GPU through NVIDIA EGL (about 4x faster per MimicGen image attempt on the A100, 2026-11-21);
 #   mesa  the rendering of every pool, dataset and evaluation made before 2026-11-22: the robosuite image (and the CP-Gen
 #         image under Singularity) on the CPU with Mesa's software EGL device (RENDER=mesa or cluster `render: mesa`).
