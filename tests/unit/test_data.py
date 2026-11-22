@@ -257,3 +257,35 @@ def test_write_dataset_reads_images_and_labels_from_the_records(tmp_path):
         d = f["data"]["demo_0"]
         assert np.array_equal(d["actions"][()], np.asarray(src["data"][chosen[0]["demo_key"]]["actions"], np.float32))
         assert np.all(d["actions_executed"][()] == 0.0) and np.all(d["actions_pre_noise"][()] == 1.0)
+
+
+def test_hub_generation_downloads_the_published_dataset_instead_of_reading_a_pool(tmp_path, monkeypatch):
+    from tmg.config import compose, resolved
+    from tmg.data import dataset as ds
+
+    monkeypatch.setenv("TMG_DATA_ROOT", str(tmp_path))
+    plain = resolved(compose("dataset", ["task=square", "scene=ours", "selection=ours", "method=skillmix", "generation=hub",
+                                         "size=2"]))
+    assert plain["generation"]["hub"] == {"repo_id": "Mayfull/Mimicgen-skillmix", "repo_type": "dataset",
+                                          "filename": "square.hdf5", "revision": None}
+    assert plain["output"].endswith("/datasets/mimicgen/square/ours/ours/skillmix/hub/image/n2_seed0.hdf5")
+    published = tmp_path / "hub" / "square.hdf5"
+    published.parent.mkdir()
+    with h5py.File(published, "w") as f:
+        for j in range(2):
+            f.create_group(f"data/demo_{j}")
+    calls = []
+
+    def download(**kw):
+        calls.append(kw)
+        return str(published)
+
+    from pathlib import Path
+
+    out = Path(plain["output"])
+    summary = ds.fetch_hub_dataset(plain, out, download=download)
+    assert calls == [{"repo_id": "Mayfull/Mimicgen-skillmix", "filename": "square.hdf5", "repo_type": "dataset", "revision": None}]
+    assert out.exists() and summary["demos"] == 2 and summary["hub"]["repo_id"] == "Mayfull/Mimicgen-skillmix"
+    assert any(p.name.endswith("DATASET.json") for p in out.parent.iterdir())
+    with pytest.raises(ds.DatasetError, match="size=2"):
+        ds.fetch_hub_dataset({**plain, "size": 1000}, out, download=download)

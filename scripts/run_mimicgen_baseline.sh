@@ -18,6 +18,7 @@
 #   chosen at random for every subtask), METHOD (none: the baseline; a method config such as skillmix runs the same pipeline
 #   with that method, writes under <...>/<selection>/<method>/ and logs to logs/<generator>_<method>; the evaluation scenes are
 #   shared with the baseline; `make generate` first builds the task's SkillMix rule file if it is missing),
+#   GENERATION (pool_robosuite_image; hub: download the published SkillMix datasets instead of generating, see README 3.10),
 #   ONLY_GENERATION (1: stop after the datasets), BUNDLE_NAME, PORT_BASE (8800: first policy-server port; run k uses
 #   PORT_BASE + 40 k ... + 40 k + 39, so two drivers on one machine need bases at least 40 x their runs apart),
 #   MINI (1: an end-to-end check at toy scale: a 200-attempt pool in the folder pilot50, 10-demonstration datasets, 200 training
@@ -52,6 +53,8 @@ if [ "${MINI:-0}" = 1 ]; then
   BUNDLE_NAME=${BUNDLE_NAME:-${GENERATOR}_mini_$(date +%Y%m%d)}
 fi
 GEN_NAME=${GENERATION##*/}
+# a generation config with a `hub:` block (generation=hub) names a published dataset: `make dataset` downloads it, no pool
+FROM_HUB=0; grep -q '^hub:' "$REPO/configs/experiment/generation/$GENERATION.yaml" 2>/dev/null && FROM_HUB=1
 export SINGULARITYENV_CUDA_VISIBLE_DEVICES=$GPU CUDA_VISIBLE_DEVICES=$GPU
 DATA_ROOT=$(make -s -C "$REPO" print-data-root CLUSTER="$CLUSTER")
 if [ "$METHOD" = none ]; then RUN_NAME=${GENERATOR}_baseline; else RUN_NAME=${GENERATOR}_${METHOD}; fi
@@ -68,6 +71,7 @@ pool_successes() { python3 -c "import json,sys; d=json.load(open(sys.argv[1])); 
 pool_task() {   # one task's sources and pool (extended until SIZE successes); returns 2 when its dataset and scenes exist
   local t=$1 attempts=${ATTEMPTS[$t]} common="GENERATOR=$GENERATOR IMAGE=$IMAGE TASK=$t CLUSTER=$CLUSTER SELECTION=$SELECTION"
   if [ -f "$(dataset_of $t)" ] && [ -f "$(resets_of $t)" ]; then log "[$t] dataset and resets exist, generation skipped"; return 2; fi
+  if [ "$FROM_HUB" = 1 ]; then log "[$t] GENERATION=$GENERATION: the dataset comes from the Hugging Face Hub, no pool"; return 0; fi
   log "[$t] sources"
   M sources $common > "$LOG/sources_$t.log" 2>&1 || { fail "sources $t" "$LOG/sources_$t.log"; return 1; }
   while :; do

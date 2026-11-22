@@ -259,6 +259,24 @@ make test-local
 
 This runs the unit tests without a simulator. `make test` runs them inside the image.
 
+### 3.10 Train and evaluate on the published SkillMix datasets
+
+The SkillMix training datasets of the MimicGen tasks (1,000 demonstrations per task) are published on the Hugging Face
+Hub (`Mayfull/Mimicgen-skillmix`, dataset repository, one `<task>.hdf5` per task). `GENERATION=hub`
+(`configs/experiment/generation/hub.yaml`) uses them: no sources and no pool are needed. `make dataset` downloads the file
+into the usual dataset path when it is missing; train, validate and evaluate with the same values:
+
+```bash
+C="TASK=square SCENE=ours SELECTION=ours METHOD=skillmix GENERATION=hub OBSERVATION=image"
+make dataset $C
+make resets  TASK=square SCENE=ours                  # the fixed evaluation scenes are drawn here, as for every dataset
+make train   $C POLICY=bc_rnn SEED=202601
+```
+
+The driver does the same for every task without generating: `GENERATION=hub SELECTION=ours METHOD=skillmix
+scripts/run_mimicgen_baseline.sh`. Evaluate with the renderer the published images were made with (`RENDER`; see the rendering note in
+`docs/MIMICGEN_BASELINE_RUNBOOK.md`): a policy trained on EGL images is evaluated with EGL.
+
 ## 4. Rules for changes
 
 - Do not copy or modify the official generator code. Add a graft anchor in `runtime.py` and record it in
