@@ -31,7 +31,7 @@ def load_fixture():
 
 def test_cpgen_chunk_spec_and_method_overrides(tmp_path, monkeypatch):
     monkeypatch.setenv("TMG_DATA_ROOT", str(tmp_path))
-    cfg = resolved(compose("generate", ["generator=cpgen", "task=coffee", "scene=ours", "method=mixup_only", "generation=test/pilot20"]))
+    cfg = resolved(compose("generate", ["generator=cpgen", "task=coffee", "scene=ours", "method=skillmix", "generation=test/pilot20"]))
     gen = make_generator(cfg)
     spec = gen.prepare_chunk(plan_chunks(20, 20, 9000)[0], tmp_path / "chunk")
     c = spec.extra["cpgen_config"]

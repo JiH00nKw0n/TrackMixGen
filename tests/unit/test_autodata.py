@@ -192,7 +192,7 @@ def test_pick_place_runs_on_the_autodata_stack(tmp_path, monkeypatch):
     (src / "autodata_examples" / "tasks" / "gr1_pick_place.yaml").write_text(yaml.safe_dump(official))
     monkeypatch.setenv("TMG_DATA_ROOT", str(tmp_path))
     monkeypatch.setenv("TMG_AUTODATA_SRC", str(src))
-    cfg = resolved(compose("generate", ["generator=dexmimicgen", "task=pick_place", "scene=ours", "method=mixup_only", "generation=test/pilot20_images"]))
+    cfg = resolved(compose("generate", ["generator=dexmimicgen", "task=pick_place", "scene=ours", "method=skillmix", "generation=test/pilot20_images"]))
     assert cfg["generator"]["image"] == "tmg/isaaclab-dex" and cfg["generator"]["package"] == "autodata_core"
     assert cfg["generation"]["protocol"]["camera_names"] == ["front_image", "side_image"]
     gen = make_generator(cfg)

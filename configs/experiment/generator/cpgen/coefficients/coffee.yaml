@@ -1,189 +1,108 @@
-# Success-model coefficients of cpgen coffee (tmg fit_coefficients). Per subtask k:
-#   P(subtask k succeeds | reached, source j) = sigmoid(alpha[j] + dx*|dx| + dy*|dy| + rotation*rot
-#                                            + inhand_position*dpos + inhand_rotation*drot)  (in-hand terms k >= 1)
-# Units: {'dx': 'm', 'dy': 'm', 'rotation': 'rad', 'inhand_position': 'm', 'inhand_rotation': 'rad'}. The source ranking is a separate file (../ranking/coffee.yaml).
+# SkillMix rule of cpgen coffee (tmg fit_coefficients). Per subtask k, with phi_j = (|dx|, |dy|, rotation,
+# inhand_position, inhand_rotation) of source j against the current scene (in-hand terms 0 for k = 0):
+#   P(task succeeds | reached k, weights w) = sigmoid(c0 + sum_j w_j s_j + d H(w)),  s_j = a[j] + g . phi_j
+#   weights: softmax(s / d) over the sources compatible with the selected one when d > 0, the best one when d <= 0
+# Units: {'dx': 'm', 'dy': 'm', 'rotation': 'rad', 'inhand_position': 'm', 'inhand_rotation': 'rad'}.
 generator: cpgen
 task: coffee
-basis: Maximum-likelihood fit (Newton, stabilizer 0.001) on the uniform-source baseline pool /data/pools/cpgen/coffee/ours/ours/none/rank_human_demos
-  (3000 attempts, 60 chunks, scene ours, selection ours, generation rank_human_demos); one fit per subtask on the attempts
-  that reached it, label = that subtask's success.
+rule: softmax
+basis: 'Fitted on 2026-11-20 on the A100 (scratch_calib/ana/fit_all.py, softmax form, without the older rank_human_demos pool;
+  the model and fit of tmg fit_coefficients, which reproduced the CP-Gen Threading rule to 1e-13 from the same records) from
+  /data/pools/cpgen/coffee/ours/ours/mixup_only/pool_calib (method mixup_only with TMG_MIX_BETA_RANDOM=1 TMG_MIX_DIRICHLET=1:
+  Dirichlet(c) weights, c ~ LogUniform(0.05, 20); selection ours, chunks of 25; for coffee, hammer_cleanup, mug_cleanup and
+  three_piece_assembly also the chunks of the same pool made on the Isaac server, scratch_calib/ana/cp_isaac; the A100 runs
+  also set TMG_CPGEN_RESOLVE_AFTER_BRIDGE=1, the re-solve after the bridge that main does not have) and /data/pools/cpgen/coffee/ours/ours/none/pool_ctrl
+  (method none, the same code and settings); rows of subtask k: the attempts that reached it, label = the attempt''s task
+  success.'
 num_sources: 10
 features:
-  scene:
-  - dx
-  - dy
-  - rotation
-  inhand:
-  - inhand_position
-  - inhand_rotation
+- dx
+- dy
+- rotation
+- inhand_position
+- inhand_rotation
 units:
   dx: m
   dy: m
   rotation: rad
   inhand_position: m
   inhand_rotation: rad
-stabilizer: 0.001
-subtask_term_signals:
-- null
-- null
-- null
 subtasks:
   0:
-    term_signal: went on to the next subtask
-    reached: 2960
-    successes: 1724
-    log_loss: 0.6721
-    alpha:
-      0: 0.44876
-      1: 0.584176
-      2: 0.479506
-      3: 0.506142
-      4: 0.396966
-      5: 0.461975
-      6: 0.391299
-      7: 0.52891
-      8: 0.647214
-      9: 0.37331
-    slopes:
-      dx: -0.696127
-      dy: 0.979563
-      rotation: -58.206615
-    source_counts:
-      0:
-        reached: 312
-        successes: 181
-      1:
-        reached: 296
-        successes: 175
-      2:
-        reached: 275
-        successes: 158
-      3:
-        reached: 301
-        successes: 176
-      4:
-        reached: 313
-        successes: 179
-      5:
-        reached: 315
-        successes: 181
-      6:
-        reached: 302
-        successes: 170
-      7:
-        reached: 258
-        successes: 154
-      8:
-        reached: 311
-        successes: 194
-      9:
-        reached: 277
-        successes: 156
-  1:
-    term_signal: went on to the next subtask
-    reached: 1724
-    successes: 1307
-    log_loss: 0.5421
-    alpha:
-      0: 0.845543
-      1: 1.436575
-      2: 1.061353
-      3: 1.551826
-      4: 1.364915
-      5: 2.056143
-      6: 0.735633
-      7: 1.233433
-      8: 1.300663
-      9: 1.034342
-    slopes:
-      dx: -0.385505
-      dy: -1.494611
-      rotation: 0.042039
-      inhand_position: 0.722356
-      inhand_rotation: 0.851598
-    source_counts:
-      0:
-        reached: 221
-        successes: 153
-      1:
-        reached: 150
-        successes: 120
-      2:
-        reached: 163
-        successes: 120
-      3:
-        reached: 137
-        successes: 112
-      4:
-        reached: 182
-        successes: 143
-      5:
-        reached: 137
-        successes: 121
-      6:
-        reached: 213
-        successes: 142
-      7:
-        reached: 157
-        successes: 121
-      8:
-        reached: 186
-        successes: 145
-      9:
-        reached: 178
-        successes: 130
-    carried_object: coffee_pod_main
-  2:
-    term_signal: task success
-    reached: 1307
-    successes: 467
-    log_loss: 0.6371
-    alpha:
-      0: -0.756935
-      1: -0.18955
-      2: -1.310083
-      3: -0.546416
-      4: -1.648915
-      5: -0.545924
-      6: -1.005451
-      7: -0.883866
-      8: -0.695734
-      9: -0.591674
-    slopes:
-      dx: -0.61056
-      dy: 0.232306
-      rotation: 0.266329
+    a:
+    - -0.23344462212036493
+    - 0.6733570864459825
+    - -0.10688399331395325
+    - -0.18265977149807805
+    - 0.0988923067256149
+    - 0.24150081689383796
+    - -0.32877536514560884
+    - -0.5017584986854254
+    - 0.10351066229010347
+    - 0.10145246394662844
+    g:
+      dx: -1.371708808012555
+      dy: 1.0451239130248342
+      rotation: -507.6058649362528
       inhand_position: 0.0
       inhand_rotation: 0.0
-    source_counts:
-      0:
-        reached: 171
-        successes: 61
-      1:
-        reached: 129
-        successes: 64
-      2:
-        reached: 158
-        successes: 38
-      3:
-        reached: 150
-        successes: 61
-      4:
-        reached: 54
-        successes: 10
-      5:
-        reached: 108
-        successes: 44
-      6:
-        reached: 115
-        successes: 35
-      7:
-        reached: 129
-        successes: 42
-      8:
-        reached: 154
-        successes: 57
-      9:
-        reached: 139
-        successes: 55
-    carried_object: coffee_machine_pod_holder_cup_body_root
+    d: 0.23682779138766952
+    c0: -0.8919939697412407
+    rows:
+      calibration: 2000
+      baseline: 990
+    cv_log_loss_gain_percent:
+      all_rows: 4.3
+      calibration_rows: 5.0
+  1:
+    a:
+    - -0.8337949447515659
+    - 0.2941154885017653
+    - 0.1806954480396097
+    - -0.4654558957827718
+    - -0.32044641635847754
+    - 0.8626589707389898
+    - -0.03705946861984526
+    - 0.08252627952411165
+    - -0.13511420657308917
+    - 0.6722147551955338
+    g:
+      dx: -1.8084700507102995
+      dy: -1.3725237323193822
+      rotation: -0.11796788403298565
+      inhand_position: -375.93966655811784
+      inhand_rotation: -3.0509404929464665
+    d: -0.0757410574574334
+    c0: 0.9643125989598191
+    rows:
+      calibration: 1976
+      baseline: 617
+    cv_log_loss_gain_percent:
+      all_rows: 14.6
+      calibration_rows: 18.3
+  2:
+    a:
+    - -0.31578335776985983
+    - 0.16449867740110044
+    - -0.008825109045904904
+    - 0.057406732860103137
+    - -0.8651295127864116
+    - 0.21306376077218706
+    - 0.12988816622617078
+    - -0.13180862304602006
+    - 0.15301130018088305
+    - 0.5412582600366749
+    g:
+      dx: -1.4786800318131492
+      dy: -0.9505516093033196
+      rotation: -0.012943811639841225
+      inhand_position: 0.0
+      inhand_rotation: 0.0
+    d: 0.02206606207380522
+    c0: -0.6380991235841328
+    rows:
+      calibration: 1227
+      baseline: 489
+    cv_log_loss_gain_percent:
+      all_rows: 0.4
+      calibration_rows: 0.6

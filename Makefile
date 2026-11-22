@@ -173,17 +173,17 @@ sif:  ## build the singularity image SIF from a docker archive ARCHIVE (made wit
 sources:  ## download and prepare the source demonstrations of TASK
 	$(PREP) && $(CONTAINER_RUN) sources generator=$(GENERATOR) task=$(TASK)
 
-generate:  ## generate one pool (TASK, SCENE, SELECTION=official|ours, METHOD, GENERATION, OVERRIDES); builds the coefficient file first when METHOD needs a missing one
-	@METHOD=$(strip $(METHOD)) GENERATOR=$(GENERATOR) IMAGE=$(IMAGE) TASK=$(TASK) SCENE=$(strip $(SCENE)) CLUSTER=$(CLUSTER) scripts/ensure_coefficients.sh
+generate:  ## generate one pool (TASK, SCENE, SELECTION=official|ours, METHOD, GENERATION, OVERRIDES); builds the SkillMix rule file first when METHOD needs a missing one
+	@METHOD=$(strip $(METHOD)) OVERRIDES="$(OVERRIDES)" GENERATOR=$(GENERATOR) IMAGE=$(IMAGE) TASK=$(TASK) SCENE=$(strip $(SCENE)) CLUSTER=$(CLUSTER) scripts/ensure_coefficients.sh
 	$(PREP) && $(CONTAINER_RUN) generate $(GEN_ARGS)
 
 verify-baseline:  ## official generator vs adapter with method=none on one chunk; must be identical
 	$(PREP) && $(CONTAINER_RUN) verify_baseline generator=$(GENERATOR) task=$(TASK) scene=$(SCENE) selection=$(SELECTION) generation=$(GENERATION) cluster=$(CLUSTER) $(OVERRIDES)
 
-fit-coefficients:  ## fit the logistic mixer's per-subtask success model on TASK's uniform-source baseline pool (SELECTION=ours, GENERATION=rank_human_demos) and write coefficients/<task>.yaml
+fit-coefficients:  ## fit TASK's SkillMix rule on its calibration pool (method skillmix_calibration) and baseline pool (method none), SELECTION=ours, GENERATION=rank_human_demos; writes coefficients/<task>.yaml
 	$(PREP) && $(CONTAINER_RUN) fit_coefficients generator=$(GENERATOR) task=$(TASK) scene=$(SCENE) selection=$(SELECTION) generation=$(GENERATION) cluster=$(CLUSTER) $(OVERRIDES)
 
-coefficients:  ## build TASK's coefficient file from scratch when missing (3,000-attempt uniform-source pool, fit-coefficients)
+coefficients:  ## build TASK's SkillMix rule file from scratch when missing (baseline and calibration pools of 3,000 attempts, fit-coefficients)
 	GENERATOR=$(GENERATOR) IMAGE=$(IMAGE) TASK=$(TASK) SCENE=$(strip $(SCENE)) CLUSTER=$(CLUSTER) scripts/ensure_coefficients.sh
 
 dataset:  ## write a training dataset from the finished pool (TASK, SCENE, METHOD, GENERATION, OBSERVATION=image|low_dim; OVERRIDES: size=... seed=...)

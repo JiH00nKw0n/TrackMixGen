@@ -75,9 +75,9 @@ def _mixer_types() -> dict[str, MixerType]:
     """Mixer implementations by ``method.mixing.type``."""
     if not _MIXERS:
         # imported here, not at the top: the mixer module imports MixContext and MixedSegment from this module
-        from tmg.generation.method.logistic_mix import LogisticMixer
+        from tmg.generation.method.skillmix import SkillMixer
 
-        _MIXERS.update(logistic=LogisticMixer)
+        _MIXERS.update(skillmix=SkillMixer)
     return _MIXERS
 
 
@@ -100,9 +100,12 @@ def build_method(cfg: Mapping, *, chunk_seed: int) -> Method:
         raise ValueError(f"method.labels must be executed or pre_noise, got {labels!r}")
     mixer = None
     if mixing.get("enabled", False):
-        kind = str(mixing.get("type", "logistic"))
+        kind = str(mixing.get("type", "skillmix"))
         types = _mixer_types()
         if kind not in types:
             raise ValueError(f"method.mixing.type {kind!r} unknown; known: {sorted(types)}")
+        if mixing.get("rule", "softmax") == "calibration" and name == "skillmix":
+            # random weights are calibration data, not SkillMix: keep them out of the SkillMix pool, dataset and run folders
+            raise ValueError("method.mixing.rule=calibration needs its own method name: add method.name=skillmix_calibration")
         mixer = types[kind].from_config(mixing, chunk_seed=chunk_seed)
     return Method(name=name, mixer=mixer, labels=labels)

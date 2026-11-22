@@ -34,7 +34,7 @@ DISPATCH = {
 HELP_LINES = {
     "generate": "one pool of generation attempts (generator, task, scene, method, generation)",
     "verify_baseline": "run one chunk officially and through the adapter (method=none) and compare the demos",
-    "fit_coefficients": "fit the per-subtask success model of the logistic mixer on a uniform-source baseline pool",
+    "fit_coefficients": "fit the SkillMix rule of a task on its calibration and baseline pools",
     "train": "train one policy on one dataset (train image)",
     "select_checkpoint": "choose a run's checkpoint from validation.jsonl (or the last one)",
     "serve": "policy server for one checkpoint (train image)",

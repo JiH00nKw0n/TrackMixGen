@@ -25,7 +25,7 @@ Anchors in ``generate_demo`` (by the name the official statement assigns):
 index. ``method.labels`` is fixed to ``pre_noise`` because the official output already is; the executed (noisy) actions
 are kept in our records.
 
-Source mixing (the logistic mixer, ``mixing.type: logistic``, selection ours): CP-Gen re-solves constraints instead of
+Source mixing (SkillMix, ``mixing.type: skillmix``, selection ours): CP-Gen re-solves constraints instead of
 replaying segments, so the blended quantity is the desired end-effector pose of every solved step, after every retained
 source is solved for the current scene (``tmg.generation.generators.cpgen.mixing``). It needs a second graft, of
 ``CPPolicy.solve_constraint``, installed only for a method with a mixer:
@@ -41,7 +41,7 @@ every source in use :class:`SourcePicker` draws one per attempt from the chunk's
 With ``selection.select_src_per_subtask`` too (selection=ours, ``extra["per_subtask_sources"]``) it draws again every time
 the policy advances to the next constraint (subtask), so constraint k of the attempt is solved from a source drawn for k,
 as MimicGen's selection=ours does. Without it every subtask of an attempt came from the same source, and the coefficient
-pools never showed an in-hand pose that differs from the source's, so the in-hand terms of the success model could not
+pools never showed an in-hand pose that differs from the source's, so the in-hand terms of the mixing model could not
 be fitted (CP-Gen Threading, 2026-11-14). The record keeps the source of every subtask (``subtasks[k].src_demo_ind`` and
 ``src_demo_inds``).
 """
@@ -145,8 +145,8 @@ class CPGenRuntime:
                  per_subtask: bool = False):
         if method.mixer is not None and not all_sources:
             raise ValueError(f"method {method.name!r}: source mixing needs every source loaded: use selection=ours")
-        if method.mixer is not None and not hasattr(method.mixer, "model"):
-            raise ValueError(f"method {method.name!r}: CP-Gen mixing supports only the logistic mixer (mixing.type: logistic)")
+        if method.mixer is not None and not hasattr(method.mixer, "weights"):
+            raise ValueError(f"method {method.name!r}: CP-Gen mixing supports only SkillMix (mixing.type: skillmix)")
         self.method = method
         self._mix_plan = None                              # MultiMixPlan of the constraint being solved (mixing only)
         self._last_mix: dict | None = None                 # mix record of that constraint, written with its subtask
@@ -185,6 +185,8 @@ class CPGenRuntime:
         self._reset_attempt_state()
         self.rec.begin_attempt()
         self.picker.pick(generator.policy)
+        if self.method.mixer is not None:
+            self.method.mixer.begin_attempt()                 # a new attempt draws new calibration weights
         robosuite_env = getattr(getattr(generator.env, "env", None), "env", None)
         self.rec.set_scene_meta(getattr(robosuite_env, SCENE_META_ATTR, None))
 
@@ -269,8 +271,8 @@ class CPGenRuntime:
 
     # source mixing (grafted into CPPolicy.solve_constraint) ----------------------------------------------------------
     def prepare_mix(self, policy, constraint, obs: dict, X_obj0_transf, X_obj1_transf, X_eef_transf) -> None:
-        """Grafted after CP-Gen chose the primary's symmetry transforms: predict every source, keep those at or above the
-        mean, solve them for the current scene and prepare the blend (``mixing`` module docstring)."""
+        """Grafted after CP-Gen chose the primary's symmetry transforms: weigh every source, solve the retained ones for the
+        current scene and prepare the blend (``mixing`` module docstring)."""
         if self._last_mix is not None:                        # an earlier solve of this attempt never reached a segment
             self._unplanned_mixes.append(self._last_mix)
         self._mix_plan, self._last_mix = None, None
@@ -288,7 +290,7 @@ class CPGenRuntime:
             self.official = demo_aug.generate
         carried = self._prev_ref if idx > 0 else None
         try:
-            record, w = mixing.decide(self.method.mixer.model, sequences, idx, primary, obs, carried)
+            record, w = mixing.decide(self.method.mixer, sequences, idx, primary, obs, carried)
         except KeyError as err:                              # a pose the model needs is missing from the observation
             self._last_mix = {"subtask": idx, "source_a": primary, "mixed": False, "identity_reason": f"missing {err}"}
             return

@@ -52,7 +52,7 @@ COMMANDS: dict[str, CommandSpec] = {
                                "reset a (task, scene) environment many times and report edge overhang, contacts, falls, reach",
                                exit_code="ok"),
     "fit_coefficients": CommandSpec("tmg.generation.fit_coefficients:fit_coefficients",
-                                    "fit the per-subtask success model of the logistic mixer on a uniform-source baseline pool"),
+                                    "fit the SkillMix rule of a task on its calibration and baseline pools"),
     "dataset": CommandSpec("tmg.data.dataset:build_dataset",
                            "select successful attempts of a finished pool and write one training hdf5"),
     "train": CommandSpec("tmg.policy.trainer:train", "train one policy on one dataset (train image)"),

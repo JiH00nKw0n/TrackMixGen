@@ -59,12 +59,14 @@ class MimicGenRuntime:
         self.rec.begin_attempt()
         self.rec.set_scene_meta(getattr(getattr(env, "env", None), SCENE_META_ATTR, None))
         self.exec.begin_attempt()
+        if self.method.mixer is not None and hasattr(self.method.mixer, "begin_attempt"):
+            self.method.mixer.begin_attempt()              # a new attempt draws new calibration weights
         self._last_mix = None
         self._traj = None
         self._carried = None
 
     def scene_extra(self, local_vars: dict, infos, all_inds, subtask_ind: int, object_name) -> dict:
-        """What the logistic mixer needs of the current scene: the reference object's pose the segment is moved to and,
+        """What SkillMix needs of the current scene: the reference object's pose the segment is moved to and,
         from the second subtask on, the in-hand pose (the previous subtask's reference object in the end-effector frame)
         now and in every source at the start of its segment. The same quantities as the attempt record's ``cur_obj_pose``,
         ``eef_pose`` and ``objects`` (``tmg fit_coefficients`` reads those)."""

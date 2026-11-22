@@ -28,7 +28,7 @@ def square_generator(tmp_path, monkeypatch, *overrides):
 
 
 def test_prepare_chunk_spec(tmp_path, monkeypatch):
-    gen = square_generator(tmp_path, monkeypatch, "scene=ours", "method=mixup_only")
+    gen = square_generator(tmp_path, monkeypatch, "scene=ours", "method=skillmix")
     folder = tmp_path / "chunk"
     spec = gen.prepare_chunk(plan_chunks(20, 20, 9000)[0], folder)
     assert isinstance(spec, ChunkSpec)

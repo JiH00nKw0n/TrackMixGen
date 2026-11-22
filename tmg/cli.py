@@ -16,7 +16,7 @@ from tmg.core import egl
 
 EXAMPLES = """examples:
   tmg generate task=square generation=test/pilot20
-  tmg generate task=square scene=ours method=mixup_only generation=pool_robosuite_image generation.attempts=5000
+  tmg generate task=square scene=ours method=skillmix generation=pool_robosuite_image generation.attempts=5000
   tmg show generate task=square
 """
 

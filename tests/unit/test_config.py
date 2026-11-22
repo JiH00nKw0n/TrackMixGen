@@ -29,9 +29,10 @@ def test_plus_override_is_refused():
 
 def test_method_variants_compose(monkeypatch, tmp_path):
     monkeypatch.setenv("TMG_DATA_ROOT", str(tmp_path))
-    plain = resolved(compose("generate", ["task=square", "method=mixup_only"]))
-    assert plain["method"]["name"] == "mixup_only" and plain["method"]["mixing"]["enabled"] is True
-    assert plain["method"]["mixing"]["type"] == "logistic" and plain["method"]["mixing"]["coefficients"] == "mimicgen/square"
+    plain = resolved(compose("generate", ["task=square", "method=skillmix"]))
+    assert plain["method"]["name"] == "skillmix" and plain["method"]["mixing"]["enabled"] is True
+    assert plain["method"]["mixing"]["type"] == "skillmix" and plain["method"]["mixing"]["rule"] == "softmax"
+    assert plain["method"]["mixing"]["coefficients"] == "mimicgen/square"
     assert "tracking" not in plain["method"] and "sources" not in plain["method"]
     plain = resolved(compose("generate", ["task=square", "method=none"]))
     assert plain["method"] == {"name": "none", "mixing": {"enabled": False}, "tracking": {"enabled": False}}   # identity kept
@@ -96,4 +97,5 @@ def test_selection_rule_is_independent_of_the_pool_config(monkeypatch, tmp_path)
     ds = resolved(compose("dataset", ["generator=mimicgen", "task=square", "scene=ours", "selection=ours", "generation=pool_robosuite_lowdim", "observation=low_dim"]))
     assert "/square/ours/ours/none/pool_robosuite_lowdim" in ds["pool"] and "/square/ours/ours/none/pool_robosuite_lowdim/low_dim/" in ds["output"]
     fit = resolved(compose("fit_coefficients", ["generator=mimicgen", "task=square", "scene=ours", "selection=ours"]))
-    assert fit["pool"].endswith("/square/ours/ours/none/rank_human_demos")
+    assert [p.split("/pools/")[1] for p in fit["calibration_pools"]] == ["mimicgen/square/ours/ours/skillmix_calibration/rank_human_demos"]
+    assert [p.split("/pools/")[1] for p in fit["baseline_pools"]] == ["mimicgen/square/ours/ours/none/rank_human_demos"]

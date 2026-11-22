@@ -33,4 +33,5 @@ noisy_state_replay: {enabled: true, num_retries: 6, action_noise_std: 0.03, num_
 # Its saved actions are already noise-free, so labels are pre_noise for every method.
 method_overrides:
   none: {labels: pre_noise}
-  mixup_only: {labels: pre_noise}
+  skillmix: {labels: pre_noise}
+  skillmix_calibration: {labels: pre_noise}   # the calibration pools of the SkillMix fit (method skillmix, rule calibration)

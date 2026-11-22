@@ -1,17 +1,16 @@
 defaults:
   - pool_robosuite_image
   - _self_
-# Pool for ranking a task's human (source) demonstrations: 3,000 attempts (300 per source for a task with 10 sources,
-# roughly 30 to 100 successes per source at 10 to 30 % generation success) in chunks of 250, chunk seeds from 20001.
-# `tmg rank_sources` counts each source's successes in this pool and writes the ranking next to the generator config.
+# The pools the SkillMix fit reads (tmg fit_coefficients, `make coefficients`): 3,000 attempts in chunks of 250, chunk
+# seeds from 20001, no images. With selection=ours a source is drawn for every subtask, so every source is seen in every
+# subtask about equally: the baseline pool (method none) and the calibration pool (method skillmix with
+# mixing.rule=calibration, folder skillmix_calibration) of a task share these settings and chunk seeds (the same scenes).
+# The name is historical: the 2026-10 pools of this config ranked the source demonstrations (that ranking was removed).
 # The Isaac Lab generators read `guarantee: false` (inherited) and run the fixed attempt count too (not 3,000 successes).
 name: rank_human_demos
 protocol:
-  camera_names: []                  # ranking needs no images
+  camera_names: []                  # the fit needs no images
   keep_failed: true
-# The ranking pools of 2026-10 were made with selection=ours (MimicGen: a source chosen at random for every subtask, so a
-# 3,000-attempt pool samples every source in every subtask about equally; the ranking is per subtask). Pass selection=ours
-# to `tmg rank_sources` to read them.
 attempts: 3000
 chunk: 250
 seed_offset: 20000

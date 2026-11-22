@@ -1,22 +1,23 @@
-"""Logistic source mixing for CP-Gen: solve every retained source for the current scene first, then blend.
+"""SkillMix for CP-Gen: solve every retained source for the current scene first, then blend.
 
 CP-Gen does not replay a source segment. For constraint k of the attempt it re-solves the annotated keypoint constraint
 of the attempt's source demonstration (the primary) for the current object poses: for every step t of the constraint
 window ``compute_X_W_eef_des`` gives the desired end-effector pose E_primary(t), inverse kinematics turns it into a joint
 configuration, and cuRobo plans from the current configuration to the first one.
 
-With the logistic mixer (``mixing.type: logistic``) the runtime replaces E_primary(t) by a weighted blend of the same
-constraint of several sources, each solved for the current scene:
+With SkillMix (``mixing.type: skillmix``) the runtime replaces E_primary(t) by a weighted blend of the same constraint of
+several sources, each solved for the current scene:
 
-1. Prediction. For every source j the success model (the task's coefficient file, ``tmg.generation.method.success_model``)
-   predicts the probability that constraint k succeeds with source j from the scene features (x and y distance and
-   rotation angle between the constraint's reference object now and in source j at its window start) and, from the
-   second constraint on, the in-hand features (position distance and rotation angle between the previous constraint's
-   reference object in the end-effector frame now and in source j). These are the quantities the runtime records for
-   every constraint, so the fit and the mixing read the same values.
-2. Weights. The retained set is the sources whose prediction is at least the mean over all sources and whose gripper
-   events match the primary's (only those can be put on the primary's timeline); weights are the predictions normalized
-   over the retained set (``logistic_mix.above_mean_weights`` with the compatible sources).
+1. Features. For every source j the scene features (x and y distance and rotation angle between the constraint's
+   reference object now and in source j at its window start) and, from the second constraint on, the in-hand features
+   (position distance and rotation angle between the previous constraint's reference object in the end-effector frame
+   now and in source j; 0 where unknown). These are the quantities the runtime records for every constraint, so the fit
+   and the mixing read the same values.
+2. Weights (``tmg.generation.method.skillmix``). The sources whose gripper events match the primary's (only those can be
+   put on the primary's timeline) are compatible. ``mixing.rule: softmax``: the scores ``s_j = a_j + g . phi_j`` of the
+   task's rule file and the softmax of ``s / d`` over the compatible sources (the best one alone when ``d <= 0``).
+   ``mixing.rule: calibration``: random Dirichlet weights over the compatible sources, drawn once per constraint and
+   attempt (the calibration pools of the fit).
 3. Symmetry alignment and solve. A source can be recorded in a different but equivalent representation of the same
    grasp: the reference object may be symmetric (the constraint's ``symmetries``, e.g. the hammer turned 180 degrees about
    its z axis) and the parallel gripper is symmetric under 180 degrees about its approach axis (CP-Gen's ``reflect_eef``).
@@ -47,8 +48,8 @@ from collections.abc import Callable
 import numpy as np
 from scipy.spatial.transform import Rotation
 
-from tmg.generation.method.event_mix import _matching_events, align_segments
-from tmg.generation.method.logistic_mix import above_mean_weights
+from tmg.generation.method.event_mix import align_segments
+from tmg.generation.method.skillmix import compatible_sources
 from tmg.generation.method.success_model import in_hand, inhand_features, scene_features
 
 
@@ -109,19 +110,18 @@ def features(constraints: list, obs: dict, carried: str | None):
     return scene, np.array(rows)
 
 
-def decide(model, sequences: list, idx: int, primary: int, obs: dict, carried: str | None) -> tuple[dict, np.ndarray]:
-    """Predictions and weights of constraint ``idx`` (module docstring, steps 1 and 2): ``(record, weights (J,))``."""
+def decide(mixer, sequences: list, idx: int, primary: int, obs: dict, carried: str | None) -> tuple[dict, np.ndarray]:
+    """Features and weights of constraint ``idx`` (module docstring, steps 1 and 2) under ``mixer`` (a ``SkillMixer``:
+    its rule mode, rule file and calibration draws): ``(record, weights (J,))``."""
     constraints = [seq[idx] for seq in sequences]
     scene, inhand = features(constraints, obs, carried)
-    sub = model.for_subtask(idx)
-    if inhand is None and any(f in sub.slopes for f in ("inhand_position", "inhand_rotation")):
-        inhand = np.zeros((len(constraints), 2))
-    p = sub.predict(scene, inhand)
+    if inhand is None and idx >= 1:
+        inhand = np.zeros((len(constraints), 2))     # from the second constraint on the in-hand features are recorded (0)
     series = [gripper_series(c)[:, 0] for c in constraints]
-    compatible = [j for j in range(len(constraints)) if j == primary or _matching_events(series[primary], series[j]) is not None]
-    weights = above_mean_weights(p, compatible)
-    record = {"subtask": int(idx), "source_a": int(primary), "rule": "above_mean",
-              "predicted": [round(float(v), 4) for v in p], "weights": [round(float(v), 4) for v in weights],
+    compatible = compatible_sources(series, primary)
+    weights, about = mixer.weights(idx, scene, inhand, compatible)
+    record = {"subtask": int(idx), "source_a": int(primary), "rule": mixer.mode, **about,
+              "weights": [round(float(v), 4) for v in weights],
               "incompatible": [j for j in range(len(constraints)) if j not in compatible],
               "scene_features": np.round(scene, 4).tolist(), "carried_object": carried}
     if inhand is not None:

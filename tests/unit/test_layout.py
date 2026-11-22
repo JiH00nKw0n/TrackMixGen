@@ -12,8 +12,8 @@ from tmg.core.layout import Condition, dataset_path, eval_output, indexed_keys, 
 from tmg.core.records import IMAGES_FORMAT, LABELS_FORMAT, NPZ_FORMAT, record_file
 
 # every one of the six names differs from the others, so a builder that swaps two folders cannot pass
-COND = Condition("mimicgen", "square", "ours", "official", "mixup_only", "pool_robosuite_image")
-GROUPS = ["generator=mimicgen", "task=square", "scene=ours", "selection=official", "method=mixup_only",
+COND = Condition("mimicgen", "square", "ours", "official", "skillmix", "pool_robosuite_image")
+GROUPS = ["generator=mimicgen", "task=square", "scene=ours", "selection=official", "method=skillmix",
           "generation=pool_robosuite_image"]
 
 
@@ -36,11 +36,11 @@ def test_builders_match_the_hydra_templates(root):
     assert Condition.from_plain(tr) == COND
     assert layout.resets_dir(root / "resets", "mimicgen", "square", "ours") == Path(root / "resets/mimicgen/square/ours")
     # the same paths spelt out (what the yaml templates render for these choices)
-    assert pool_dir(root / "pools", COND) == root / "pools/mimicgen/square/ours/official/mixup_only/pool_robosuite_image"
+    assert pool_dir(root / "pools", COND) == root / "pools/mimicgen/square/ours/official/skillmix/pool_robosuite_image"
     assert dataset_path(root / "datasets", COND, "low_dim", 200, 3) == \
-        root / "datasets/mimicgen/square/ours/official/mixup_only/pool_robosuite_image/low_dim/n200_seed3.hdf5"
+        root / "datasets/mimicgen/square/ours/official/skillmix/pool_robosuite_image/low_dim/n200_seed3.hdf5"
     assert run_dir(root / "runs", COND, "image", "diffusion_policy", 202601) == \
-        root / "runs/mimicgen/square/ours/official/mixup_only/pool_robosuite_image/image/diffusion_policy/seed202601"
+        root / "runs/mimicgen/square/ours/official/skillmix/pool_robosuite_image/image/diffusion_policy/seed202601"
     ev = resolved(compose("eval", ["task=square", "scene=ours", "checkpoint=/c"]))
     assert layout.resets_path(ev, isaaclab=False) == root / "resets/mimicgen/square/ours/val25_test300_seed202600.hdf5"
     # the paths yaml names the subfolders the builders assume
@@ -108,13 +108,13 @@ def test_record_file_names_and_jsonl_helpers(tmp_path):
 def test_collect_results_builds_the_same_paths_as_the_configs(root):
     from scripts import collect_results
 
-    cond, observation = collect_results.parse_job("mimicgen/square/ours/official/mixup_only/pool_robosuite_image/low_dim")
+    cond, observation = collect_results.parse_job("mimicgen/square/ours/official/skillmix/pool_robosuite_image/low_dim")
     assert cond == COND and observation == "low_dim"
-    assert pool_dir(root / layout.POOLS_DIR, cond) == root / "pools/mimicgen/square/ours/official/mixup_only/pool_robosuite_image"
+    assert pool_dir(root / layout.POOLS_DIR, cond) == root / "pools/mimicgen/square/ours/official/skillmix/pool_robosuite_image"
     assert layout.dataset_dir(root / layout.DATASETS_DIR, cond, observation) == \
-        root / "datasets/mimicgen/square/ours/official/mixup_only/pool_robosuite_image/low_dim"
+        root / "datasets/mimicgen/square/ours/official/skillmix/pool_robosuite_image/low_dim"
     assert run_dir(root / layout.RUNS_DIR, cond, observation, "bc_rnn", 202602) == \
-        root / "runs/mimicgen/square/ours/official/mixup_only/pool_robosuite_image/low_dim/bc_rnn/seed202602"
+        root / "runs/mimicgen/square/ours/official/skillmix/pool_robosuite_image/low_dim/bc_rnn/seed202602"
     # collect_run reads the run folder by the layout names
     run = root / "run"
     (run / layout.CHECKPOINTS_DIR / "0000500").mkdir(parents=True)
@@ -180,13 +180,13 @@ def test_migration_plan_moves_every_non_selection_child(tmp_path):
         (tmp_path / kind / "mimicgen/square/ours/none").mkdir(parents=True)
         (tmp_path / kind / "mimicgen/square/ours/official").mkdir(parents=True)      # already migrated: left alone
     (tmp_path / "pools/_verify_baseline/mimicgen").mkdir(parents=True)
-    (tmp_path / "pools/softmimicgen/rope/ours/mixup_only").mkdir(parents=True)
+    (tmp_path / "pools/softmimicgen/rope/ours/skillmix").mkdir(parents=True)
     (tmp_path / "reports/rank_sources/mimicgen/square/ours/rank_human_demos").mkdir(parents=True)
     (tmp_path / "pools/mimicgen/square/ours/README.md").write_text("file, not a folder")
     moves = m.plan(tmp_path)
     assert moves == [
         (tmp_path / "pools/mimicgen/square/ours/none", tmp_path / "pools/mimicgen/square/ours/ours/none"),
-        (tmp_path / "pools/softmimicgen/rope/ours/mixup_only", tmp_path / "pools/softmimicgen/rope/ours/official/mixup_only"),
+        (tmp_path / "pools/softmimicgen/rope/ours/skillmix", tmp_path / "pools/softmimicgen/rope/ours/official/skillmix"),
         (tmp_path / "datasets/mimicgen/square/ours/none", tmp_path / "datasets/mimicgen/square/ours/ours/none"),
         (tmp_path / "runs/mimicgen/square/ours/none", tmp_path / "runs/mimicgen/square/ours/ours/none"),
         (tmp_path / "reports/rank_sources/mimicgen/square/ours/rank_human_demos",

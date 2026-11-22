@@ -15,9 +15,9 @@
 #   ("diffusion_policy bc_rnn"), SEEDS ("202601 202602 202603"), SIZE (1000), POOL_LANES (2: pools generated at the same time),
 #   POLICY_PARALLEL (2: policy pipelines on the GPU at the same time), VAL_PARALLEL (4: checkpoints validated at a time per run),
 #   TEST_SHARDS (6: parallel shards of the 300 test scenes), SELECTION (official: the generator's source selection rule; ours = a source
-#   chosen at random for every subtask), METHOD (none: the baseline; a method config such as mixup_only runs the same pipeline
+#   chosen at random for every subtask), METHOD (none: the baseline; a method config such as skillmix runs the same pipeline
 #   with that method, writes under <...>/<selection>/<method>/ and logs to logs/<generator>_<method>; the evaluation scenes are
-#   shared with the baseline; `make generate` first builds the task's coefficient file if the method needs a missing one),
+#   shared with the baseline; `make generate` first builds the task's SkillMix rule file if it is missing),
 #   ONLY_GENERATION (1: stop after the datasets), BUNDLE_NAME, PORT_BASE (8800: first policy-server port; run k uses
 #   PORT_BASE + 40 k ... + 40 k + 39, so two drivers on one machine need bases at least 40 x their runs apart),
 #   MINI (1: an end-to-end check at toy scale: a 200-attempt pool in the folder pilot50, 10-demonstration datasets, 200 training
