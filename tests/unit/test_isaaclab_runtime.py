@@ -115,6 +115,9 @@ class RecordingMixer:
     def __init__(self, mixed=True):
         self.mixed, self.contexts = mixed, []
 
+    def begin_attempt(self):
+        pass
+
     def mix(self, context):
         self.contexts.append(context)
         n = len(context.primary_targets)

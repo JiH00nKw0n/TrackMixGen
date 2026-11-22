@@ -69,6 +69,7 @@ from tmg.generation.generators._shared import record_error_guard
 from tmg.generation.generators.cpgen import mixing
 from tmg.generation.graft import Graft, Installed, install_grafts
 from tmg.generation.method.interfaces import Method
+from tmg.generation.method.skillmix import SkillMixer
 from tmg.generation.seeds import source_pick_rng
 from tmg.generation.simulators.robosuite import SCENE_META_ATTR
 
@@ -88,18 +89,7 @@ def action_to_pose(action) -> np.ndarray:
 
 def pose_from_obs(obs: dict) -> np.ndarray:
     """4x4 end-effector pose from robomimic's ``robot0_eef_pos`` and ``robot0_eef_quat`` (x, y, z, w)."""
-    pose = np.eye(4)
-    pose[:3, 3] = np.asarray(obs["robot0_eef_pos"], dtype=float).reshape(3)
-    pose[:3, :3] = Rotation.from_quat(np.asarray(obs["robot0_eef_quat"], dtype=float).reshape(4)).as_matrix()
-    return pose
-
-
-def _site_pose(pos, quat_xyzw) -> np.ndarray:
-    """4x4 pose from a position and an (x, y, z, w) quaternion (robosuite's convention)."""
-    pose = np.eye(4)
-    pose[:3, 3] = np.asarray(pos, dtype=float).reshape(3)
-    pose[:3, :3] = Rotation.from_quat(np.asarray(quat_xyzw, dtype=float).reshape(4)).as_matrix()
-    return pose
+    return mixing.site_pose(obs["robot0_eef_pos"], obs["robot0_eef_quat"])
 
 
 class SourcePicker:
@@ -155,7 +145,7 @@ class CPGenRuntime:
                  per_subtask: bool = False, resolve_after_bridge: bool = False):
         if method.mixer is not None and not all_sources:
             raise ValueError(f"method {method.name!r}: source mixing needs every source loaded: use selection=ours")
-        if method.mixer is not None and not hasattr(method.mixer, "weights"):
+        if method.mixer is not None and not isinstance(method.mixer, SkillMixer):
             raise ValueError(f"method {method.name!r}: CP-Gen mixing supports only SkillMix (mixing.type: skillmix)")
         self.method = method
         self.resolve_after_bridge = bool(resolve_after_bridge)
@@ -241,20 +231,20 @@ class CPGenRuntime:
         src_obs = getattr(constraint, "src_obs", None) or {}
         if obs is None or not names:
             return {}
-        ref = names[1] if getattr(constraint, "constraint_type", None) == "object-object" and len(names) > 1 else names[0]
+        ref = mixing.reference_object(constraint)
         if f"{ref}_pose" not in obs or ref not in src_obj:
             return {}
-        quat_key = "robot0_eef_quat_site" if "robot0_eef_quat_site" in obs else "robot0_eef_quat"
+        quat_key = mixing.quat_key(obs)
         out = {"object_name": ref, "constraint_type": getattr(constraint, "constraint_type", None),
                "cur_obj_pose": np.asarray(obs[f"{ref}_pose"], dtype=float),
                "src_obj_pose": np.asarray(src_obj[ref], dtype=float)[0],
-               "eef_pose": _site_pose(obs["robot0_eef_pos"], obs[quat_key]),
+               "eef_pose": mixing.site_pose(obs["robot0_eef_pos"], obs[quat_key]),
                "objects": {k[:-5]: np.asarray(v, dtype=float) for k, v in obs.items()
                            if k.endswith("_pose") and np.asarray(v).shape == (4, 4)},
                "src_objects": {k: np.asarray(v, dtype=float)[0] for k, v in src_obj.items()},
                "src_subtask_start": 0}
         if "robot0_eef_pos" in src_obs and quat_key in src_obs:
-            out["src_eef_pose"] = _site_pose(np.asarray(src_obs["robot0_eef_pos"])[0], np.asarray(src_obs[quat_key])[0])
+            out["src_eef_pose"] = mixing.site_pose(np.asarray(src_obs["robot0_eef_pos"])[0], np.asarray(src_obs[quat_key])[0])
         return out
 
     def _begin_segment(self, policy, *, first_action: np.ndarray, obs: dict | None = None) -> None:
@@ -444,6 +434,6 @@ def carried_in_hand(policy, obs: dict) -> dict:
     names = list(getattr(constraint, "attached_object_names", None) or [])
     if not names or "robot0_eef_pos" not in obs or "robot0_eef_quat_site" not in obs:
         return {}
-    eef = _site_pose(obs["robot0_eef_pos"], obs["robot0_eef_quat_site"])
+    eef = mixing.site_pose(obs["robot0_eef_pos"], obs["robot0_eef_quat_site"])
     return {name: np.linalg.inv(eef) @ np.asarray(obs[f"{name}_pose"], dtype=float)
             for name in names if f"{name}_pose" in obs}

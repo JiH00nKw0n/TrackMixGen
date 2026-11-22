@@ -194,7 +194,7 @@ class IsaacLabRuntime:
         self._selected = {}
         self.rec.begin_attempt()
         self._seg_id = -1
-        if self.method.mixer is not None and hasattr(self.method.mixer, "begin_attempt"):
+        if self.method.mixer is not None:
             self.method.mixer.begin_attempt()              # a new attempt draws new calibration weights
         if self._hand_layout is None:
             self._hand_layout = self.layout.hand_layout(self.environment(generator))

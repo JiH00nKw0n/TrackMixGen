@@ -200,7 +200,6 @@ def test_end_attempt_records_a_record_error_file(tmp_path):
 def test_source_picker_draws_a_source_per_subtask_with_selection_ours():
     """selection=ours with select_src_per_subtask: every advance to the next constraint draws a new source; without the
     flag the attempt keeps its first source."""
-    import types
     from tmg.generation.generators.cpgen.runtime import SourcePicker
 
     class Policy:

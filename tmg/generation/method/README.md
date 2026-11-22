@@ -27,7 +27,8 @@ the fitted mixed-effects logistic model of the task success given the mixing wei
 weights that maximize it over the sources compatible with the selected one (same gripper events) are `softmax(s / d)` when
 `d > 0`, and the best-scored source alone when `d <= 0`; weights below 1e-3 are dropped. The retained segments are aligned
 by the object and gripper symmetries and blended in their reference-object frames (`skillmix.py` module docstring). CP-Gen
-uses the same rule on its re-solved constraints (`tmg/generation/generators/cpgen/mixing.py`).
+blends its re-solved constraints itself (`tmg/generation/generators/cpgen/mixing.py`) and takes the weights and their record
+from the same call, `SkillMixer.decide`, so both generators apply one rule.
 
 **Rule files, from scratch.** `make coefficients GENERATOR=<g> TASK=<t>` (`scripts/ensure_coefficients.sh`) builds two
 2,000-attempt pools of the same settings and chunk seeds (selection `ours`, generation `pool_ctrl`; chunks of 50, CP-Gen

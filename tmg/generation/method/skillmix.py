@@ -44,8 +44,10 @@ The blend itself (both rules), for subtask k of one attempt:
    mean event steps, weighted mean positions, weighted rotation mean) and the result is expressed in the frame of the
    source the generator selected, so the generator's own transform moves it to the current scene unchanged.
 
-The record of every call keeps the rule, the scores, the spread effect, the features and the weights. CP-Gen re-solves
-constraints instead of replaying segments; it uses the same rule and draws (``tmg.generation.generators.cpgen.mixing``).
+The record of every call keeps the rule, the scores, the spread effect, the features and the weights
+(``SkillMixer.decide``). CP-Gen re-solves constraints instead of replaying segments: it blends solved poses in its own
+module (``tmg.generation.generators.cpgen.mixing``) but takes the weights, the record and the symmetry score from here,
+so both generators apply one rule.
 """
 from __future__ import annotations
 
@@ -64,7 +66,8 @@ from tmg.generation.method.interfaces import MixContext, MixedSegment
 from tmg.generation.method.success_model import FEATURES, inhand_features, scene_features
 from tmg.generation.simulators.scenes import generator_config_dir
 
-RULES = ("softmax", "calibration")
+RULES = ("softmax", "calibration")           # mixing.rule
+CALIBRATION_METHOD = "skillmix_calibration"  # method name (pool, dataset and run folder) of the calibration rule
 COEFFICIENTS_DIR = "coefficients"
 MIN_WEIGHT = 1e-3                            # smaller weights are dropped and the rest renormalized
 CALIBRATION_SEED = 727272                    # second seed word of the calibration draws (the chunk seed is the first)
@@ -215,25 +218,31 @@ def symmetry_matrix(params: Mapping) -> np.ndarray:
     return out
 
 
-def _symmetry_label(kind: str, params: Mapping, k: int) -> str:
+def symmetry_label(kind: str, params: Mapping, k: int) -> str:
+    """Record label of the ``k``-th annotated symmetry of ``kind`` (obj, obj0, obj1, eef), e.g. ``"obj:z180"``."""
     if "rot_axis" in params and "rot_param" in params:
         return f"{kind}:{params['rot_axis']}{int(round(np.degrees(float(params['rot_param']))))}"
     return f"{kind}:{k}"
 
 
+def gripper_flip() -> np.ndarray:
+    """The parallel gripper's own symmetry: 180 degrees about its approach axis (the end-effector z axis)."""
+    out = np.eye(4)
+    out[:3, :3] = Rotation.from_euler("z", np.pi).as_matrix()
+    return out
+
+
 def symmetry_candidates(object_symmetries, parallel_gripper: bool) -> list[tuple[str, np.ndarray, np.ndarray]]:
-    """``(label, S_obj, S_eef)`` combinations (module docstring, step 4), identity first."""
-    objs = [("", np.eye(4))] + [(_symmetry_label("obj", p, k), symmetry_matrix(p)) for k, p in enumerate(object_symmetries or [])]
+    """``(label, S_obj, S_eef)`` combinations (module docstring, step 1), identity first."""
+    objs = [("", np.eye(4))] + [(symmetry_label("obj", p, k), symmetry_matrix(p)) for k, p in enumerate(object_symmetries or [])]
     eefs = [("", np.eye(4))]
     if parallel_gripper:
-        flip = np.eye(4)
-        flip[:3, :3] = Rotation.from_euler("z", np.pi).as_matrix()
-        eefs.append(("eef:z180", flip))
+        eefs.append(("eef:z180", gripper_flip()))
     return [("+".join(x for x in (lo, le) if x) or "identity", so, se) for le, se in eefs for lo, so in objs]
 
 
 def key_step(series) -> int:
-    """The first gripper event of a segment, else its last step (module docstring, step 4)."""
+    """The first gripper event of a segment, else its last step (module docstring, step 1)."""
     change = events(np.asarray(series, dtype=float).reshape(-1))[1]
     return int(change[0]) if len(change) else len(series) - 1
 
@@ -244,6 +253,11 @@ def pose_distance(a, b) -> tuple[float, float]:
     return float(np.linalg.norm(a[:3, 3] - b[:3, 3])), float(Rotation.from_matrix(a[:3, :3].T @ b[:3, :3]).magnitude())
 
 
+def symmetry_score(position_m: float, rotation_rad: float) -> float:
+    """How far a candidate pose is from the reference (smaller is closer): CP-Gen ``find_best_transform``'s score."""
+    return W_TRANS * position_m + W_ROT * rotation_rad
+
+
 def align_to_reference(poses, eef, key: int, reference, candidates) -> tuple[np.ndarray, np.ndarray, dict]:
     """Re-express one source's object-frame ``poses`` (T,4,4) and start pose ``eef`` (4x4) with the candidate closest to
     ``reference`` at step ``key``: ``(poses, eef, record)``."""
@@ -251,7 +265,7 @@ def align_to_reference(poses, eef, key: int, reference, candidates) -> tuple[np.
     best = None
     for label, so, se in candidates:
         dp, dr = pose_distance(invert(so) @ poses[key] @ se, reference)
-        score = W_TRANS * dp + W_ROT * dr
+        score = symmetry_score(dp, dr)
         if best is None or score < best[0]:
             best = (score, label, so, se, dp, dr)
     _score, label, so, se, dp, dr = best
@@ -264,8 +278,9 @@ def align_to_reference(poses, eef, key: int, reference, candidates) -> tuple[np.
 
 
 class SkillMixer:
-    """The ``SegmentMixer`` of the module docstring (MimicGen and the Isaac Lab generators; CP-Gen reads its ``rule``,
-    ``mode`` and ``draws`` from ``tmg.generation.generators.cpgen.mixing``).
+    """The ``SegmentMixer`` of the module docstring. MimicGen and the Isaac Lab generators call ``mix``; CP-Gen, which blends
+    solved poses itself, calls ``decide`` (``tmg.generation.generators.cpgen.mixing``). ``rule`` and ``coefficients`` are the
+    ``mixing.rule`` and ``mixing.coefficients`` of the method config.
 
     ``gripper_events`` is the open/closed rule of the gripper commands (``{type: sign}`` for one scalar command per step,
     the default; ``{type: closure, columns: [...]}`` for many-joint hands such as the GR1's). Events found by this rule
@@ -273,12 +288,14 @@ class SkillMixer:
     commands (same phase at every step).
     """
 
-    def __init__(self, *, rule: SkillMixRule, mode: str = "softmax", chunk_seed: int = 0, gripper_events: Mapping | None = None,
-                 symmetries: Mapping | None = None):
-        if mode not in RULES:
-            raise ValueError(f"mixing.rule must be one of {RULES}, got {mode!r}")
+    def __init__(self, *, rule: str = "softmax", coefficients: SkillMixRule | None = None, chunk_seed: int = 0,
+                 gripper_events: Mapping | None = None, symmetries: Mapping | None = None):
+        if rule not in RULES:
+            raise ValueError(f"mixing.rule must be one of {RULES}, got {rule!r}")
+        if rule == "softmax" and coefficients is None:
+            raise ValueError("mixing.rule=softmax needs the task's rule file (mixing.coefficients)")
         self.rule = rule
-        self.mode = mode
+        self.coefficients = coefficients                   # the fitted rule file; None for the calibration rule
         self.draws = CalibrationDraws(chunk_seed)
         self.detector = build_detector(gripper_events)
         self.chunk_seed = int(chunk_seed)
@@ -286,16 +303,22 @@ class SkillMixer:
         self.symmetries = {str(k): [dict(p) for p in v] for k, v in (symmetries or {}).items()}   # object -> transforms
 
     @classmethod
-    def from_config(cls, cfg: Mapping, *, chunk_seed: int) -> SkillMixer:
+    def from_config(cls, cfg: Mapping, *, chunk_seed: int, method_name: str) -> SkillMixer:
         """``mixing.coefficients``: ``<generator>/<task>`` or a path to a rule file; ``mixing.rule``: softmax | calibration.
-        The calibration rule needs no rule file (it draws the weights)."""
-        mode = str(cfg.get("rule", "softmax"))
-        rule = None if mode == "calibration" else load_rule(str(cfg["coefficients"]))
-        return cls(rule=rule, mode=mode, chunk_seed=chunk_seed, gripper_events=cfg.get("gripper_events"),
+        The calibration rule needs no rule file (it draws the weights). Random weights are calibration data, not SkillMix,
+        so that rule runs under the method name ``CALIBRATION_METHOD`` and no other rule does: the name is the pool,
+        dataset and run folder and the key of a generator's ``method_overrides``."""
+        rule = str(cfg.get("rule", "softmax"))
+        if (rule == "calibration") != (method_name == CALIBRATION_METHOD):
+            raise ValueError(f"method {method_name!r} with mixing.rule={rule}: the calibration rule and the method name "
+                             f"{CALIBRATION_METHOD} go together (method.mixing.rule=calibration method.name={CALIBRATION_METHOD})")
+        coefficients = None if rule == "calibration" else load_rule(str(cfg["coefficients"]))
+        return cls(rule=rule, coefficients=coefficients, chunk_seed=chunk_seed, gripper_events=cfg.get("gripper_events"),
                    symmetries=cfg.get("symmetries"))
 
     def describe(self) -> dict:
-        return {"type": "skillmix", "rule": self.mode, "coefficients": None if self.rule is None else self.rule.describe(),
+        return {"type": "skillmix", "rule": self.rule,
+                "coefficients": None if self.coefficients is None else self.coefficients.describe(),
                 "gripper_events": self.detector.name, "symmetries": self.symmetries}
 
     def begin_attempt(self) -> None:
@@ -304,13 +327,25 @@ class SkillMixer:
 
     def weights(self, subtask: int, scene, inhand, compatible: list[int]) -> tuple[np.ndarray, dict]:
         """The weights of one subtask under the configured rule, and what the record keeps about them."""
-        n = len(scene)
-        if self.mode == "calibration":
-            draw = self.draws.draw(subtask, n)
+        if self.rule == "calibration":
+            draw = self.draws.draw(subtask, len(scene))
             return calibration_weights(draw, compatible), {"dirichlet_c": round(draw[0], 5)}
-        block = self.rule.for_subtask(subtask)
+        block = self.coefficients.for_subtask(subtask)
         s = block.scores(scene, inhand)
         return softmax_weights(s, block.d, compatible), {"scores": [round(float(v), 4) for v in s], "d": round(block.d, 4)}
+
+    def decide(self, subtask: int, primary: int, scene, inhand, series: list) -> tuple[np.ndarray, dict]:
+        """The decision of one subtask, the same for every generator: ``(weights (J,), record)`` from the sources'
+        features (``scene`` (J,3), ``inhand`` (J,2) or None) and gripper event series (``series``, one per source; only
+        sources whose events match the selected source ``primary`` can be blended with it)."""
+        compatible = compatible_sources(series, primary)
+        w, about = self.weights(subtask, scene, inhand, compatible)
+        record = {"rule": self.rule, **about, "weights": [round(float(v), 4) for v in w],
+                  "incompatible": [j for j in range(len(series)) if j not in compatible],
+                  "scene_features": np.round(scene, 4).tolist()}
+        if inhand is not None:
+            record["inhand_features"] = np.round(inhand, 4).tolist()
+        return w, record
 
     # events ------------------------------------------------------------------------------------------
     def _scalar_commands(self, commands: np.ndarray) -> bool:
@@ -339,7 +374,7 @@ class SkillMixer:
 
     def mix(self, context: MixContext) -> MixedSegment:
         primary = int(context.primary)
-        record = {"call": self.calls, "subtask": int(context.subtask_ind), "source_a": primary, "mixed": False, "rule": self.mode}
+        record = {"call": self.calls, "subtask": int(context.subtask_ind), "source_a": primary, "mixed": False, "rule": self.rule}
         self.calls += 1
         identity = MixedSegment(context.primary_eef_start, context.primary_targets, context.primary_gripper, record)
         if not context.has_reference_object or context.extra.get("current_object_pose") is None:
@@ -348,13 +383,8 @@ class SkillMixer:
         n = context.num_sources
         scene, inhand = self.features(context)
         series = [self._event_series(np.asarray(context.src_segments[j][2], dtype=float)) for j in range(n)]
-        compatible = compatible_sources(series, primary)
-        w, about = self.weights(int(context.subtask_ind), scene, inhand, compatible)
-        record.update(about)
-        record.update(weights=[round(float(v), 4) for v in w], incompatible=[j for j in range(n) if j not in compatible],
-                      scene_features=np.round(scene, 4).tolist())
-        if inhand is not None:
-            record["inhand_features"] = np.round(inhand, 4).tolist()
+        w, decided = self.decide(int(context.subtask_ind), primary, scene, inhand, series)
+        record.update(decided)
         keep = [j for j in range(n) if w[j] > 0]
         obj = [np.asarray(context.src_object_poses[j], dtype=float) for j in keep]
         poses = [transform_all(invert(o), np.asarray(context.src_segments[j][1], dtype=float)) for o, j in zip(obj, keep)]
@@ -371,7 +401,7 @@ class SkillMixer:
         return MixedSegment(obj_primary @ eef_mixed, transform_all(obj_primary, mixed_obj), gripper, record)
 
     def _align(self, context: MixContext, keep: list[int], series: list, poses: list, eef_obj: list) -> dict:
-        """Step 4 of the module docstring, in place on ``poses`` and ``eef_obj`` (object frames of the ``keep`` sources)."""
+        """Step 1 of the module docstring, in place on ``poses`` and ``eef_obj`` (object frames of the ``keep`` sources)."""
         primary = int(context.primary)
         g = np.asarray(context.src_segments[primary][2], dtype=float)
         candidates = symmetry_candidates(self.symmetries.get(str(context.extra.get("reference_object"))),

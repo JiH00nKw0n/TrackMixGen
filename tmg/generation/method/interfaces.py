@@ -47,6 +47,10 @@ class SegmentMixer(Protocol):
         record of what was done."""
         ...
 
+    def begin_attempt(self) -> None:
+        """Called by the runtime when an attempt starts (a mixer with per-attempt random choices draws them anew)."""
+        ...
+
 
 @dataclass
 class Method:
@@ -63,8 +67,9 @@ class Method:
 
 class MixerType(Protocol):
     """A mixer implementation as ``build_method`` sees it: a class with ``from_config``."""
-    def from_config(self, cfg: Mapping, *, chunk_seed: int) -> SegmentMixer:
-        """Build the mixer from the ``method.mixing`` block; ``chunk_seed`` seeds its private random choices."""
+    def from_config(self, cfg: Mapping, *, chunk_seed: int, method_name: str) -> SegmentMixer:
+        """Build the mixer from the ``method.mixing`` block; ``chunk_seed`` seeds its private random choices and
+        ``method_name`` is the method's name (a mixer may tie a setting to the folder name its output goes to)."""
         ...
 
 
@@ -104,8 +109,5 @@ def build_method(cfg: Mapping, *, chunk_seed: int) -> Method:
         types = _mixer_types()
         if kind not in types:
             raise ValueError(f"method.mixing.type {kind!r} unknown; known: {sorted(types)}")
-        if mixing.get("rule", "softmax") == "calibration" and name == "skillmix":
-            # random weights are calibration data, not SkillMix: keep them out of the SkillMix pool, dataset and run folders
-            raise ValueError("method.mixing.rule=calibration needs its own method name: add method.name=skillmix_calibration")
-        mixer = types[kind].from_config(mixing, chunk_seed=chunk_seed)
+        mixer = types[kind].from_config(mixing, chunk_seed=chunk_seed, method_name=name)
     return Method(name=name, mixer=mixer, labels=labels)

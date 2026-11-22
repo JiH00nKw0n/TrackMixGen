@@ -179,14 +179,19 @@ def test_build_method_reads_the_rule_file_and_keeps_calibration_out_of_the_skill
                                   "d": 0.4, "c0": -1.0}})
     m = build_method({"name": "skillmix", "mixing": {"enabled": True, "type": "skillmix", "rule": "softmax",
                                                      "coefficients": str(path)}}, chunk_seed=0)
-    assert isinstance(m.mixer, SkillMixer) and m.mixer.mode == "softmax" and m.mixer.rule.for_subtask(0).d == 0.4
+    assert isinstance(m.mixer, SkillMixer) and m.mixer.rule == "softmax" and m.mixer.coefficients.for_subtask(0).d == 0.4
     with pytest.raises(ValueError, match="skillmix_calibration"):
         build_method({"name": "skillmix", "mixing": {"enabled": True, "type": "skillmix", "rule": "calibration"}}, chunk_seed=0)
+    with pytest.raises(ValueError, match="skillmix_calibration"):          # and no softmax pool in the calibration folder
+        build_method({"name": "skillmix_calibration", "mixing": {"enabled": True, "type": "skillmix", "rule": "softmax",
+                                                                 "coefficients": str(path)}}, chunk_seed=0)
     m = build_method({"name": "skillmix_calibration", "mixing": {"enabled": True, "type": "skillmix", "rule": "calibration",
                                                                  "coefficients": str(tmp_path / "missing.yaml")}}, chunk_seed=0)
-    assert m.mixer.mode == "calibration" and m.mixer.rule is None          # calibration needs no rule file
+    assert m.mixer.rule == "calibration" and m.mixer.coefficients is None          # calibration needs no rule file
     with pytest.raises(ValueError, match="mixing.rule"):
-        SkillMixer(rule=None, mode="above_mean")
+        SkillMixer(rule="above_mean")
+    with pytest.raises(ValueError, match="rule file"):
+        SkillMixer(rule="softmax")
 
 
 # the mixer ------------------------------------------------------------------------------------------------------------
@@ -205,14 +210,14 @@ def test_skillmix_mixer_weighs_the_sources_by_the_softmax_of_their_scores():
     segs = [_segment(0.0), _segment(0.0), _segment(0.0)]
     objs = [pose(0.0), pose(0.05), pose(0.3)]
     rule = _rule(3, a=[0.0, 0.0, 0.0], g=[-10.0, 0.0, 0.0, 0.0, 0.0], d=0.5)
-    out = SkillMixer(rule=rule).mix(_context(segs, objs, 2, pose(0.0)))
+    out = SkillMixer(coefficients=rule).mix(_context(segs, objs, 2, pose(0.0)))
     rec = out.record
     s = np.array([0.0, -0.5, -3.0])
     expected = np.exp(s / 0.5) / np.exp(s / 0.5).sum()
     assert rec["rule"] == "softmax" and rec["d"] == 0.5 and rec["scores"] == [0.0, -0.5, -3.0]
     assert np.allclose(rec["weights"], np.round(expected, 4)) and rec["mixed"] is True and rec["incompatible"] == []
     assert out.targets.shape[1:] == (4, 4)
-    best = SkillMixer(rule=_rule(3, a=[0.0, 0.0, 0.0], g=[-10.0, 0.0, 0.0, 0.0, 0.0], d=-0.2)).mix(_context(segs, objs, 2, pose(0.0)))
+    best = SkillMixer(coefficients=_rule(3, a=[0.0, 0.0, 0.0], g=[-10.0, 0.0, 0.0, 0.0, 0.0], d=-0.2)).mix(_context(segs, objs, 2, pose(0.0)))
     assert best.record["weights"] == [1.0, 0.0, 0.0] and best.record["mixed"] is True     # another source alone
 
 
@@ -221,14 +226,14 @@ def test_skillmix_mixer_identity_without_reference_object():
     ctx = MixContext(subtask_ind=0, primary=0, primary_eef_start=segs[0][0], primary_targets=segs[0][1],
                      primary_gripper=segs[0][2], src_object_poses=[None, None], src_segments=segs, num_sources=2,
                      has_reference_object=False, extra={})
-    rec = SkillMixer(rule=_rule(2)).mix(ctx).record
+    rec = SkillMixer(coefficients=_rule(2)).mix(ctx).record
     assert rec["mixed"] is False and "identity_reason" in rec
 
 
 def test_skillmix_calibration_mixer_draws_new_weights_per_attempt():
     segs = [_segment(0.0)] * 3
     objs = [pose(0.0)] * 3
-    mixer = SkillMixer(rule=None, mode="calibration", chunk_seed=7)
+    mixer = SkillMixer(rule="calibration", chunk_seed=7)
     first = mixer.mix(_context(segs, objs, 0, pose(0.0))).record
     assert first["rule"] == "calibration" and "dirichlet_c" in first and sum(first["weights"]) == pytest.approx(1.0, abs=1e-3)
     mixer.begin_attempt()
@@ -245,7 +250,7 @@ def test_skillmix_mixer_blends_many_joint_hand_commands_with_the_closure_rule():
         return (targets[0], targets, g)
 
     segs = [hand(10, 6, -1.2), hand(14, 9, -1.0)]
-    mixer = SkillMixer(rule=_rule(2), gripper_events={"type": "closure", "columns": [0, 1, 2, 3]})
+    mixer = SkillMixer(coefficients=_rule(2), gripper_events={"type": "closure", "columns": [0, 1, 2, 3]})
     out = mixer.mix(_context(segs, [pose(), pose()], 0, pose()))
     assert out.record["weights"] == [0.5, 0.5] and out.gripper.shape == (len(out.targets), 11)
     closed = out.gripper[:, 0] < -0.5
@@ -302,7 +307,7 @@ def test_skillmix_mixer_aligns_sources_held_from_the_other_side():
     segs = [_grasp_segment(objs[0], -0.06, 0.0), _grasp_segment(objs[1], -0.055, 0.05),
             _grasp_segment(objs[2], 0.06, np.pi), _grasp_segment(objs[3], 0.06, 0.0)]
     rule = _rule(4)                                       # equal scores: equal weights
-    out = SkillMixer(rule=rule, symmetries=HAMMER_SYM).mix(_hammer_context(segs, objs))
+    out = SkillMixer(coefficients=rule, symmetries=HAMMER_SYM).mix(_hammer_context(segs, objs))
     rec = out.record
     assert rec["mixed"] and all(w == pytest.approx(0.25) for w in rec["weights"])
     assert rec["symmetry"]["1"]["symmetry"] == "identity"
@@ -316,14 +321,14 @@ def test_skillmix_mixer_aligns_sources_held_from_the_other_side():
     dr = np.degrees(np.arccos(np.clip((np.trace(out.targets[k][:3, :3].T @ grasp[:3, :3]) - 1) / 2, -1, 1)))
     assert dp < 0.005 and dr < 2.0
     # without the object symmetry only the gripper flip is available: source 2's position stays on the other side
-    rec = SkillMixer(rule=rule).mix(_hammer_context(segs, objs)).record
+    rec = SkillMixer(coefficients=rule).mix(_hammer_context(segs, objs)).record
     assert rec["symmetry"]["2"]["symmetry"] == "eef:z180" and rec["symmetry"]["2"]["pos_cm"] == pytest.approx(12.0, abs=0.01)
 
 
 def test_skillmix_mixer_records_the_distance_after_alignment():
     objs = [pose(0.0), pose(0.0)]
     segs = [_grasp_segment(objs[0], -0.06, 0.0), _grasp_segment(objs[1], -0.14, 0.0)]
-    rec = SkillMixer(rule=_rule(2), symmetries=HAMMER_SYM).mix(_hammer_context(segs, objs)).record
+    rec = SkillMixer(coefficients=_rule(2), symmetries=HAMMER_SYM).mix(_hammer_context(segs, objs)).record
     assert rec["weights"] == [0.5, 0.5]
     assert rec["symmetry"]["1"]["symmetry"] == "identity" and rec["symmetry"]["1"]["pos_cm"] == pytest.approx(8.0, abs=0.01)
 
