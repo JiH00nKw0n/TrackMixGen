@@ -7,14 +7,14 @@ import yaml
 
 from tmg.generation.method.interfaces import MixContext, build_method
 from tmg.generation.method.skillmix import (
-    RANDMIX_SEED,
     MIN_WEIGHT,
+    RANDMIX_SEED,
     RandmixDraws,
     SkillMixer,
     SkillMixRule,
     SubtaskRule,
-    randmix_weights,
     load_rule,
+    randmix_weights,
     softmax_weights,
 )
 from tmg.generation.method.success_model import (
