@@ -87,7 +87,7 @@ def test_every_generation_config_composes_and_is_named_after_its_file(tmp_path, 
 def test_selection_rule_is_independent_of_the_pool_config(monkeypatch, tmp_path):
     """selection=official|ours sets the source selection of any robosuite pool and names a folder after the scene."""
     monkeypatch.setenv("TMG_DATA_ROOT", str(tmp_path))
-    for generation in ("pool_robosuite_image", "pool_robosuite_lowdim", "rank_human_demos", "test/pilot20"):
+    for generation in ("pool_robosuite_image", "pool_robosuite_lowdim", "pool_ctrl", "test/pilot20"):
         official = resolved(compose("generate", ["generator=mimicgen", "task=square", "scene=ours", f"generation={generation}"]))
         ours = resolved(compose("generate", ["generator=mimicgen", "task=square", "scene=ours", "selection=ours", f"generation={generation}"]))
         assert official["generation"]["protocol"]["select_src_per_subtask"] is None and official["generation"]["protocol"]["selection_strategy"] is None
@@ -97,5 +97,5 @@ def test_selection_rule_is_independent_of_the_pool_config(monkeypatch, tmp_path)
     ds = resolved(compose("dataset", ["generator=mimicgen", "task=square", "scene=ours", "selection=ours", "generation=pool_robosuite_lowdim", "observation=low_dim"]))
     assert "/square/ours/ours/none/pool_robosuite_lowdim" in ds["pool"] and "/square/ours/ours/none/pool_robosuite_lowdim/low_dim/" in ds["output"]
     fit = resolved(compose("fit_coefficients", ["generator=mimicgen", "task=square", "scene=ours", "selection=ours"]))
-    assert [p.split("/pools/")[1] for p in fit["calibration_pools"]] == ["mimicgen/square/ours/ours/skillmix_calibration/rank_human_demos"]
-    assert [p.split("/pools/")[1] for p in fit["baseline_pools"]] == ["mimicgen/square/ours/ours/none/rank_human_demos"]
+    assert [p.split("/pools/")[1] for p in fit["calibration_pools"]] == ["mimicgen/square/ours/ours/skillmix_calibration/pool_calib"]
+    assert [p.split("/pools/")[1] for p in fit["baseline_pools"]] == ["mimicgen/square/ours/ours/none/pool_ctrl"]

@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Build a task's SkillMix rule file from scratch when it is missing:
 #   configs/experiment/generator/<GENERATOR>/coefficients/<TASK>.yaml  (read by method skillmix)
-# It is fitted (tmg fit_coefficients) on two pools of the same code and settings, both selection ours (a source drawn for
-# every subtask) and generation rank_human_demos (3,000 attempts, no images):
-#   baseline     method none                                  (one source per subtask)
-#   calibration  method skillmix, mixing.rule=calibration     (random Dirichlet weights), folder skillmix_calibration
+# It is fitted (tmg fit_coefficients) on two pools of the same code, settings and chunk seeds, both selection ours (a source
+# drawn for every subtask) and generation pool_ctrl (2,000 attempts, no images, chunks of 50; CP-Gen chunks of 25), the
+# sizes of the pools the committed rule files were fitted on:
+#   control      method none                                  (one source per subtask), folder none/pool_ctrl
+#   calibration  method skillmix, mixing.rule=calibration     (random Dirichlet weights), folder skillmix_calibration/pool_calib
 # A finished pool is reused; an unfinished one resumes its missing chunks. A rule file that exists is left as it is
 # (delete it to refit).
 #   GENERATOR=mimicgen TASK=threading SCENE=ours CLUSTER=a100 scripts/ensure_coefficients.sh
@@ -22,10 +23,11 @@ fi
 SCENE=${SCENE:-ours}; CLUSTER=${CLUSTER:-local}; IMAGE=${IMAGE:-robosuite}
 RULE="$REPO/configs/experiment/generator/$GENERATOR/coefficients/$TASK.yaml"
 [ -f "$RULE" ] && exit 0
-ARGS=(GENERATOR="$GENERATOR" IMAGE="$IMAGE" TASK="$TASK" SCENE="$SCENE" SELECTION=ours CLUSTER="$CLUSTER" GENERATION=rank_human_demos)
-echo "[ensure_coefficients] $GENERATOR/$TASK: baseline pool (method none, 3,000 attempts)"
-make -s -C "$REPO" generate "${ARGS[@]}" METHOD=none OVERRIDES="${POOL_OVERRIDES:-}"
-echo "[ensure_coefficients] $GENERATOR/$TASK: calibration pool (method skillmix, random weights, 3,000 attempts)"
+ARGS=(GENERATOR="$GENERATOR" IMAGE="$IMAGE" TASK="$TASK" SCENE="$SCENE" SELECTION=ours CLUSTER="$CLUSTER" GENERATION=pool_ctrl)
+CHUNK=""; [ "$GENERATOR" = cpgen ] && CHUNK="generation.chunk=25"       # the CP-Gen pools of the committed rules
+echo "[ensure_coefficients] $GENERATOR/$TASK: control pool (method none, 2,000 attempts)"
+make -s -C "$REPO" generate "${ARGS[@]}" METHOD=none OVERRIDES="$CHUNK ${POOL_OVERRIDES:-}"
+echo "[ensure_coefficients] $GENERATOR/$TASK: calibration pool (method skillmix, random weights, 2,000 attempts)"
 make -s -C "$REPO" generate "${ARGS[@]}" METHOD=skillmix \
-  OVERRIDES="method.mixing.rule=calibration method.name=skillmix_calibration ${POOL_OVERRIDES:-}"
+  OVERRIDES="generation.name=pool_calib method.mixing.rule=calibration method.name=skillmix_calibration $CHUNK ${POOL_OVERRIDES:-}"
 make -s -C "$REPO" fit-coefficients "${ARGS[@]}"

@@ -55,7 +55,7 @@
 ### 1.4 원본 시연 선택 방식: 지금은 우리 값, 최종 평가는 MimicGen 공식 값 (2026-10-27 결정)
 
 생성 프로토콜은 `configs/experiment/generation/pool_robosuite_image.yaml`의 `protocol` 블록에 있고, 다른 generation 설정(`pool_robosuite_lowdim`,
-`rank_human_demos`, `pool_isaac`, `test/` 아래의 시험용 설정들)은 이 블록을 물려받는다. 지금 값은 하위작업마다 원본 시연을 독립적으로 고르고
+`pool_ctrl`, `pool_isaac`, `test/` 아래의 시험용 설정들)은 이 블록을 물려받는다. 지금 값은 하위작업마다 원본 시연을 독립적으로 고르고
 (`select_src_per_subtask: true`) 고르는 방식은 무작위다(`selection_strategy: random`). MimicGen 공식 설정 템플릿
 (`mimicgen/exps/templates/robosuite/*.json`)은 일곱 과제 모두 `select_src_per_subtask: false`(한 시도의 모든 하위작업이 같은 원본
 시연을 쓴다)다. 그러나 MimicGen이 논문 데이터를 만들 때 쓴 설정은 템플릿이 아니라 템플릿 위에 과제별 값을 덮어쓰는
@@ -230,7 +230,7 @@ Isaac Lab 평가를 만들 때도 성공 판정은 첫 행동 뒤부터 매 걸�
 공식 성공 수 보장은 Soft 세 과제(`generation_guarantee`)와 Pick Place(`guarantee_success: true`)에서 켜져 있고, Microwave와 Bottle
 Placement and Door Closing에서는 꺼져 있다(`guarantee_success: false`, 공식 `num_trials`는 50과 100). 우리 `generation=pool_isaac`(성공
 250개 청크 4개, `protocol.guarantee: true`)은 모든 과제에서 `--generation_num_trials`가 성공 수를 뜻하게 하므로, 뒤의 두 과제에서는
-공식과 다르다. 기록기는 실패 시도까지 모두 남기므로 생성 성공률은 기록에서 계산한다. 시험용 설정과 순위 풀(`rank_human_demos`)은
+공식과 다르다. 기록기는 실패 시도까지 모두 남기므로 생성 성공률은 기록에서 계산한다. 시험용 설정과 SkillMix 적합 풀(`pool_ctrl`)은
 `guarantee: false`여서 어댑터가 보장을 꺼 적힌 수만큼만 시도한다(2026-10-29부터).
 
 원본 시연 파일의 공개 여부는 다음과 같다. 측정한 사실이다.

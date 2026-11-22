@@ -204,8 +204,8 @@ def test_pick_place_runs_on_the_autodata_stack(tmp_path, monkeypatch):
     assert spec.extra["cameras"] == ["front_image", "side_image"] and spec.extra["layout"]["noise_draw_shapes"] == [3, 4, 3, 4]
     assert spec.extra["layout"]["measure_links"] == {"left": "left_hand_pitch_link", "right": "right_hand_pitch_link"}
     assert spec.method["mixing"]["gripper_events"]["columns"] == [0, 1, 2, 3] and "tracking" not in spec.method
-    # the uniform-source pools (rank_human_demos) want no images: the official environment is used (no per-step rendering), nothing is captured
-    rank = resolved(compose("generate", ["generator=dexmimicgen", "task=pick_place", "scene=ours", "method=none", "generation=rank_human_demos"]))
+    # the SkillMix fit pools (pool_ctrl) want no images: the official environment is used (no per-step rendering), nothing is captured
+    rank = resolved(compose("generate", ["generator=dexmimicgen", "task=pick_place", "scene=ours", "method=none", "generation=pool_ctrl"]))
     assert rank["generation"]["protocol"]["camera_names"] == []
     spec = make_generator(rank).prepare_chunk(plan_chunks(3000, 250, 20000)[0], tmp_path / "r")
     args = spec.extra["script_args"]

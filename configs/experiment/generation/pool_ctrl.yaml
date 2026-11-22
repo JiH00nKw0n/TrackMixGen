@@ -1,16 +1,14 @@
 defaults:
-  - pool_robosuite_image
+  - pool_robosuite_lowdim
   - _self_
-# The pools the SkillMix fit reads (tmg fit_coefficients, `make coefficients`): 3,000 attempts in chunks of 250, chunk
-# seeds from 20001, no images. With selection=ours a source is drawn for every subtask, so every source is seen in every
-# subtask about equally: the baseline pool (method none) and the calibration pool (method skillmix with
-# mixing.rule=calibration, folder skillmix_calibration) of a task share these settings and chunk seeds (the same scenes).
-# The name is historical: the 2026-10 pools of this config ranked the source demonstrations (that ranking was removed).
-# The Isaac Lab generators read `guarantee: false` (inherited) and run the fixed attempt count too (not 3,000 successes).
-name: rank_human_demos
-protocol:
-  camera_names: []                  # the fit needs no images
-  keep_failed: true
-attempts: 3000
-chunk: 250
-seed_offset: 20000
+# The pools the SkillMix fit reads (tmg fit_coefficients, `make coefficients`), the sizes of the pools the committed rule
+# files were fitted on (2026-11-20): 2,000 attempts, no images, chunk seeds from 30001, with selection=ours (a source drawn
+# for every subtask). Two pools of a task share these settings and chunk seeds (the same scenes):
+#   pool_ctrl   method none, the control without mixing (folder none/pool_ctrl)
+#   pool_calib  method skillmix with mixing.rule=calibration and method.name=skillmix_calibration, the same config with
+#               generation.name=pool_calib (folder skillmix_calibration/pool_calib)
+# Chunks of 50 attempts (MimicGen); CP-Gen pools use chunks of 25 (scripts/ensure_coefficients.sh passes generation.chunk=25),
+# as on the server. Replaces rank_human_demos (3,000 attempts, chunks of 250), whose source ranking was removed.
+name: pool_ctrl
+attempts: 2000
+chunk: 50

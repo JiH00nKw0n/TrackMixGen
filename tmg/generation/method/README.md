@@ -30,8 +30,9 @@ by the object and gripper symmetries and blended in their reference-object frame
 uses the same rule on its re-solved constraints (`tmg/generation/generators/cpgen/mixing.py`).
 
 **Rule files, from scratch.** `make coefficients GENERATOR=<g> TASK=<t>` (`scripts/ensure_coefficients.sh`) builds two
-3,000-attempt pools of the same settings (selection `ours`, generation `rank_human_demos`): a baseline pool (method `none`)
-and a calibration pool (method `skillmix` with `mixing.rule=calibration` and `method.name=skillmix_calibration`: random
+2,000-attempt pools of the same settings and chunk seeds (selection `ours`, generation `pool_ctrl`; chunks of 50, CP-Gen
+25, the sizes of the committed rules' pools): a control pool (method `none`, `none/pool_ctrl`) and a calibration pool
+(`skillmix_calibration/pool_calib`, method `skillmix` with `mixing.rule=calibration` and `method.name=skillmix_calibration`: random
 Dirichlet weights), then fits the model on both (`tmg fit_coefficients`). `make generate METHOD=skillmix` does this by
 itself when the rule file is missing. The committed files (MimicGen: seven tasks, CP-Gen: five) were fitted on 2026-11-20;
 each file's `basis` names its pools.

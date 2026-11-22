@@ -1,7 +1,7 @@
 # Full pool of a robosuite generator (MimicGen, CP-Gen) with the images the policies train on: enough attempts for
 # 1,000 successes per task (attempts are set per task on the command line, generation.attempts=...), chunks of 250
 # attempts, chunk seeds 30001, 30002, ... This file holds the generation protocol that every other generation config
-# inherits (`pool_robosuite_lowdim`, `rank_human_demos`, `pool_isaac`, and the `test/` configs).
+# inherits (`pool_robosuite_lowdim`, `pool_ctrl`, `pool_isaac`, and the `test/` configs).
 #
 # Naming: pool_<simulator>_<observation> for the full pools; `test/` holds the small configs for smoke runs and checks.
 name: pool_robosuite_image
