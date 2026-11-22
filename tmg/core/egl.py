@@ -1,4 +1,9 @@
-"""Offscreen-rendering device variables for robosuite 1.5 (the CP-Gen image).
+"""Offscreen rendering of the robosuite images as the launcher set it up: which renderer (``renderer``), and the device
+variables robosuite 1.5 needs (``apply``, the CP-Gen image).
+
+The Makefile chooses the renderer (``RENDER``: egl = the GPU through NVIDIA EGL, mesa = Mesa's software EGL on the CPU) and
+passes it into the container as ``TMG_RENDER``. The two do not draw the same pixels, so everything that produces or
+consumes images under one of them records it (``tmg.generation.base.ChunkSpec``).
 
 robosuite 1.5 reads the EGL device index from ``MUJOCO_EGL_DEVICE_ID`` (else from ``CUDA_VISIBLE_DEVICES``) and
 asserts at import time that the former appears in the latter. The EGL index is often not the CUDA index of the same GPU:
@@ -11,6 +16,18 @@ valid one (GPU rendering on the A100) only becomes a second visible device that 
 from __future__ import annotations
 
 import os
+
+RENDER_ENV = "TMG_RENDER"
+RENDERERS = ("egl", "mesa")
+
+
+def renderer(environ: dict | None = None) -> str | None:
+    """The offscreen renderer of this process (``TMG_RENDER``), or None when the launcher did not say: a process started
+    without the Makefile, or an image that does not render through robosuite (Isaac Lab)."""
+    value = (os.environ if environ is None else environ).get(RENDER_ENV) or None
+    if value is not None and value not in RENDERERS:
+        raise ValueError(f"{RENDER_ENV} must be one of {RENDERERS}, got {value!r}")
+    return value
 
 
 def apply(environ: dict | None = None) -> dict:

@@ -380,3 +380,6 @@ def test_run_pool_refuses_to_continue_a_pool_under_another_renderer(pool, tmp_pa
     monkeypatch.setenv("TMG_RENDER", "egl")
     with pytest.raises(runner.PoolError, match=r"seed101: finished chunk was made under another configuration: \['render'\]"):
         pool(_cfg(tmp_path))
+    monkeypatch.setenv("TMG_RENDER", "opengl")    # not a renderer the Makefile knows: refused, not recorded
+    with pytest.raises(ValueError, match="TMG_RENDER"):
+        pool(_cfg(tmp_path))

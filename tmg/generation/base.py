@@ -8,20 +8,19 @@ import time, because the runner also runs where the package is absent.
 """
 from __future__ import annotations
 
-import os
 import sys
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from tmg.core import egl
 from tmg.core.chunks import Chunk
 from tmg.core.records import RECORDS_DIR
 
-# Offscreen renderer of the chunk (the Makefile's RENDER, passed into the container as TMG_RENDER: egl | mesa). A chunk spec
-# without it was written before 2026-11-22, when the robosuite images rendered with Mesa; it counts as "mesa". The Isaac
-# Lab images render with Isaac Sim, get no TMG_RENDER and keep "mesa" as a constant that never differs.
-RENDER_ENV = "TMG_RENDER"
+# The renderer a chunk spec without one counts as (``tmg.core.egl.renderer``): such a spec was written before 2026-11-22,
+# when the robosuite images rendered with Mesa, or by an Isaac Lab image, which renders with Isaac Sim and always compares
+# equal to itself.
 LEGACY_RENDER = "mesa"
 
 
@@ -39,7 +38,7 @@ class ChunkSpec:
     generator_config: str           # path of the official generator's own config file
     expected_outputs: list = field(default_factory=list)   # files that must exist when the chunk finished
     extra: dict = field(default_factory=dict)
-    render: str | None = None       # offscreen renderer (TMG_RENDER); None in specs written before 2026-11-22
+    render: str | None = None       # offscreen renderer (tmg.core.egl.renderer); None in specs written before 2026-11-22
 
     def identity(self) -> dict:
         """What must be equal for a finished chunk to be reused (machine-specific paths excluded). The renderer is part of
@@ -147,7 +146,7 @@ class SyntheticDataGenerator(ABC):
             chunk={"index": chunk.index, "seed": chunk.seed, "attempts": chunk.attempts},
             folder=str(folder), records_dir=str(folder / RECORDS_DIR), task=self.task, scene=scene, method=self.method,
             protocol=self.protocol if protocol is None else protocol, generator_config=generator_config,
-            expected_outputs=list(expected_outputs), extra=extra, render=os.environ.get(RENDER_ENV) or None)
+            expected_outputs=list(expected_outputs), extra=extra, render=egl.renderer())
 
     def graft_hashes(self) -> dict:
         """``generator.graft_hashes`` as a plain dict (the pinned source hashes the chunk process verifies)."""
