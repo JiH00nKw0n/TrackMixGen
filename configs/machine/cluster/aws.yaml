@@ -10,3 +10,4 @@ workers: auto
 max_workers: 8
 threads_per_worker: 1
 min_free_disk_gib: 50
+render: egl                     # robosuite images render on the GPU (NVIDIA EGL); mesa = CPU software rendering

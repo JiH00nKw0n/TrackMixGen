@@ -11,5 +11,10 @@ max_workers: 48
 threads_per_worker: 1
 min_free_disk_gib: 20
 container_tmp: /mnt/nvme0/jihoonkwon/tmg_tmp/container_tmp   # bound to /tmp in the containers (home disk is small and shared)
-egl_device_id: 8                # CP-Gen image only (robosuite 1.5): Mesa lists the 8 GPUs' DRM devices (not openable by the
-                                # user) and then its software device; 8 is that software device (the robosuite image finds it itself)
+render: egl                     # offscreen rendering of the robosuite images: egl (GPU, NVIDIA EGL) | mesa (CPU, the renderer
+                                # of the pools made before 2026-11-22); a dataset and its evaluations use the same renderer
+egl_device_of_gpu: [2, 3, 0, 1, 6, 7, 4, 5]   # EGL device index of GPU 0, 1, ..., 7 (EGL_CUDA_DEVICE_NV; not the nvidia-smi order)
+nvidia_egl_dir: /mnt/nvme0/jihoonkwon/nv_egl_580   # copy of the driver's EGL libraries (580.126.09) and 10_nvidia.json: Singularity's
+                                # --nv brings no EGL library here, so the Makefile binds this folder into the container
+egl_device_id: 8                # render: mesa only. Mesa lists the 8 GPUs' DRM devices (not openable by the user) and then its
+                                # software device; 8 is that software device

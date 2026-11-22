@@ -1,17 +1,16 @@
 # TrackMixGen
 
-TrackMixGen runs synthetic demonstration generators with and without the TrackMix method and measures the effect
-on trained policies. The method has two parts: guided source mixing (a low-success source segment is blended
-with a compatible high-success one) and error-adaptive path following (the executed path advances by the
-measured tracking error, with pre-noise actions kept as labels). The official generator code is never copied or
-edited: at run time the code reads the source of the official functions, checks their hashes and grafts one
-call per anchor into their syntax trees.
+TrackMixGen runs synthetic demonstration generators with and without SkillMix and measures the effect on trained
+policies. SkillMix blends the source demonstrations of every subtask with the softmax weights that maximize the task
+success predicted by a fitted mixed-effects logistic model of the mixing weights (`tmg/generation/method/README.md`). The
+official generator code is never copied or edited: at run time the code reads the source of the official functions,
+checks their hashes and grafts one call per anchor into their syntax trees.
 
 Generators: MimicGen (robosuite), SoftMimicGen (Isaac Lab fork), DexMimicGen (NVIDIA AutoData on Isaac Lab 3.0 with Arena. GR1 Pick Place, Microwave Opening, Bottle Placement and Door Closing), CP-Gen (robosuite with cuRobo). The Isaac Lab
 baseline runs end to end on one GPU machine with `scripts/run_isaaclab_baseline.sh`, and `docs/ISAACLAB_BASELINE_RUNBOOK.md` is the hand-off guide.
 The MimicGen baseline (seven tasks, Diffusion Policy and BC-RNN on images) runs with `scripts/run_mimicgen_baseline.sh`, and
 `docs/MIMICGEN_BASELINE_RUNBOOK.md` is its hand-off guide (Korean).
-Pipeline: source demonstrations, generation pools, source rankings, datasets, policies (BC-RNN, Diffusion
+Pipeline: source demonstrations, generation pools, SkillMix rule files, datasets, policies (BC-RNN, Diffusion
 Policy, π0 through LeRobot 0.6.1), fixed-scene evaluation through a policy server. Every command composes one
 config and writes one output folder with the resolved config and a provenance record.
 
@@ -38,7 +37,7 @@ logic, its inputs and its outputs.
 | `tmg/generation/runner.py` | `run_pool`. It plans the chunks, skips the finished ones, runs the others in parallel processes, validates each result, and writes `DONE.json`. |
 | `tmg/generation/verify.py` | `verify_baseline`. It runs one MimicGen chunk two times with the same `mg_config.json`. The first run has no grafts. The second run has the grafts and `method=none`. Then it compares the outputs byte for byte. This shows that the grafts change nothing when the method is off. It does not show that our generation settings are equal to the settings of the authors. |
 | `tmg/generation/execution.py` | `TrajectoryExecution`. This is the step-by-step bookkeeping that is the same for every generator. It applies the path follower, counts the random draws, keeps the labels before noise and feeds the recorder. |
-| `tmg/generation/method/` | The TrackMix method. `guided_mix.py` is the source mixer. `tracking.py` is the error-adaptive follower. `grippers.py` finds the gripper events. `interfaces.py` defines the `SegmentMixer`, `PathFollower` and `Method` protocols and `build_method(cfg)`. |
+| `tmg/generation/method/` | SkillMix. `skillmix.py` is the source mixer and reads the rule file. `success_model.py` computes the per-source features and the rows of the fit. `grippers.py` finds the gripper events. `interfaces.py` defines the `SegmentMixer` and `Method` protocols and `build_method(cfg)`. |
 | `tmg/generation/simulators/` | Scene handling. `scenes.py` reads a generator's scene files (`configs/experiment/generator/<generator>/scene/`) and their inheritance chain for every generator. `robosuite.py` validates the placement bounds and registers an environment class with the configured bounds and reach constraint. |
 | `tmg/generation/generators/` | One folder per generator adapter (`mimicgen/`, `cpgen/`, `isaaclab/` for SoftMimicGen, `autodata/` for DexMimicGen). In each, `runtime.py` holds the callbacks the grafted code calls, `adapter.py` builds the chunk config, `entrypoint.py` is the chunk process and `sources.py` downloads and prepares the source demonstrations. Code the adapters share sits next to the folders: `robosuite_base.py` (the robosuite adapter base), `_sources.py` (download, md5, manifest), `_shared.py` (record summary, record-error file), `_entry.py` (chunk process start-up). `tmg/generation/graft.py` edits an official function's syntax tree. |
 | `configs/` | All YAML config groups. See section 2. |
@@ -59,7 +58,7 @@ result from run to run on the GPU, so this check does not apply to them.
 
 | Folder | Layer | Content |
 |---|---|---|
-| `configs/command/` | What command runs | One file per command (`generate`, `sources`, `verify_baseline`, `check_scene`, `rank_sources`, `dataset`, `train`, `select_checkpoint`, `resets`, `serve`, `eval`). It names a default for each group and holds the values of that command only. |
+| `configs/command/` | What command runs | One file per command (`generate`, `sources`, `verify_baseline`, `check_scene`, `fit_coefficients`, `dataset`, `train`, `select_checkpoint`, `resets`, `serve`, `eval`). It names a default for each group and holds the values of that command only. |
 | `configs/machine/` | Where it runs | `cluster/` (container runtime, worker count, data root per machine) and `paths/` (data layout). |
 | `configs/experiment/` | What experiment | Generator-independent groups `method/`, `generation/`, `policy/`, `training/`, `evaluation/`, and one folder per generator. |
 
@@ -69,14 +68,14 @@ Everything that depends on the generator lives under it:
 configs/experiment/generator/mimicgen.yaml        the generator package: pinned commit, graft hashes, source repo, method_overrides
 configs/experiment/generator/mimicgen/task/        one file per task: environment class, subtasks, cameras, source file
 configs/experiment/generator/mimicgen/scene/       placement ranges per task for each scene condition (official_d1, ours)
-configs/experiment/generator/mimicgen/ranking/     measured source rankings per task, written by `tmg rank_sources`
+configs/experiment/generator/mimicgen/coefficients/ SkillMix rule file per task, written by `tmg fit_coefficients`
 ```
 
 You select a file of a group on the command line with `group=name`. The generator's folder joins the search path,
 so its groups keep short names:
 
 ```bash
-tmg generate generator=mimicgen task=square scene=ours selection=official method=trackmix generation=pool_robosuite_image cluster=isaac
+tmg generate generator=mimicgen task=square scene=ours selection=ours method=skillmix generation=pool_robosuite_image cluster=isaac
 ```
 
 | Group | Files | Meaning |
@@ -86,8 +85,8 @@ tmg generate generator=mimicgen task=square scene=ours selection=official method
 | `generator` | `mimicgen` | The generator adapter, its pinned commit, and the source hashes of the grafted functions. |
 | `task` | MimicGen: `square`, `coffee`, `threading`, `stack_three`, `hammer_cleanup`, `mug_cleanup`, `three_piece_assembly`. SoftMimicGen: `rope`, `towel`, `jenga`. DexMimicGen: `pick_place`, `microwave`, `bottle_door`. CP-Gen: `coffee`, `threading`, `three_piece_assembly`, `hammer_cleanup`, `mug_cleanup` | The task of the chosen generator. |
 | `scene` | `official_d1`, `ours` | Object placement. `official_d1` runs the generator's own distribution unchanged and lists its ranges. `ours` keeps each D1 centre, doubles the x and y widths, clips to 0.35 m of the table centre, pulls back where the 2026-10-26 scene check found robot contacts, and redraws until every object is within 0.85 m of the robot base. |
-| `method` | `none`, `trackmix`, `mixup_only`, `tracking_only` | Which hooks are on. `none` runs the official generator unchanged. A generator may override a few values through `method_overrides` in its own file. |
-| `generation` | `pool_robosuite_image`, `pool_robosuite_lowdim`, `pool_isaac`, `rank_human_demos`, `imported_official`, and small configs under `test/` (`test/pilot20`, `test/pilot20_images`, `test/pilot50`, `test/pool_robosuite_lowdim_onesrc`) | The attempt count, the chunk size, the seed offset and the generator protocol (noise, interpolation steps, whether cameras are rendered). `pool_robosuite_image` stores images, `pool_robosuite_lowdim` is the same pool without them. `pool_isaac` is the Isaac Lab pool (1,000 successes in 4 chunks). The Isaac Lab generators keep the official source selection, action noise and interpolation steps. From the protocol block they read only `guarantee` (true here, so the count is a count of successes, which is not the official setting of Microwave and Bottle Door) and, for DexMimicGen, `camera_names`. The adapters also apply the scene ranges, add the low-dim observation terms, prepare and reset the Arena success term, and run Pick Place in our camera environment when cameras are stored (`docs/GENERATORS.md` section 2.1). `rank_human_demos` is the 3,000-attempt pool for ranking the source demonstrations, `imported_official` the name under which an official dataset is imported. The pool folder is named after the config's `name` (the `test/` folder is not part of the path). |
+| `method` | `none`, `skillmix` | `none` runs the official generator unchanged. `skillmix` blends the source demonstrations of every subtask with the softmax weights of the task's fitted rule file (`tmg/generation/method/README.md`). A generator may override a few values through `method_overrides` in its own file. |
+| `generation` | `pool_robosuite_image`, `pool_robosuite_lowdim`, `pool_isaac`, `pool_unmix`, `imported_official`, and small configs under `test/` (`test/pilot20`, `test/pilot20_images`, `test/pilot50`, `test/pool_robosuite_lowdim_onesrc`) | The attempt count, the chunk size, the seed offset and the generator protocol (noise, interpolation steps, whether cameras are rendered). `pool_robosuite_image` stores images, `pool_robosuite_lowdim` is the same pool without them. `pool_isaac` is the Isaac Lab pool (1,000 successes in 4 chunks). The Isaac Lab generators keep the official source selection, action noise and interpolation steps. From the protocol block they read only `guarantee` (true here, so the count is a count of successes, which is not the official setting of Microwave and Bottle Door) and, for DexMimicGen, `camera_names`. The adapters also apply the scene ranges, add the low-dim observation terms, prepare and reset the Arena success term, and run Pick Place in our camera environment when cameras are stored (`docs/GENERATORS.md` section 2.1). `pool_unmix` is the 2,000-attempt pool of the SkillMix fit (control and, under the name `pool_randmix`, randmix), `imported_official` the name under which an official dataset is imported. The pool folder is named after the config's `name` (the `test/` folder is not part of the path). |
 | `observation` | `image`, `low_dim` | What the policy sees. `image`: the task's cameras (84x84) and the robot state, the paper setting. `low_dim`: the robot state and the task's object state (`task.object_state`, no images), for method exploration. It selects the dataset variant, the policy's `by_observation` values and the training batch size. |
 | `policy` | `bc_rnn`, `diffusion_policy`, `pi0` | Model values, with one override block per observation (`by_observation`). `pi0` has no low-dim form. |
 | `training` | `default` | Batch size and update budget per policy and observation, epoch length, checkpoint interval, gradient clip, selection rule. |
@@ -161,10 +160,11 @@ A pilot pool uses the same code path as a full pool. Run it before each full poo
 make generate TASK=square SCENE=official_d1 METHOD=none GENERATION=test/pilot20
 ```
 
-To run the path follower on the same 20 scenes, change the method:
+To run SkillMix on the same 20 scenes, change the method (SkillMix draws a source for every subtask, so use
+`SELECTION=ours`):
 
 ```bash
-make generate TASK=square SCENE=official_d1 METHOD=tracking_only GENERATION=test/pilot20
+make generate TASK=square SCENE=official_d1 SELECTION=ours METHOD=skillmix GENERATION=test/pilot20
 ```
 
 ### 3.6 Run a full pool
@@ -203,52 +203,53 @@ CP-Gen files written before that have no `error` key).
 
 ### 3.8 Run a method variant
 
-The method is the `METHOD` axis. To compare a variant with the baseline and with `trackmix`, give it a name of
-its own and run the same five commands with that name. The name is part of every output path, so nothing is
-overwritten.
+The method is the `METHOD` axis: `none` (the baseline) or `skillmix`. A variant gets a name of its own and runs the
+same five commands with that name. The name is part of every output path, so nothing is overwritten.
 
-1. Make the variant. For other values of the same algorithm, add a file to `configs/experiment/method/` that
-   inherits `trackmix` and changes the values:
+1. Make the variant. For SkillMix with another rule file, add a file to `configs/experiment/method/` that inherits
+   `skillmix` and changes the values (one config file per variant, so its folders are its own):
 
    ```yaml
-   # configs/experiment/method/trackmix_w07.yaml
+   # configs/experiment/method/skillmix_refit.yaml
    defaults:
-     - trackmix
+     - skillmix
      - _self_
-   name: trackmix_w07
-   mixing: {weight_a: 0.7}
+   name: skillmix_refit
+   mixing: {coefficients: /path/to/rule.yaml}
    ```
 
    For another algorithm, write a class in `tmg/generation/method/`, register its name in `interfaces.py` and
-   name it in the method file with `mixing.type` or `tracking.type`. `tmg/generation/method/README.md` gives the
-   interfaces, the record keys and a skeleton.
+   name it in the method file with `mixing.type`. `tmg/generation/method/README.md` gives the interface and the
+   record keys.
 
-2. Check the composed config, then run the pool. The baseline pool (`METHOD=none`) and the ranking of the task
-   must exist, because the mixer reads the ranking file:
+2. Check the composed config, then run the pool. SkillMix reads the task's rule file
+   (`configs/experiment/generator/<generator>/coefficients/<task>.yaml`); `make generate` builds it first when it is
+   missing (`make coefficients`: an unmix and a randmix pool, then `tmg fit_coefficients`). Pools made on the servers before 2026-11-23 keep their folder names (`<method>/pool_calib`, `none/pool_ctrl`); to fit on them, name the folders: `make fit-coefficients GENERATOR=<g> TASK=<t> SCENE=ours SELECTION=ours GENERATION=pool_unmix OVERRIDES="randmix_pools=[/data/pools/<g>/<t>/ours/ours/mixup_only/pool_calib] unmix_pools=[/data/pools/<g>/<t>/ours/ours/none/pool_ctrl]"`.
+   The commands:
 
    ```bash
-   tmg show generate task=square scene=ours method=trackmix_w07 generation=pool_robosuite_lowdim
-   make generate TASK=square SCENE=ours METHOD=trackmix_w07 GENERATION=pool_robosuite_lowdim CLUSTER=a100 OVERRIDES="generation.attempts=5000"
+   tmg show generate task=square scene=ours selection=ours method=skillmix generation=pool_robosuite_lowdim
+   make generate TASK=square SCENE=ours SELECTION=ours METHOD=skillmix GENERATION=pool_robosuite_lowdim CLUSTER=a100 OVERRIDES="generation.attempts=5000"
    ```
 
 3. Read the attempt records before you train anything. `chunks/seed<N>/records/attempts.jsonl` has the success
-   of every attempt and the mix record of every subtask (`mixed`, `source_b`, `identity_reason`), and the `.npz`
-   files have the per-step follower records (`track_k`, `track_region`, ...). The generation success rate and
-   these records already show whether the variant did what it should.
+   of every attempt and the mix record of every subtask (`rule`, `scores`, `d`, `weights`, `mixed`,
+   `identity_reason`). The generation success rate and these records already show whether the variant did what it
+   should.
 
 4. Train and evaluate with the same `METHOD`:
 
    ```bash
-   make dataset  TASK=square SCENE=ours METHOD=trackmix_w07 GENERATION=pool_robosuite_lowdim OBSERVATION=low_dim CLUSTER=a100 OVERRIDES="size=300"
-   make train    TASK=square SCENE=ours METHOD=trackmix_w07 GENERATION=pool_robosuite_lowdim OBSERVATION=low_dim POLICY=diffusion_policy SEED=1 CLUSTER=a100 OVERRIDES="dataset.size=300"
-   make validate RUN=<data root>/runs/mimicgen/square/ours/trackmix_w07/pool_robosuite_lowdim/low_dim/diffusion_policy/seed1 TASK=square SCENE=ours OBSERVATION=low_dim CLUSTER=a100
+   make dataset  TASK=square SCENE=ours SELECTION=ours METHOD=skillmix GENERATION=pool_robosuite_lowdim OBSERVATION=low_dim CLUSTER=a100 OVERRIDES="size=300"
+   make train    TASK=square SCENE=ours SELECTION=ours METHOD=skillmix GENERATION=pool_robosuite_lowdim OBSERVATION=low_dim POLICY=diffusion_policy SEED=1 CLUSTER=a100 OVERRIDES="dataset.size=300"
+   make validate RUN=<data root>/runs/mimicgen/square/ours/ours/skillmix/pool_robosuite_lowdim/low_dim/diffusion_policy/seed1 TASK=square SCENE=ours OBSERVATION=low_dim CLUSTER=a100
    make evaluate RUN=<the same run> TASK=square SCENE=ours OBSERVATION=low_dim CLUSTER=a100
    ```
 
    `validate` plays the 25 validation scenes of every checkpoint and appends to the run's `validation.jsonl`.
    `tmg select_checkpoint` picks the checkpoint. `evaluate` plays the 300 test scenes of that checkpoint.
 
-5. Compare with the baseline (`METHOD=none`) and with `trackmix` run through the same commands. Keep the
+5. Compare with the baseline (`METHOD=none`) and with `skillmix` run through the same commands. Keep the
    generation config, the observation, the policy and the seeds equal. Only `METHOD` differs.
 
 ### 3.9 Run the tests
@@ -258,6 +259,26 @@ make test-local
 ```
 
 This runs the unit tests without a simulator. `make test` runs them inside the image.
+
+### 3.10 Train and evaluate on the published SkillMix datasets
+
+The SkillMix training datasets of the MimicGen tasks (1,000 demonstrations per task) are published on the Hugging Face
+Hub (`Mayfull/Mimicgen-skillmix`, dataset repository, one `<task>.hdf5` per task). `GENERATION=hub`
+(`configs/experiment/generation/hub.yaml`) uses them: no sources and no pool are needed (`make generate` refuses it).
+`make dataset` downloads the file into the usual dataset path when it is missing; train, validate and evaluate with the
+same values. The values must be the ones below (`hub.made_with` in the config), since they name the dataset and run folders;
+`make dataset` refuses any other scene, selection, method or observation instead of filing the download under it:
+
+```bash
+C="TASK=square SCENE=ours SELECTION=ours METHOD=skillmix GENERATION=hub OBSERVATION=image"
+make dataset $C
+make resets  TASK=square SCENE=ours                  # the fixed evaluation scenes are drawn here, as for every dataset
+make train   $C POLICY=bc_rnn SEED=202601
+```
+
+The driver does the same for every task without generating: `GENERATION=hub SELECTION=ours METHOD=skillmix
+scripts/run_mimicgen_baseline.sh`. Evaluate with the renderer the published images were made with (`RENDER`; see the rendering note in
+`docs/MIMICGEN_BASELINE_RUNBOOK.md`): a policy trained on EGL images is evaluated with EGL.
 
 ## 4. Rules for changes
 

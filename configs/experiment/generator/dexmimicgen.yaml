@@ -30,17 +30,14 @@ eefs: [left, right]
 arm_action_dims: {left: [0, 7], right: [7, 14]}
 hand_prefixes: null
 hand_term: null
-# the IK tasks target the pitch links while the observations read the roll links; the follower measures its error on the
+# the IK tasks target the pitch links while the observations read the roll links; the records measure the pose on the
 # target links (2026-10-26 analysis of the Isaac Lab Mimic GR1 controller; Arena's GR1 uses the same links)
 measure_links: {left: left_hand_pitch_link, right: right_hand_pitch_link}
 # randn_like draws of AutoData's target_eef_pose_to_action per step, in order: left pos, left quat, right pos, right quat;
 # a hand whose noise scale is zero at that step draws nothing (the tracking loop's noise ledger tolerates fewer draws)
 noise_draw_shapes: [3, 4, 3, 4]
 method_overrides:
-  trackmix:
-    mixing: {max_anchor_rotation_deg: 40.0, gripper_events: {type: closure, columns: [0, 1, 2, 3]}}   # the mixer aligns segments by the
-    tracking: {gripper_events: {type: closure, columns: [0, 1, 2, 3]}}   # same hand-closure events as the follower (a hand's 11
-  mixup_only:                                                             # commands: proximal index, middle, pinky, ring first)
-    mixing: {max_anchor_rotation_deg: 40.0, gripper_events: {type: closure, columns: [0, 1, 2, 3]}}
-  tracking_only:
-    tracking: {gripper_events: {type: closure, columns: [0, 1, 2, 3]}}
+  skillmix:                         # the mixer aligns segments by the hands' closure events (a hand's 11 commands:
+    mixing: {gripper_events: {type: closure, columns: [0, 1, 2, 3]}}   # proximal index, middle, pinky, ring first)
+  skillmix_randmix:             # the randmix pools of the SkillMix fit (method skillmix, rule randmix)
+    mixing: {gripper_events: {type: closure, columns: [0, 1, 2, 3]}}

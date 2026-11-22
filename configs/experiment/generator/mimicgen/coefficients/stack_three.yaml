@@ -1,244 +1,132 @@
-# Success-model coefficients of mimicgen stack_three (tmg fit_coefficients). Per subtask k:
-#   P(subtask k succeeds | reached, source j) = sigmoid(alpha[j] + dx*|dx| + dy*|dy| + rotation*rot
-#                                            + inhand_position*dpos + inhand_rotation*drot)  (in-hand terms k >= 1)
-# Units: {'dx': 'm', 'dy': 'm', 'rotation': 'rad', 'inhand_position': 'm', 'inhand_rotation': 'rad'}. The source ranking is a separate file (../ranking/stack_three.yaml).
+# SkillMix rule of mimicgen stack_three (tmg fit_coefficients). Per subtask k, with phi_j = (|dx|, |dy|, rotation,
+# inhand_position, inhand_rotation) of source j against the current scene (in-hand terms 0 for k = 0):
+#   P(task succeeds | reached k, weights w) = sigmoid(c0 + sum_j w_j s_j + d H(w)),  s_j = a[j] + g . phi_j
+#   weights: softmax(s / d) over the sources compatible with the selected one when d > 0, the best one when d <= 0
+# Units: {'dx': 'm', 'dy': 'm', 'rotation': 'rad', 'inhand_position': 'm', 'inhand_rotation': 'rad'}.
 generator: mimicgen
 task: stack_three
-basis: Maximum-likelihood fit (Newton, stabilizer 0.001) on the uniform-source baseline pool /data/pools/mimicgen/stack_three/ours/ours/none/rank_human_demos
-  (3000 attempts, 12 chunks, scene ours, selection ours, generation rank_human_demos); one fit per subtask on the attempts
-  that reached it, label = that subtask's success.
+rule: softmax
+basis: 'Fitted on 2026-11-20 on the A100 (scratch_calib/ana/fit_all.py, softmax form, without the older rank_human_demos pool;
+  the model and fit of tmg fit_coefficients, which reproduced the CP-Gen Threading rule to 1e-13 from the same records) from
+  /data/pools/mimicgen/stack_three/ours/ours/mixup_only/pool_calib [the randmix pool; in this repository skillmix_randmix/pool_randmix] (method mixup_only with TMG_MIX_DIRICHLET=1: Dirichlet(c)
+  weights, c ~ LogUniform(0.05, 20); selection ours, pool_robosuite_lowdim settings, 2,000 attempts in chunks of 50) and /data/pools/mimicgen/stack_three/ours/ours/none/pool_ctrl [the unmix pool; in this repository none/pool_unmix]
+  (method none, the same code, settings and chunk seeds, 2,000 attempts); rows of subtask k: the attempts that reached it,
+  label = the attempt''s task success.'
 num_sources: 10
 features:
-  scene:
-  - dx
-  - dy
-  - rotation
-  inhand:
-  - inhand_position
-  - inhand_rotation
+- dx
+- dy
+- rotation
+- inhand_position
+- inhand_rotation
 units:
   dx: m
   dy: m
   rotation: rad
   inhand_position: m
   inhand_rotation: rad
-stabilizer: 0.001
-subtask_term_signals:
-- grasp_1
-- stack_1
-- grasp_2
-- null
 subtasks:
   0:
-    term_signal: grasp_1
-    reached: 3000
-    successes: 2483
-    log_loss: 0.3742
-    alpha:
-      0: 4.038398
-      1: 4.191941
-      2: 5.226723
-      3: 4.540388
-      4: 3.518598
-      5: 4.395091
-      6: 5.127327
-      7: 4.806417
-      8: 5.024348
-      9: 4.362838
-    slopes:
-      dx: -1.504831
-      dy: -1.025299
-      rotation: -1.300156
-    source_counts:
-      0:
-        reached: 302
-        successes: 230
-      1:
-        reached: 265
-        successes: 212
-      2:
-        reached: 305
-        successes: 275
-      3:
-        reached: 324
-        successes: 270
-      4:
-        reached: 284
-        successes: 195
-      5:
-        reached: 311
-        successes: 253
-      6:
-        reached: 282
-        successes: 249
-      7:
-        reached: 318
-        successes: 279
-      8:
-        reached: 306
-        successes: 272
-      9:
-        reached: 303
-        successes: 248
+    a:
+    - -0.2275448098078596
+    - -0.1900448179121245
+    - 0.11752990552543205
+    - -0.023168043074993563
+    - -0.21213914791567026
+    - 0.167659332536212
+    - 0.22965811660462596
+    - -0.1594298386079999
+    - 0.23519777408313694
+    - 0.05526327774505015
+    g:
+      dx: -2.140358270118288
+      dy: -0.9078263240157278
+      rotation: -0.2665873154992097
+      inhand_position: 0.0
+      inhand_rotation: 0.0
+    d: 0.2086521437244792
+    c0: -1.1598354787378422
+    rows:
+      randmix: 2000
+      unmix: 2000
+    cv_log_loss_gain_percent:
+      all_rows: 2.1
+      randmix_rows: 2.0
   1:
-    term_signal: stack_1
-    reached: 2483
-    successes: 1499
-    log_loss: 0.5973
-    alpha:
-      0: 1.98811
-      1: 2.676612
-      2: 1.769052
-      3: 2.018228
-      4: 1.45514
-      5: 2.091091
-      6: 1.430837
-      7: 2.972777
-      8: 2.151183
-      9: 1.9403
-    slopes:
-      dx: 0.03836
-      dy: -2.464272
-      rotation: -0.354241
-      inhand_position: -65.309053
-      inhand_rotation: 0.023716
-    source_counts:
-      0:
-        reached: 232
-        successes: 133
-      1:
-        reached: 263
-        successes: 184
-      2:
-        reached: 251
-        successes: 141
-      3:
-        reached: 239
-        successes: 145
-      4:
-        reached: 258
-        successes: 124
-      5:
-        reached: 269
-        successes: 171
-      6:
-        reached: 231
-        successes: 110
-      7:
-        reached: 256
-        successes: 201
-      8:
-        reached: 256
-        successes: 154
-      9:
-        reached: 228
-        successes: 136
-    carried_object: cubeA
+    a:
+    - -0.24751797755342347
+    - 0.6587948081225555
+    - -0.2848491062334319
+    - -0.09623226328485944
+    - -0.09718102909950344
+    - -0.1464587302076188
+    - -0.356497006137299
+    - 0.0905687909434407
+    - 0.3892300515318593
+    - 0.13612803713863364
+    g:
+      dx: -1.0571795344151615
+      dy: -2.846069970718928
+      rotation: -0.29261076995652263
+      inhand_position: -83.34431384250692
+      inhand_rotation: 0.013436474816613654
+    d: 0.2048251591274168
+    c0: -0.15827939976512306
+    rows:
+      randmix: 1709
+      unmix: 1666
+    cv_log_loss_gain_percent:
+      all_rows: 5.1
+      randmix_rows: 5.8
   2:
-    term_signal: grasp_2
-    reached: 1499
-    successes: 869
-    log_loss: 0.6498
-    alpha:
-      0: 0.596371
-      1: 1.13955
-      2: 1.02135
-      3: 1.395864
-      4: 1.551429
-      5: 1.366044
-      6: 1.153355
-      7: 1.438573
-      8: 1.464045
-      9: 1.648701
-    slopes:
-      dx: 0.042033
-      dy: -2.187526
-      rotation: -0.395846
-      inhand_position: -1.417678
-      inhand_rotation: 0.081745
-    source_counts:
-      0:
-        reached: 130
-        successes: 53
-      1:
-        reached: 125
-        successes: 67
-      2:
-        reached: 162
-        successes: 83
-      3:
-        reached: 169
-        successes: 104
-      4:
-        reached: 144
-        successes: 93
-      5:
-        reached: 152
-        successes: 89
-      6:
-        reached: 134
-        successes: 74
-      7:
-        reached: 159
-        successes: 99
-      8:
-        reached: 162
-        successes: 100
-      9:
-        reached: 162
-        successes: 107
-    carried_object: cubeB
+    a:
+    - -0.037391909854043476
+    - 0.1775204461959134
+    - -0.2065673727889909
+    - 0.2298113998634407
+    - -0.004589491672935187
+    - 0.048045571168343966
+    - -0.3506337812352776
+    - 0.11777133333977698
+    - 0.014981205581136624
+    - -0.01236393306637339
+    g:
+      dx: -1.1966254157563632
+      dy: -1.1790363340099903
+      rotation: -0.17227047924771138
+      inhand_position: -4.8259791787013695
+      inhand_rotation: 0.021656276018809092
+    d: 0.12647728416725879
+    c0: -0.3049592465564488
+    rows:
+      randmix: 1128
+      unmix: 989
+    cv_log_loss_gain_percent:
+      all_rows: 1.2
+      randmix_rows: 0.8
   3:
-    term_signal: task success
-    reached: 869
-    successes: 358
-    log_loss: 0.5741
-    alpha:
-      0: 2.009251
-      1: 2.232665
-      2: 2.27861
-      3: 1.609097
-      4: 1.604666
-      5: 1.733479
-      6: 1.839298
-      7: 1.89852
-      8: 1.948416
-      9: 2.027786
-    slopes:
-      dx: 0.424815
-      dy: -1.187887
-      rotation: -0.85566
-      inhand_position: -44.463954
-      inhand_rotation: -0.0161
-    source_counts:
-      0:
-        reached: 100
-        successes: 43
-      1:
-        reached: 95
-        successes: 43
-      2:
-        reached: 83
-        successes: 39
-      3:
-        reached: 83
-        successes: 28
-      4:
-        reached: 92
-        successes: 33
-      5:
-        reached: 76
-        successes: 27
-      6:
-        reached: 86
-        successes: 36
-      7:
-        reached: 71
-        successes: 31
-      8:
-        reached: 89
-        successes: 37
-      9:
-        reached: 94
-        successes: 41
-    carried_object: cubeC
+    a:
+    - -0.04805712330169165
+    - 0.5155167476242805
+    - 0.09579638669724909
+    - -0.654569054446356
+    - 0.03944991825145141
+    - 0.25157572524194843
+    - 0.12363672835695032
+    - 0.2761785608312107
+    - -0.3064869831669428
+    - -0.27505533852606656
+    g:
+      dx: 0.9065540764611312
+      dy: -0.49372977466226936
+      rotation: -1.2792994118612002
+      inhand_position: -45.37733740750864
+      inhand_rotation: 0.08093290443243355
+    d: 0.1854951685365895
+    c0: 2.1354222666757896
+    rows:
+      randmix: 663
+      unmix: 552
+    cv_log_loss_gain_percent:
+      all_rows: 13.7
+      randmix_rows: 13.9

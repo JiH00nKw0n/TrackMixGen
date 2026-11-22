@@ -150,6 +150,13 @@ class AttemptRecorder:
         self.subtasks.append(_jsonable(meta))
         self.cur_subtask = int(meta.get("subtask_ind", self.cur_subtask))
 
+    def update_last_subtask(self, **meta):
+        """Replace or add keys of the subtask recorded last (CP-Gen: the record of a constraint solved again after its
+        bridge). No-op before the first subtask of the attempt."""
+        if not self._active or not self.subtasks:
+            return
+        self.subtasks[-1].update(_jsonable(meta))
+
     def add_extra(self, **fields):
         """Add attempt-level keys to the jsonl line (for example the label kind)."""
         if self._active:

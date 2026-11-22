@@ -7,8 +7,7 @@ for AutoData's ``autodata_core``) and then executes one ``MultiWaypoint`` per co
 driving the environment from an action queue and Isaac Lab's recorder writing the hdf5.
 
 - ``runtime.py``: the ``_tmg`` callbacks grafted into those functions (records, source mixing, pre-noise labels) with the
-  package-specific steps as hooks, and the Isaac Lab hooks of the tracking loop.
-- ``tracking_loop.py``: the shared-path follower loop used when tracking is on (``TrackingLoop`` and its pure helpers).
+  package-specific steps as hooks.
 - ``adapter.py``: ``IsaacLabGenerator`` (chunk spec template, command and result validation) and ``SoftMimicGenGenerator``.
 - ``entrypoint.py``: the chunk process inside the Isaac Sim image (app launcher, scene ranges, grafts, official main);
   ``..autodata`` reuses it through ``spec["extra"]["runtime_module"]``.

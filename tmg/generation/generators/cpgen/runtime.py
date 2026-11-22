@@ -22,15 +22,22 @@ Anchors in ``generate_demo`` (by the name the official statement assigns):
 
 ``get_action`` calls the official ``CPPolicy.get_action`` and, each time the policy has just planned a segment
 (``new_constraint``), records the segment (bridge = motion-plan steps, skill = constraint steps) and the source
-index. With tracking on, the planned actions become one ``EndEffectorPath`` (absolute poses from the action's
-position and axis-angle, gripper from its last element) and the error-adaptive follower returns the next
-target from the measured end-effector pose of the observation; the policy's queue is kept in step with the
-follower's base index so the official noise rule (``in_constraint_segment``) still reads the right segment,
-and when the path is finished the queue is emptied and ``check_constraint`` set, exactly the state the
-official pop leaves behind. ``method.labels`` is fixed to ``pre_noise`` because the official output already is; the
-executed (noisy) actions are kept in our records.
+index.
 
-Source mixing (the logistic mixer, ``mixing.type: logistic``, selection ours): CP-Gen re-solves constraints instead of
+Re-solve after the bridge (generator ``resolve_after_bridge``, on by default): CP-Gen solves a constraint before it plans
+the bridge to the constraint's start. When the constraint carries an object (``attached_object_names``), the object can
+sit differently in the hand once the bridge has been executed, so ``get_action`` solves the constraint again from that
+observation and, when the new plan has the same number of steps, replaces the queued constraint steps. With a mixer the
+re-solve is mixed again (the grafted ``solve_constraint`` calls ``prepare_mix``); the subtask record then keeps the mix
+record of the solve that was executed (``mix``), the first one under ``mix_before_resolve``, and the outcome under
+``resolve_after_bridge`` (``replaced`` or why the plan was kept). Constraints that carry nothing (grasps) keep their plan:
+re-solving every constraint made attempts 1.4-1.7x slower without changing the success where nothing moves, and a rule
+that also skipped carried objects that had not moved in the hand kept Threading at 7 % (2026-11-17).
+
+``method.labels`` is fixed to ``pre_noise`` because the official output already is; the executed (noisy) actions are kept
+in our records.
+
+Source mixing (SkillMix, ``mixing.type: skillmix``, selection ours): CP-Gen re-solves constraints instead of
 replaying segments, so the blended quantity is the desired end-effector pose of every solved step, after every retained
 source is solved for the current scene (``tmg.generation.generators.cpgen.mixing``). It needs a second graft, of
 ``CPPolicy.solve_constraint``, installed only for a method with a mixer:
@@ -40,16 +47,13 @@ source is solved for the current scene (``tmg.generation.generators.cpgen.mixing
 | after ``X_obj0_transf, X_obj1_transf, X_eef_transf = find_best_transform(...)`` | ``_tmg.prepare_mix(self, constraint, obs, X_obj0_transf, X_obj1_transf, X_eef_transf)`` |
 | ``X_W_eef_des = compute_X_W_eef_des(...)`` in the step loop     | becomes ``X_W_eef_des = _tmg.mixed_eef_des(t_idx, compute_X_W_eef_des(...))`` |
 
-A source rule (``method.sources``, ``RankBasedSampling``: top-K of the ranking file) replaces the per-attempt source draw
-(subtask 0's order, one source per attempt); the chunk's own draw is still taken so the streams stay aligned.
-
 Source selection (``selection.all_sources``, ``extra["all_sources"]`` of the chunk spec): CP-Gen picks the constraint
 sequence (source demonstration) only in its reset-near-constraint mode and otherwise always uses sequence 0, so with
 every source in use :class:`SourcePicker` draws one per attempt from the chunk's private stream (``seeds.source_pick_rng``).
 With ``selection.select_src_per_subtask`` too (selection=ours, ``extra["per_subtask_sources"]``) it draws again every time
 the policy advances to the next constraint (subtask), so constraint k of the attempt is solved from a source drawn for k,
 as MimicGen's selection=ours does. Without it every subtask of an attempt came from the same source, and the coefficient
-pools never showed an in-hand pose that differs from the source's, so the in-hand terms of the success model could not
+pools never showed an in-hand pose that differs from the source's, so the in-hand terms of the mixing model could not
 be fitted (CP-Gen Threading, 2026-11-14). The record keeps the source of every subtask (``subtasks[k].src_demo_ind`` and
 ``src_demo_inds``).
 """
@@ -67,7 +71,7 @@ from tmg.generation.generators._shared import record_error_guard
 from tmg.generation.generators.cpgen import mixing
 from tmg.generation.graft import Graft, Installed, install_grafts
 from tmg.generation.method.interfaces import Method
-from tmg.generation.method.tracking import EndEffectorPath
+from tmg.generation.method.skillmix import SkillMixer
 from tmg.generation.seeds import source_pick_rng
 from tmg.generation.simulators.robosuite import SCENE_META_ATTR
 
@@ -85,27 +89,23 @@ def action_to_pose(action) -> np.ndarray:
     return pose
 
 
-def pose_to_action(pose, gripper) -> np.ndarray:
-    """Absolute CP-Gen action from a 4x4 pose and a gripper command."""
-    pose = np.asarray(pose, dtype=float)
-    return np.concatenate([pose[:3, 3], Rotation.from_matrix(pose[:3, :3]).as_rotvec(),
-                           np.asarray(gripper, dtype=float).reshape(-1)])
-
-
 def pose_from_obs(obs: dict) -> np.ndarray:
     """4x4 end-effector pose from robomimic's ``robot0_eef_pos`` and ``robot0_eef_quat`` (x, y, z, w)."""
-    pose = np.eye(4)
-    pose[:3, 3] = np.asarray(obs["robot0_eef_pos"], dtype=float).reshape(3)
-    pose[:3, :3] = Rotation.from_quat(np.asarray(obs["robot0_eef_quat"], dtype=float).reshape(4)).as_matrix()
-    return pose
+    return mixing.site_pose(obs["robot0_eef_pos"], obs["robot0_eef_quat"])
 
 
-def _site_pose(pos, quat_xyzw) -> np.ndarray:
-    """4x4 pose from a position and an (x, y, z, w) quaternion (robosuite's convention)."""
-    pose = np.eye(4)
-    pose[:3, 3] = np.asarray(pos, dtype=float).reshape(3)
-    pose[:3, :3] = Rotation.from_quat(np.asarray(quat_xyzw, dtype=float).reshape(4)).as_matrix()
-    return pose
+def carried_objects(constraint, obs: dict) -> list[str]:
+    """The objects the constraint carries in the hand (``attached_object_names``) whose pose ``obs`` has; empty for a
+    constraint that carries nothing (a grasp)."""
+    return [name for name in getattr(constraint, "attached_object_names", None) or [] if f"{name}_pose" in obs]
+
+
+def bridge_just_finished(policy) -> bool:
+    """True when the policy has executed the bridge of its current plan and nothing of the constraint yet: the plan had a
+    bridge and the queue holds exactly the constraint's steps."""
+    queue = getattr(policy, "action_queue", None)
+    return bool(queue) and int(getattr(policy, "curr_motion_plan_steps", 0) or 0) > 0 \
+        and len(queue) == int(getattr(policy, "curr_constraint_steps", 0) or 0)
 
 
 class SourcePicker:
@@ -118,23 +118,16 @@ class SourcePicker:
     wrapped on the policy instance; CP-Gen's own code is not changed).
     """
 
-    def __init__(self, all_sources: bool, chunk_seed: int, rule=None, per_subtask: bool = False):
+    def __init__(self, all_sources: bool, chunk_seed: int, per_subtask: bool = False):
         self.all_sources = bool(all_sources)
         self.per_subtask = bool(per_subtask) and self.all_sources
         self._rng = source_pick_rng(chunk_seed)
-        self.rule = rule
-        if rule is not None and not self.all_sources:
-            raise ValueError("a source rule (method.sources) needs every source loaded: use selection=ours")
 
     def _draw(self, policy, subtask_ind: int) -> int:
-        """A source for constraint ``subtask_ind``: the method's rule when it has one, otherwise uniform over the
-        sequences that have that constraint (the private stream is drawn either way so the streams stay aligned)."""
+        """A source for constraint ``subtask_ind``: uniform over the sequences that have that constraint."""
         sequences = policy.constraint_sequences
         allowed = [j for j, seq in enumerate(sequences) if subtask_ind == 0 or len(seq) > subtask_ind]
-        index = allowed[int(self._rng.integers(len(allowed)))]
-        if self.rule is not None:
-            index = int(self.rule.pick(subtask_ind))
-        return index
+        return allowed[int(self._rng.integers(len(allowed)))]
 
     def _wrap_advance(self, policy) -> None:
         """Make ``policy.advance_constraint`` draw the next constraint's source (installed once per policy)."""
@@ -165,16 +158,17 @@ class CPGenRuntime:
     """The ``_tmg`` object the grafted ``generate_demo`` calls (anchors in the module docstring)."""
 
     def __init__(self, method: Method, chunk_seed: int, records_dir: Path | None, all_sources: bool = False,
-                 per_subtask: bool = False):
+                 per_subtask: bool = False, resolve_after_bridge: bool = False):
         if method.mixer is not None and not all_sources:
             raise ValueError(f"method {method.name!r}: source mixing needs every source loaded: use selection=ours")
-        if method.mixer is not None and not hasattr(method.mixer, "model"):
-            raise ValueError(f"method {method.name!r}: CP-Gen mixing supports only the logistic mixer (mixing.type: logistic)")
+        if method.mixer is not None and not isinstance(method.mixer, SkillMixer):
+            raise ValueError(f"method {method.name!r}: CP-Gen mixing supports only SkillMix (mixing.type: skillmix)")
         self.method = method
+        self.resolve_after_bridge = bool(resolve_after_bridge)
         self._mix_plan = None                              # MultiMixPlan of the constraint being solved (mixing only)
         self._last_mix: dict | None = None                 # mix record of that constraint, written with its subtask
         self.official = None                               # demo_aug.generate (tests put a stand-in here)
-        self.picker = SourcePicker(all_sources, chunk_seed, rule=getattr(method, "sources", None), per_subtask=per_subtask)
+        self.picker = SourcePicker(all_sources, chunk_seed, per_subtask=per_subtask)
         self.rec = AttemptRecorder()
         self.rec.configure(records_dir)
         self.records_dir = records_dir
@@ -187,19 +181,16 @@ class CPGenRuntime:
         return self.picker.all_sources
 
     def _reset_attempt_state(self) -> None:
-        self.follower = None
-        self._path: list[np.ndarray] = []
         self._segments = SegmentTable()                   # record segments of the current planned path (bridge, skill)
-        self._pos = 0                                    # executed steps of the current path (identity mode)
+        self._pos = 0                                    # executed steps of the current path
         self._subtasks = 0
         self._sources: list[int] = []                      # source demonstration of every recorded subtask
-        self._gripper_states: dict = {}
         self._measured_before: np.ndarray | None = None
         self._target: np.ndarray | None = None
-        self._track: dict | None = None
         self._labels: list[np.ndarray] = []
         self._executed: list[np.ndarray] = []
-        self._prev_ref: str | None = None                  # reference object of the previous constraint (in-hand feature)
+        self._references: dict[int, str] = {}              # reference object of every recorded constraint (by its index)
+        self._resolved_queue: list | None = None           # the action queue whose constraint was already solved again
         self._last_mix = None
         self._mix_plan = None
         self._unplanned_mixes: list[dict] = []             # mix records of solves whose motion plan failed
@@ -212,6 +203,8 @@ class CPGenRuntime:
         self._reset_attempt_state()
         self.rec.begin_attempt()
         self.picker.pick(generator.policy)
+        if self.method.mixer is not None:
+            self.method.mixer.begin_attempt()                 # a new attempt draws new randmix weights
         robosuite_env = getattr(getattr(generator.env, "env", None), "env", None)
         self.rec.set_scene_meta(getattr(robosuite_env, SCENE_META_ATTR, None))
 
@@ -234,20 +227,13 @@ class CPGenRuntime:
         """Replaces ``self.policy.get_action(obs)`` (see the module docstring)."""
         policy = generator.policy
         self._measured_before = pose_from_obs(obs)
-        self._track = None
-        if self.follower is not None:
-            if not self.follower.finished():
-                return self._follower_action(policy)
-            self.follower = None
-            policy.action_queue = []
-            policy.check_constraint = True
+        if self.resolve_after_bridge:
+            self._resolve_after_bridge(policy, obs)
         result = policy.get_action(obs)
         if result.get("action") is None:
             return result
         if getattr(policy, "new_constraint", False):
             self._begin_segment(policy, first_action=np.asarray(result["action"], dtype=float), obs=obs)
-            if self.follower is not None:
-                return self._follower_action(policy)
         self._target = action_to_pose(result["action"])
         return result
 
@@ -262,24 +248,24 @@ class CPGenRuntime:
         src_obs = getattr(constraint, "src_obs", None) or {}
         if obs is None or not names:
             return {}
-        ref = names[1] if getattr(constraint, "constraint_type", None) == "object-object" and len(names) > 1 else names[0]
+        ref = mixing.reference_object(constraint)
         if f"{ref}_pose" not in obs or ref not in src_obj:
             return {}
-        quat_key = "robot0_eef_quat_site" if "robot0_eef_quat_site" in obs else "robot0_eef_quat"
+        quat_key = mixing.quat_key(obs)
         out = {"object_name": ref, "constraint_type": getattr(constraint, "constraint_type", None),
                "cur_obj_pose": np.asarray(obs[f"{ref}_pose"], dtype=float),
                "src_obj_pose": np.asarray(src_obj[ref], dtype=float)[0],
-               "eef_pose": _site_pose(obs["robot0_eef_pos"], obs[quat_key]),
+               "eef_pose": mixing.site_pose(obs["robot0_eef_pos"], obs[quat_key]),
                "objects": {k[:-5]: np.asarray(v, dtype=float) for k, v in obs.items()
                            if k.endswith("_pose") and np.asarray(v).shape == (4, 4)},
                "src_objects": {k: np.asarray(v, dtype=float)[0] for k, v in src_obj.items()},
                "src_subtask_start": 0}
         if "robot0_eef_pos" in src_obs and quat_key in src_obs:
-            out["src_eef_pose"] = _site_pose(np.asarray(src_obs["robot0_eef_pos"])[0], np.asarray(src_obs[quat_key])[0])
+            out["src_eef_pose"] = mixing.site_pose(np.asarray(src_obs["robot0_eef_pos"])[0], np.asarray(src_obs[quat_key])[0])
         return out
 
     def _begin_segment(self, policy, *, first_action: np.ndarray, obs: dict | None = None) -> None:
-        """A segment was just planned: record it and, with tracking, start the follower on its path."""
+        """A segment was just planned: record it and open its bridge and skill record segments."""
         path = [first_action] + [np.asarray(a, dtype=float) for a in policy.action_queue]
         n_bridge = int(policy.curr_motion_plan_steps)
         n_skill = int(policy.curr_constraint_steps)
@@ -290,7 +276,7 @@ class CPGenRuntime:
         mix = {"mix": self._last_mix} if self._last_mix is not None else {}
         self._last_mix, self._mix_plan = None, None
         if scene.get("object_name"):
-            self._prev_ref = scene["object_name"]
+            self._references[int(policy.current_constraint_idx)] = scene["object_name"]
         self.rec.add_subtask(subtask_ind=int(policy.current_constraint_idx),
                              src_demo_ind=int(policy.current_constraint_sequence_idx),
                              constraint_name=getattr(constraint, "name", None), obj_names=list(getattr(constraint, "obj_names", []) or []),
@@ -301,32 +287,51 @@ class CPGenRuntime:
         self._segments = SegmentTable()
         self._segments.add(n_bridge, self.rec.begin_segment(SEG_BRIDGE), SEG_BRIDGE)   # bridge opened first, as before
         self._segments.add(n_skill, self.rec.begin_segment(SEG_SKILL), SEG_SKILL)
-        self._path, self._pos = path, 0
-        if self.method.follower_factory is None:
-            return
-        kinds = self._segments.kinds_per_waypoint()
-        eef = EndEffectorPath(EEF, np.stack([action_to_pose(a) for a in path]), np.stack([a[6:] for a in path]))
-        self.follower = self.method.follower_factory()
-        self.follower.start_path([eef], [None] * len(path), kinds, self._gripper_states or None)
+        self._pos = 0
 
-    def _follower_action(self, policy) -> dict:
-        """Next target of the follower as a CP-Gen action; keeps the policy's queue consistent with it."""
-        poses, grippers, _noise, record = self.follower.next_target({EEF: self._measured_before})
-        self._target, self._track = np.asarray(poses[EEF]), record
-        self._pos = int(record["k"])
-        policy.action_queue = [np.array(a) for a in self._path[self._pos + 1:]]
-        policy.new_constraint = False
-        policy.check_constraint = False
-        if self.follower.finished():
-            self._gripper_states.update(self.follower.final_gripper_states())
-            policy.action_queue = []
-            policy.check_constraint = True
-        return {"action": pose_to_action(self._target, grippers[EEF]), "failure_type": None}
+    # re-solve after the bridge -----------------------------------------------------------------------------------------
+    def _resolve_after_bridge(self, policy, obs: dict) -> None:
+        """When the bridge of the current constraint has just been executed and the constraint carries an object, solve it
+        again from ``obs`` and replace the queued steps if the new plan has the same length (module docstring). The
+        outcome goes to the constraint's subtask record."""
+        queue = policy.action_queue
+        if not bridge_just_finished(policy) or queue is self._resolved_queue:
+            return
+        self._resolved_queue = queue                        # once per plan, whatever the outcome
+        if not carried_objects(policy.current_constraint, obs):
+            return                                          # a grasp: nothing in the hand can have moved
+        result, mix = self._solve_again(policy, obs)
+        actions = list(result.actions) if result.success else []
+        if getattr(policy.current_constraint, "duplicate_actions", False):
+            actions = [a for a in actions for _ in (0, 1)]    # as the official get_action queues them
+        if not result.success:
+            outcome = "kept: the re-solve failed"
+        elif len(actions) != len(queue):
+            outcome = f"kept: the re-solve has {len(actions)} steps, the plan {len(queue)}"
+        else:
+            queue[:] = actions
+            outcome = "replaced"
+        meta = {"resolve_after_bridge": outcome}
+        if outcome == "replaced" and mix is not None:         # the record follows the solve that is executed
+            meta.update(mix=mix, mix_before_resolve=self.rec.subtasks[-1].get("mix") if self.rec.subtasks else None)
+        self.rec.update_last_subtask(**meta)
+        print(f"[resolve-after-bridge] {outcome}", flush=True)
+
+    def _solve_again(self, policy, obs: dict):
+        """Solve the current constraint from ``obs``: ``(the official result, its mix record or None)``. The grafted solve
+        leaves its mix record and plan on the runtime for the segment that would follow; this solve belongs to a
+        constraint whose segment is already recorded, so what was pending before is put back."""
+        pending, self._last_mix = self._last_mix, None
+        try:
+            result = policy.solve_constraint(policy.current_constraint, obs)
+            return result, self._last_mix
+        finally:
+            self._last_mix, self._mix_plan = pending, None
 
     # source mixing (grafted into CPPolicy.solve_constraint) ----------------------------------------------------------
     def prepare_mix(self, policy, constraint, obs: dict, X_obj0_transf, X_obj1_transf, X_eef_transf) -> None:
-        """Grafted after CP-Gen chose the primary's symmetry transforms: predict every source, keep those at or above the
-        mean, solve them for the current scene and prepare the blend (``mixing`` module docstring)."""
+        """Grafted after CP-Gen chose the primary's symmetry transforms: weigh every source, solve the retained ones for the
+        current scene and prepare the blend (``mixing`` module docstring)."""
         if self._last_mix is not None:                        # an earlier solve of this attempt never reached a segment
             self._unplanned_mixes.append(self._last_mix)
         self._mix_plan, self._last_mix = None, None
@@ -342,9 +347,9 @@ class CPGenRuntime:
             import demo_aug.generate
 
             self.official = demo_aug.generate
-        carried = self._prev_ref if idx > 0 else None
+        carried = self._carried_into(idx)
         try:
-            record, w = mixing.decide(self.method.mixer.model, sequences, idx, primary, obs, carried)
+            record, w = mixing.decide(self.method.mixer, sequences, idx, primary, obs, carried)
         except KeyError as err:                              # a pose the model needs is missing from the observation
             self._last_mix = {"subtask": idx, "source_a": primary, "mixed": False, "identity_reason": f"missing {err}"}
             return
@@ -360,6 +365,13 @@ class CPGenRuntime:
         weights = {"primary": float(w[primary]), **{j: float(w[j]) for j in others}}
         self._mix_plan = mixing.MultiMixPlan(mixing.gripper_series(constraint), solved, weights)
         record.update(mixed=True, alignment=self._mix_plan.meta)
+
+    def _carried_into(self, idx: int) -> str | None:
+        """The object in the hand when constraint ``idx`` starts: the reference object of the latest recorded constraint
+        before it (None for the first constraint). Asked by index, so a second solve of ``idx`` (after its bridge) gets
+        the same object as the first."""
+        earlier = [k for k in self._references if k < idx]
+        return self._references[max(earlier)] if earlier else None
 
     def mixed_eef_des(self, t_idx: int, primary_pose):
         """Grafted around the step loop's ``compute_X_W_eef_des``: the official pose of step ``t_idx``, blended with the
@@ -380,34 +392,31 @@ class CPGenRuntime:
         self.rec.add_step(w_poses={EEF: self._target if self._target is not None else action_to_pose(action)},
                           e_poses={EEF: self._measured_before if self._measured_before is not None else np.eye(4)},
                           a_pre=action[:6], a_label=action, a_exec=executed,
-                          noise=float(np.max(np.abs(np.asarray(magnitude, dtype=float)))), seg_id=seg_id, term_signals=None,
-                          track=self._track)
+                          noise=float(np.max(np.abs(np.asarray(magnitude, dtype=float)))), seg_id=seg_id, term_signals=None)
         self.rec.add_success(bool(np.asarray(reward).item() == 1))
         self._labels.append(action)
         self._executed.append(executed)
-        if self.follower is None:
-            self._pos += 1
-            g = action[6:]
-            if g.size and g[0] != 0:
-                self._gripper_states[EEF] = bool(g[0] > 0)
+        self._pos += 1
 
 
 def apply(method: Method, *, chunk_seed: int, records_dir: Path | None, graft_hashes: dict, all_sources: bool = False,
-          per_subtask: bool = False) -> dict:
+          per_subtask: bool = False, resolve_after_bridge: bool = False) -> dict:
     """Install the grafted ``generate_demo``; returns a description for the chunk log."""
     global _INSTALLED
     from demo_aug.generate import CPPolicy, DemoGenerator
 
     if _INSTALLED is not None:
         raise RuntimeError("CP-Gen runtime already applied in this process")
-    runtime = CPGenRuntime(method, chunk_seed, records_dir, all_sources=all_sources, per_subtask=per_subtask)
+    runtime = CPGenRuntime(method, chunk_seed, records_dir, all_sources=all_sources, per_subtask=per_subtask,
+                           resolve_after_bridge=resolve_after_bridge)
     edits = [(DemoGenerator, "generate_demo", build_graft(DemoGenerator.generate_demo, graft_hashes.get("generate_demo")))]
     if method.mixer is not None:
         edits.append((CPPolicy, "solve_constraint", build_mix_graft(CPPolicy.solve_constraint, graft_hashes.get("solve_constraint"))))
     _INSTALLED = install_grafts(edits, {"_tmg": runtime})
     return {**_INSTALLED.info, "method": method.name, "labels": "pre_noise",
-            "tracking": method.follower_factory is not None, "records_dir": None if records_dir is None else str(records_dir),
+            "records_dir": None if records_dir is None else str(records_dir),
             "all_sources": runtime.all_sources, "per_subtask_sources": runtime.picker.per_subtask,
+            "resolve_after_bridge": runtime.resolve_after_bridge,
             "mixing": method.mixer is not None}
 
 

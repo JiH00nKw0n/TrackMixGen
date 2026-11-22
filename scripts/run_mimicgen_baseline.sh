@@ -15,16 +15,19 @@
 #   ("diffusion_policy bc_rnn"), SEEDS ("202601 202602 202603"), SIZE (1000), POOL_LANES (2: pools generated at the same time),
 #   POLICY_PARALLEL (2: policy pipelines on the GPU at the same time), VAL_PARALLEL (4: checkpoints validated at a time per run),
 #   TEST_SHARDS (6: parallel shards of the 300 test scenes), SELECTION (official: the generator's source selection rule; ours = a source
-#   chosen at random for every subtask), METHOD (none: the baseline; a method config such as mixup_only runs the same pipeline
+#   chosen at random for every subtask), METHOD (none: the baseline; a method config such as skillmix runs the same pipeline
 #   with that method, writes under <...>/<selection>/<method>/ and logs to logs/<generator>_<method>; the evaluation scenes are
-#   shared with the baseline; `make generate` first builds the task's coefficient file if the method needs a missing one),
-#   ONLY_GENERATION (1: stop after the datasets), BUNDLE_NAME,
+#   shared with the baseline; `make generate` first builds the task's SkillMix rule file if it is missing),
+#   GENERATION (pool_robosuite_image; hub: download the published SkillMix datasets instead of generating, see README 3.10),
+#   ONLY_GENERATION (1: stop after the datasets), BUNDLE_NAME, PORT_BASE (8800: first policy-server port; run k uses
+#   PORT_BASE + 40 k ... + 40 k + 39, so two drivers on one machine need bases at least 40 x their runs apart),
 #   MINI (1: an end-to-end check at toy scale: a 200-attempt pool in the folder pilot50, 10-demonstration datasets, 200 training
 #   updates, 6 evaluation scenes per split; same code path as the real run).
 set -uo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 CLUSTER=${CLUSTER:-local}; GPU=${GPU:-0}
 GENERATOR=${GENERATOR:-mimicgen}
+PORT_BASE=${PORT_BASE:-8800}   # first policy-server port; a second driver on the same machine needs its own range
 if [ "$GENERATOR" = cpgen ]; then DEFAULT_TASKS="three_piece_assembly hammer_cleanup mug_cleanup threading coffee"; IMAGE=cpgen
 else DEFAULT_TASKS="three_piece_assembly square stack_three mug_cleanup hammer_cleanup threading coffee"; IMAGE=robosuite; fi
 TASKS=${TASKS:-$DEFAULT_TASKS}   # longest pools first
@@ -50,6 +53,8 @@ if [ "${MINI:-0}" = 1 ]; then
   BUNDLE_NAME=${BUNDLE_NAME:-${GENERATOR}_mini_$(date +%Y%m%d)}
 fi
 GEN_NAME=${GENERATION##*/}
+# a generation config with a `hub:` block (generation=hub) names a published dataset: `make dataset` downloads it, no pool
+FROM_HUB=0; grep -q '^hub:' "$REPO/configs/experiment/generation/$GENERATION.yaml" 2>/dev/null && FROM_HUB=1
 export SINGULARITYENV_CUDA_VISIBLE_DEVICES=$GPU CUDA_VISIBLE_DEVICES=$GPU
 DATA_ROOT=$(make -s -C "$REPO" print-data-root CLUSTER="$CLUSTER")
 if [ "$METHOD" = none ]; then RUN_NAME=${GENERATOR}_baseline; else RUN_NAME=${GENERATOR}_${METHOD}; fi
@@ -66,6 +71,7 @@ pool_successes() { python3 -c "import json,sys; d=json.load(open(sys.argv[1])); 
 pool_task() {   # one task's sources and pool (extended until SIZE successes); returns 2 when its dataset and scenes exist
   local t=$1 attempts=${ATTEMPTS[$t]} common="GENERATOR=$GENERATOR IMAGE=$IMAGE TASK=$t CLUSTER=$CLUSTER SELECTION=$SELECTION"
   if [ -f "$(dataset_of $t)" ] && [ -f "$(resets_of $t)" ]; then log "[$t] dataset and resets exist, generation skipped"; return 2; fi
+  if [ "$FROM_HUB" = 1 ]; then log "[$t] GENERATION=$GENERATION: the dataset comes from the Hugging Face Hub, no pool"; return 0; fi
   log "[$t] sources"
   M sources $common > "$LOG/sources_$t.log" 2>&1 || { fail "sources $t" "$LOG/sources_$t.log"; return 1; }
   while :; do
@@ -114,7 +120,7 @@ generation_lane() {
 }
 
 policy_lane() {   # task x policy x seed, POLICY_PARALLEL pipelines at a time; a pipeline starts when its task's dataset exists
-  local port=8800
+  local port=$PORT_BASE
   for t in $TASKS; do
     until [ -f "$(dataset_of $t)" ] && [ -f "$(resets_of $t)" ]; do
       grep -q "pool $t\|dataset $t\|sources $t\|resets $t" "$LOG/FAILURES" 2>/dev/null && { log "[$t] generation failed, policies skipped"; continue 2; }

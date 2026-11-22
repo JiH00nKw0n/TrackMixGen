@@ -32,7 +32,8 @@ def main(argv=None):
 
         register_scene_env(spec)
         install_runtime(spec, runtime.apply, all_sources=bool(extra.get("all_sources")),
-                        per_subtask=bool(extra.get("per_subtask_sources")))
+                        per_subtask=bool(extra.get("per_subtask_sources")),
+                        resolve_after_bridge=bool(extra.get("resolve_after_bridge")))
         import demo_aug.generate as official
 
         if os.environ.get("TMG_CPGEN_FAILURE_VIDEOS", "1") == "0":

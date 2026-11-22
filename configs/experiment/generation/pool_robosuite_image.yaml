@@ -1,7 +1,7 @@
 # Full pool of a robosuite generator (MimicGen, CP-Gen) with the images the policies train on: enough attempts for
 # 1,000 successes per task (attempts are set per task on the command line, generation.attempts=...), chunks of 250
 # attempts, chunk seeds 30001, 30002, ... This file holds the generation protocol that every other generation config
-# inherits (`pool_robosuite_lowdim`, `rank_human_demos`, `pool_isaac`, and the `test/` configs).
+# inherits (`pool_robosuite_lowdim`, `pool_unmix`, `pool_isaac`, and the `test/` configs).
 #
 # Naming: pool_<simulator>_<observation> for the full pools; `test/` holds the small configs for smoke runs and checks.
 name: pool_robosuite_image
@@ -10,8 +10,8 @@ chunk: 250
 seed_offset: 30000                # chunk seeds are seed_offset + 1, + 2, ...
 protocol:
   keep_failed: false              # failed attempts are not written to MimicGen's demo_failed.hdf5 (with images, a failed attempt is
-                                  # about 13 MB; our records keep every attempt's steps and outcome anyway). The low-dim and ranking
-                                  # pools keep them (their own files say so).
+                                  # about 13 MB; our records keep every attempt's steps and outcome anyway). The low-dim pools and the
+                                  # SkillMix fit pools keep them (their own files say so).
   max_num_failures: null
   guarantee: false                # fixed attempt count (successes are selected at the dataset stage)
   # source selection comes from the `selection` group (selection=official | ours), independent of this file. official: what

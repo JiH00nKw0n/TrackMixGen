@@ -21,7 +21,6 @@ DISPATCH = {
     "verify_baseline": ("tmg.generation.verify:verify_baseline", "identical"),
     "sources": ("tmg.cli:fetch_sources", None),
     "check_scene": ("tmg.generation.scene_check:check_scene", "ok"),
-    "rank_sources": ("tmg.generation.rank_sources:rank_sources", None),
     "fit_coefficients": ("tmg.generation.fit_coefficients:fit_coefficients", None),
     "dataset": ("tmg.data.dataset:build_dataset", None),
     "train": ("tmg.policy.trainer:train", None),
@@ -35,8 +34,7 @@ DISPATCH = {
 HELP_LINES = {
     "generate": "one pool of generation attempts (generator, task, scene, method, generation)",
     "verify_baseline": "run one chunk officially and through the adapter (method=none) and compare the demos",
-    "rank_sources": "order a task's source demonstrations by their generation success in a baseline pool",
-    "fit_coefficients": "fit the per-subtask success model of the logistic mixer on a uniform-source baseline pool",
+    "fit_coefficients": "fit the SkillMix rule of a task on its randmix and unmix pools",
     "train": "train one policy on one dataset (train image)",
     "select_checkpoint": "choose a run's checkpoint from validation.jsonl (or the last one)",
     "serve": "policy server for one checkpoint (train image)",

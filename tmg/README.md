@@ -40,11 +40,10 @@ tmg/
 | `runner.py` | `run_pool`: plans the chunks, skips finished ones, runs the others as parallel processes, validates each result, writes `DONE.json`. Generator-independent. |
 | `verify.py` | `verify_baseline`: one MimicGen chunk run two times with the same `mg_config.json`, without the grafts and with the grafts and `method=none`, compared byte for byte. It shows that the grafts change nothing when the method is off, not that our settings equal the authors' settings. MimicGen only (CP-Gen and the Isaac Lab generators are not deterministic from run to run on the GPU). |
 | `graft.py` | `Graft`: reads an official function's source, checks its hash, inserts our calls at named anchors in the syntax tree, recompiles. The official source is never copied or edited on disk. |
-| `execution.py` | `TrajectoryExecution`: the step bookkeeping of the MimicGen adapter (follower driving, noise accounting, pre-noise labels, feeding the recorder), and `SegmentTable`, the waypoint-to-record-segment map that the CP-Gen runtime also uses. |
-| `seeds.py` | The random streams we derive from a chunk seed (private noise stream: seed + 7919; per-attempt source pick of CP-Gen), named once so every adapter derives them the same way. |
+| `execution.py` | `TrajectoryExecution`: the step bookkeeping of the MimicGen adapter (record segments, pre-noise labels, feeding the recorder), and `SegmentTable`, the waypoint-to-record-segment map that the CP-Gen runtime also uses. |
+| `seeds.py` | The random streams we derive from a chunk seed (per-attempt source pick of CP-Gen), named once so every adapter derives them the same way. |
 | `scene_check.py` | `tmg check_scene`: resets a (task, scene) many times and reports contacts, overhang, falls, drift and reach. |
-| `rank_sources.py` | `tmg rank_sources`: per-source success rates from a baseline pool, written as the task's ranking file. |
-| `method/` | The TrackMix method behind two hook interfaces. `interfaces.py` (`SegmentMixer`, `PathFollower`, `Method`, `build_method`), `guided_mix.py` (source mixing guided by the ranking), `event_mix.py` (event-aligned blending of two segments), `tracking.py` (`ErrorAdaptiveFollower`, `EndEffectorPath`), `grippers.py` (gripper event detectors: sign rule, hand closure), `ranking.py` (reading rankings and splitting them). No simulator imports. |
+| `method/` | SkillMix behind one hook interface. `interfaces.py` (`SegmentMixer`, `Method`, `build_method`), `skillmix.py` (SkillMix: the rule file, the softmax and randmix weights, the mixer), `success_model.py` (the per-source features and the rows of the fit), `event_mix.py` (event-aligned blending of segments), `grippers.py` (gripper event detectors: sign rule, hand closure). No simulator imports. |
 | `simulators/` | Simulator-level helpers shared by adapters on the same simulator. `robosuite.py` registers environment classes with the scene ranges and the reach constraint on MimicGen's classes; `isaaclab.py` applies scene ranges to Isaac Lab environment configs, reads hand layouts and measured link poses; `isaaclab_tasks/` registers a GR1 pick-and-place environment with two cameras. |
 | `generators/` | One adapter per generator. `make_generator(cfg)` picks it from the `ADAPTERS` table by `generator.name` and imports only that adapter. Shared code: `robosuite_base.py` (base of the two robosuite adapters), `_sources.py` (download, md5, manifest), `_shared.py` (record summary, `RECORD_ERROR.json`), `_entry.py` (spec loading and graft installation in the chunk process). |
 
@@ -54,17 +53,17 @@ Each adapter folder has the same four files:
 |---|---|
 | `adapter.py` | The `SyntheticDataGenerator`: builds the official generator's configuration for one chunk, names the chunk command, validates the chunk's outputs, tells `tmg dataset` where the demonstrations are (`demo_layout`). |
 | `entrypoint.py` | The chunk process: registers the scene's environment, installs the grafts, runs the official generation script or function. |
-| `runtime.py` | The `_tmg` object the grafted official code calls: begins and ends attempts, mixes segments, drives the follower, records steps. |
+| `runtime.py` | The `_tmg` object the grafted official code calls: begins and ends attempts, mixes segments, records steps. |
 | `sources.py` | Downloads and prepares the official source demonstrations. |
 
 `mimicgen/` also has `config_builder.py` (the official json config from the task template and our protocol). `cpgen/` also has
 `windows.py` (per-demonstration constraint windows of the source demonstrations) and `checkout.py` (puts CP-Gen's checkout on the path).
-`isaaclab/` is the Isaac Lab base (SoftMimicGen on its Isaac Lab fork; the chunk entrypoint, the mixing runtime and `tracking_loop.py`, the one tracking loop whose package-specific steps are hooks), `autodata/` the DexMimicGen generator (NVIDIA AutoData's `autodata_core` on Isaac Lab 3.0 with Arena: Pick Place, Microwave, Bottle Door). `cpgen/` is CP-Gen.
+`isaaclab/` is the Isaac Lab base (SoftMimicGen on its Isaac Lab fork; the chunk entrypoint and the mixing runtime, whose package-specific steps are hooks), `autodata/` the DexMimicGen generator (NVIDIA AutoData's `autodata_core` on Isaac Lab 3.0 with Arena: Pick Place, Microwave, Bottle Door). `cpgen/` is CP-Gen.
 
 ### Adding a method variant
 
-See `tmg/generation/method/README.md`: the hook interfaces, the record keys a follower must return, the current
-values, and the three steps of a new variant (class, registry name, method file).
+See `tmg/generation/method/README.md`: the hook interface, the current values, and the three steps of a new variant
+(class, registry name, method file).
 
 ## `tmg/data/`: from pools to training files
 

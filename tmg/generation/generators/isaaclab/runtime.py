@@ -1,4 +1,4 @@
-"""The ``_tmg`` callbacks for the Isaac Lab mimic generators, and the shared-path tracking loop on their classes.
+"""The ``_tmg`` callbacks for the Isaac Lab mimic generators.
 
 Official code is never edited on disk. ``install`` reads the pinned functions, checks their source hashes and
 grafts one call per anchor (``tmg.generation.graft``). The anchors of the trajectory builder are class attributes of the
@@ -29,17 +29,6 @@ first computes the noiseless action (with the torch RNG state saved and restored
 official draw sequence is unchanged) and keeps it as the label, then calls the official method with the
 noise. The official recorder writes the executed actions to the hdf5; the labels live in our records, and
 ``tmg dataset`` reads ``actions_pre_noise`` from there for these generators.
-
-Tracking (``method.tracking.enabled``): the official loop advances one waypoint per step for each end
-effector separately, so a follower that moves both hands along one path variable cannot be hosted by grafts.
-``TrackingLoop`` (``tracking_loop.py``; ``IsaacLabTrackingLoop`` below fills its hooks) replaces
-``DataGenerator.generate`` for the attempt with a loop that still calls the official builders
-(``generate_*trajectory``, ``merge_eef_subtask_trajectory``, ``MultiWaypoint.execute``) and the official recorder, and
-drives the paired trajectories with ``tmg.generation.method.tracking``: one ``ErrorAdaptiveFollower`` per source-time
-interval during which every end effector has a trajectory, errors measured on the configured links
-(``simulators.isaaclab.measured_eef_poses``), gripper events taken from the union of the hands' commanded events, and the
-official per-step noise draws preserved by a ``NoiseLedger`` (one original draw bundle per base waypoint, a private
-generator for extra steps). The identity check (``method=none``) always runs the official ``generate``.
 """
 from __future__ import annotations
 
@@ -47,7 +36,6 @@ import importlib
 import json
 import time
 import traceback
-from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -55,23 +43,16 @@ from pathlib import Path
 import numpy as np
 
 from tmg.core.records import LABELS_FORMAT, AttemptRecorder, record_file
-from tmg.generation.generators.isaaclab.tracking_loop import (  # noqa: F401  re-exported names
-    Attempt,
-    Interval,
-    NoiseLedger,
-    TrackingLoop,
-    _np,
-    _wrap_randn_like,
-    completed_last,
-    cut_interval,
-    replay_randn_like,
-)
 from tmg.generation.graft import Graft
 from tmg.generation.method.interfaces import Method, MixContext
-from tmg.generation.seeds import private_noise_seed
 from tmg.generation.simulators.isaaclab import HandLayout, measured_eef_poses, observed_eef_poses
 
 RECORD_ERROR = "RECORD_ERROR.json"
+
+
+def _np(x) -> np.ndarray:
+    """A torch tensor (or anything array-like) as a float numpy array."""
+    return np.asarray(x.detach().cpu().numpy() if hasattr(x, "detach") else x, dtype=float)
 
 
 @dataclass
@@ -82,7 +63,7 @@ class IsaacLabLayout:
     arm_action_dims: dict[str, tuple[int, int]]       # eef -> (start, end) of its arm pose block in the action
     hand_prefixes: dict[str, str] | None              # eef -> joint-name prefix (dexterous hands), or None (gripper)
     hand_term: str | None                             # action term holding the hand joint names (GR1: "upper_body_ik")
-    measure_links: dict[str, str] | None              # eef -> body name to measure the follower error on (None: observed eef)
+    measure_links: dict[str, str] | None              # eef -> body whose pose is recorded as the measured pose (None: observed eef)
     noise_draw_shapes: tuple[int, ...] = ()           # per-step torch.randn_like shapes of target_eef_pose_to_action
 
     @classmethod
@@ -147,7 +128,6 @@ class IsaacLabRuntime:
         self._labels: list[np.ndarray] = []
         self._executed: list[np.ndarray] = []
         self._pending: dict | None = None
-        self._pending_track: dict | None = None
         self._selected: dict[str, int] = {}           # eef -> source demonstration chosen in this attempt
         self._seg_id = -1
         self._action_owner = None                     # object whose target_eef_pose_to_action is wrapped
@@ -210,10 +190,12 @@ class IsaacLabRuntime:
     def begin_attempt(self, generator, env_id: int) -> None:
         """Grafted after ``new_initial_state``: start the record and install the pre-noise label wrapper."""
         self._attempt_t0 = time.time()
-        self._labels, self._executed, self._pending, self._pending_track = [], [], None, None
+        self._labels, self._executed, self._pending = [], [], None
         self._selected = {}
         self.rec.begin_attempt()
         self._seg_id = -1
+        if self.method.mixer is not None:
+            self.method.mixer.begin_attempt()              # a new attempt draws new randmix weights
         if self._hand_layout is None:
             self._hand_layout = self.layout.hand_layout(self.environment(generator))
         self._install_label_wrapper(self.action_owner(generator), env_id)
@@ -339,18 +321,9 @@ class IsaacLabRuntime:
         if self._seg_id < 0:
             self._seg_id = self.rec.begin_segment(1)
         self.rec.add_step(w_poses=p["targets"], e_poses=p["measured"], a_pre=arm, a_label=p["label"], a_exec=p["executed"],
-                          noise=p["noise"], seg_id=self._seg_id, term_signals=signals, track=self._pending_track)
-        self._pending_track = None
+                          noise=p["noise"], seg_id=self._seg_id, term_signals=signals)
         self.rec.add_success(bool(success))
 
-    def begin_segment(self, kind: int) -> int:
-        """Open a record segment (the tracking loop opens one per source-time interval)."""
-        self._seg_id = self.rec.begin_segment(kind)
-        return self._seg_id
-
-    def note_track(self, row: dict, *, slot_used: bool) -> None:
-        """The follower's record of the step about to execute (``record_step`` attaches it to the step)."""
-        self._pending_track = {**row, "slot": 1 if slot_used else 0}
 
 
 class SoftMimicGenRuntime(IsaacLabRuntime):
@@ -421,8 +394,8 @@ def install(package: str, runtime: IsaacLabRuntime, graft_hashes: dict) -> dict:
 
 
 def install_from_spec(spec: dict, namespace: dict | None = None) -> dict:
-    """Entry used by the chunk entrypoint: build the runtime from the chunk spec, install the grafts and, when the method
-    tracks, the shared-path ``generate``. ``namespace`` (the official script's globals) is not needed here."""
+    """Entry used by the chunk entrypoint: build the runtime from the chunk spec and install the grafts. ``namespace`` (the
+    official script's globals) is not needed here."""
     from tmg.generation.method import build_method
 
     chunk_seed = int(spec["chunk"]["seed"])
@@ -430,106 +403,4 @@ def install_from_spec(spec: dict, namespace: dict | None = None) -> dict:
     layout = IsaacLabLayout.from_spec(spec["extra"]["layout"])
     runtime = runtime_class(bool(spec["extra"]["soft"]))(method, layout, Path(spec["records_dir"]))
     info = install(spec["extra"]["package"], runtime, dict(spec["extra"].get("graft_hashes") or {}))
-    if method.follower_factory is not None:
-        dg = importlib.import_module(f"{spec['extra']['package']}.data_generator")
-        dg.DataGenerator.generate = make_tracking_generate(runtime, method.follower_factory,
-                                                           private_seed=private_noise_seed(chunk_seed))
-        info["tracking"] = "shared-path generate installed"
     return info
-
-
-# tracking: shared-path loop on the Isaac Lab classes ---------------------------------------------------
-class IsaacLabTrackingLoop(TrackingLoop):
-    """``TrackingLoop`` hooks for ``softmimicgen.datagen`` / ``isaaclab_mimic.datagen``: a waypoint's hand command is its
-    ``gripper_action`` tensor, ``MultiWaypoint.execute`` returns the step's states, observations and actions, and the
-    result dict of the official ``generate`` is rebuilt from them."""
-
-    async def begin(self, generator, env_id: int, success_term, env_reset_queue, env_action_queue) -> Attempt:
-        import torch
-
-        env = generator.env
-        eefs = sorted(generator.env_cfg.subtask_configs.keys())
-        env_ids = torch.tensor([env_id], dtype=torch.int64, device=env.device)
-        env.recorder_manager.reset(env_ids=env_ids)
-        await env_reset_queue.put(env_id)
-        await env_reset_queue.join()
-        initial_state = env.scene.get_state(is_relative=True)
-        self.runtime.begin_attempt(generator, env_id)
-        return Attempt(generator, env_id, success_term, env_action_queue, eefs, initial_state, env_ids,
-                       extra={"states": [], "observations": [], "actions": []})
-
-    def lock(self, attempt: Attempt):
-        return attempt.generator.src_demo_datagen_info_pool.asyncio_lock
-
-    def build(self, attempt: Attempt, eef: str, subtask_ind: int, boundaries: dict, selected: dict, previous) -> list:
-        generator = attempt.generator
-        if hasattr(generator, "generate_trajectory"):      # Soft: one builder returns the merged trajectory
-            return generator.generate_trajectory(attempt.env_id, eef, subtask_ind, boundaries, {}, selected, previous)
-        traj = generator.generate_eef_subtask_trajectory(attempt.env_id, eef, subtask_ind, boundaries, {}, selected)
-        return generator.merge_eef_subtask_trajectory(attempt.env_id, eef, subtask_ind, previous, traj)
-
-    def subtask_steps(self, attempt: Attempt, eef: str) -> list[tuple[int, int]]:
-        return [(c.num_interpolation_steps, c.num_fixed_steps) for c in attempt.generator.env_cfg.subtask_configs[eef]]
-
-    def num_subtasks(self, attempt: Attempt, eef: str) -> int:
-        return len(attempt.generator.env_cfg.subtask_configs[eef])
-
-    def waypoint_classes(self, attempt: Attempt) -> tuple:
-        wp = importlib.import_module(type(attempt.generator).__module__.rsplit(".", 1)[0] + ".waypoint")
-        return wp.Waypoint, wp.MultiWaypoint
-
-    def waypoint_gripper(self, waypoint, eef: str) -> np.ndarray:
-        return _np(waypoint.gripper_action)
-
-    def clone_hand(self, waypoint):
-        return waypoint.gripper_action.clone()
-
-    def hand_command(self, base, eef: str, gripper: np.ndarray, device):
-        import torch
-
-        return torch.as_tensor(gripper, device=device, dtype=base.gripper_action.dtype)
-
-    async def execute(self, attempt: Attempt, multi_waypoint) -> bool:
-        result = await multi_waypoint.execute(attempt.generator.env, attempt.success_term, attempt.env_id,
-                                              attempt.env_action_queue)
-        if not result["states"]:
-            return False
-        attempt.extra["states"].extend(result["states"])
-        attempt.extra["observations"].extend(result["observations"])
-        attempt.extra["actions"].extend(result["actions"])
-        return result["success"]
-
-    def export(self, attempt: Attempt, success: bool, export_demo: bool) -> dict:
-        import torch
-
-        env = attempt.generator.env
-        actions = torch.cat(attempt.extra["actions"], dim=0)
-        verdict = torch.tensor([[success]], dtype=torch.bool, device=env.device)
-        env.recorder_manager.set_success_to_episodes(attempt.env_ids, verdict)
-        if export_demo:
-            env.recorder_manager.export_episodes(attempt.env_ids)
-        return {"initial_state": attempt.initial_state, "states": attempt.extra["states"],
-                "observations": attempt.extra["observations"], "actions": actions, "success": success}
-
-
-def make_tracking_generate(runtime: IsaacLabRuntime, follower_factory: Callable, private_seed: int):
-    """Build the replacement ``DataGenerator.generate`` (official signature) that drives paired trajectories with one follower."""
-    loop = IsaacLabTrackingLoop(runtime, follower_factory, private_seed)
-
-    async def generate(self, env_id, success_term, env_reset_queue=None, env_action_queue=None, pause_subtask=False,
-                       export_demo=True, motion_planner=None):
-        if pause_subtask or motion_planner is not None:
-            raise NotImplementedError("tracking generate supports neither pause_subtask nor motion planners")
-        attempt = await loop.begin(self, env_id, success_term, env_reset_queue, env_action_queue)
-        return await loop.run(attempt, export_demo)
-
-    return generate
-
-
-def _clone_gripper(waypoint):
-    return waypoint.gripper_action.clone()
-
-
-def _cut_interval(active: dict, eefs: list[str], start: int, Waypoint, previous_last: dict) -> Interval:
-    """``tracking_loop.cut_interval`` for Isaac Lab waypoints (hand command: the ``gripper_action`` tensor)."""
-    return cut_interval(active, eefs, start, Waypoint, previous_last, _clone_gripper)

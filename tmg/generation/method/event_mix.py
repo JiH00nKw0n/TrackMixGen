@@ -1,17 +1,17 @@
-"""Event-aligned mixing of two subtask segments (pure numpy/scipy; no simulator).
+"""Event-aligned mixing of subtask segments (pure numpy/scipy; no simulator).
 
-Ported from the 2026-10 Soft/Dex experiment code (event_aligned_mix.py) with the same semantics: the two
-segments must have the same ordered gripper open/close events; event times are blended with ``weight_a``,
-each interval between events is time-warped separately, positions are blended linearly and rotations by a
-fraction of the shortest rotation from A to B. ``weight_a`` 1 or 0 returns the corresponding segment
-unchanged. Gripper state means the COMMANDED open/close (positive = close), not measured contact.
+Ported from the 2026-10 Soft/Dex experiment code (event_aligned_mix.py) with the same semantics: the segments must have
+the same ordered gripper open/close events; event times are the weighted mean of the segments' event steps, each interval
+between events is time-warped separately, positions are blended linearly and rotations by the weighted rotation mean
+(``mix_many``, SkillMix). ``align_segments`` puts two segments on one timeline (CP-Gen puts each retained source on the
+primary's). Gripper state means the COMMANDED open/close (positive = close), not measured contact.
 """
 from __future__ import annotations
 
 import numpy as np
 from scipy.spatial.transform import Rotation, Slerp
 
-from tmg.generation.method.grippers import (  # noqa: F401  IncompatibleGripperEvents and gripper_states are re-exported
+from tmg.generation.method.grippers import (  # IncompatibleGripperEvents and gripper_states are also re-exported
     IncompatibleGripperEvents,
     change_indices,
     gripper_states,
@@ -64,40 +64,6 @@ def sample_poses(poses: np.ndarray, times: np.ndarray) -> np.ndarray:
 BLEND_PARTS = ("both", "position", "rotation")
 
 
-def blend_poses(a: np.ndarray, b: np.ndarray, weight_a, parts: str = "both") -> np.ndarray:
-    """Linear translation blend and shortest-rotation blend of two aligned pose arrays.
-
-    ``weight_a`` is the share of ``a``: one number for the whole array, or one number per pose (shape ``(n,)``)
-    for a blend whose weight changes along the segment. ``parts`` blends both (default), only the positions (the
-    rotations stay ``a``'s), or only the rotations (the positions stay ``a``'s); the blend-ratio study uses the last two
-    to tell which part of a blend causes a failure.
-    """
-    if parts not in BLEND_PARTS:
-        raise ValueError(f"parts must be one of {BLEND_PARTS}, got {parts!r}")
-    a = np.asarray(a, dtype=float)
-    b = np.asarray(b, dtype=float)
-    if a.shape != b.shape:
-        raise ValueError("aligned pose arrays must have equal shapes")
-    out = np.tile(np.eye(4), (len(a), 1, 1))
-    ra = Rotation.from_matrix(a[:, :3, :3])
-    rb = Rotation.from_matrix(b[:, :3, :3])
-    delta = ra.inv() * rb
-    if np.ndim(weight_a) == 0:
-        w_pos = w_rot = float(weight_a)
-    else:
-        w = np.asarray(weight_a, dtype=float).reshape(-1)
-        if len(w) != len(a):
-            raise ValueError(f"{len(w)} weights for {len(a)} poses")
-        w_pos, w_rot = w[:, None], w[:, None]
-    if parts == "rotation":
-        w_pos = 1.0
-    if parts == "position":
-        w_rot = 1.0
-    out[:, :3, 3] = w_pos * a[:, :3, 3] + (1 - w_pos) * b[:, :3, 3]
-    out[:, :3, :3] = (ra * Rotation.from_rotvec((1 - w_rot) * delta.as_rotvec())).as_matrix()
-    return out
-
-
 def _check_commands(gripper_a, gripper_b) -> tuple[np.ndarray, np.ndarray]:
     ga = np.asarray(gripper_a, dtype=float)
     gb = np.asarray(gripper_b, dtype=float)
@@ -144,31 +110,6 @@ def align_segments(poses_a, gripper_a, poses_b, gripper_b, weight_a: float):
     return sample_poses(pa, ta), sample_poses(pb, tb), ia, ib, meta
 
 
-def mix_segments(poses_a, gripper_a, poses_b, gripper_b, weight_a: float, parts: str = "both"):
-    """Return (mixed poses, mixed gripper commands, alignment metadata).
-
-    Inputs are the target poses of a subtask segment, each expressed in its own frozen reference-object
-    frame, and the per-step gripper commands of shape (N,) or (N, 1). The events are placed at the ``weight_a``
-    blend of both sources' event steps (:func:`align_segments`) and the poses and commands are blended with
-    ``weight_a`` at every step. ``parts`` limits the pose blend to the positions or the rotations (:func:`blend_poses`);
-    the timeline and the gripper commands are the same for all three.
-    """
-    if not np.isfinite(weight_a) or not 0 <= weight_a <= 1:
-        raise ValueError("weight_a must lie in [0, 1]")
-    if weight_a in (0, 1):
-        p, g = (poses_a, gripper_a) if weight_a == 1 else (poses_b, gripper_b)
-        return np.array(p, dtype=float), np.array(g, dtype=float), {
-            "identity_source": "A" if weight_a == 1 else "B", "weight_a": float(weight_a), "samples": len(p)}
-    ga, gb = _check_commands(gripper_a, gripper_b)
-    aligned_a, aligned_b, ia, ib, align = align_segments(poses_a, ga, poses_b, gb, weight_a)
-    mixed = blend_poses(aligned_a, aligned_b, weight_a, parts)
-    grip = weight_a * ga.reshape(-1)[ia] + (1 - weight_a) * gb.reshape(-1)[ib]
-    if ga.ndim == 2:
-        grip = grip[:, None]
-    meta = dict(weight_a=float(weight_a), **align)
-    return mixed, grip, meta
-
-
 def mix_many(poses, series, weights, parts: str = "both"):
     """Convex blend of any number of segments: ``(mixed poses, mixed event series, alignment metadata)``.
 
@@ -179,8 +120,6 @@ def mix_many(poses, series, weights, parts: str = "both"):
     weighted mean of the segments' event steps and every interval between events is time-warped separately; positions
     are the weighted mean, rotations the weighted rotation mean (``Rotation.mean``), and the event series the weighted
     mean. ``parts`` keeps the rotations (``position``) or the positions (``rotation``) of the largest-weight segment.
-    With two segments the positions, the timeline and the series equal ``mix_segments``; the rotations differ from its
-    shortest-rotation blend only by the difference between a chordal mean and a geodesic blend.
     """
     if parts not in BLEND_PARTS:
         raise ValueError(f"parts must be one of {BLEND_PARTS}, got {parts!r}")
@@ -234,21 +173,3 @@ def mix_many(poses, series, weights, parts: str = "both"):
                 desired_event_steps=desired[1:-1].tolist(), actual_event_steps=knots[1:-1].tolist(),
                 source_index={str(k): i.tolist() for (k, _, _), i in zip(segs, index)})
     return out, grip, meta
-
-
-def anchor_rotation_degrees(poses_a, gripper_a, poses_b, gripper_b) -> list[float] | None:
-    """Rotation differences (deg) between the two segments at the anchors (start, every close event, end), or
-    None when the gripper event structure differs."""
-    matched = _matching_events(gripper_a, gripper_b)
-    if matched is None:
-        return None
-    _, ea, _, eb, la = matched
-    a = np.asarray(poses_a, dtype=float)
-    b = np.asarray(poses_b, dtype=float)
-    pairs = [(0, 0), (len(a) - 1, len(b) - 1)] + [(int(i), int(j)) for i, j, label in zip(ea, eb, la)
-                                                   if label == "close"]
-    out = []
-    for i, j in pairs:
-        cos = (np.sum(a[i, :3, :3] * b[j, :3, :3]) - 1) / 2
-        out.append(float(np.degrees(np.arccos(np.clip(cos, -1, 1)))))
-    return out

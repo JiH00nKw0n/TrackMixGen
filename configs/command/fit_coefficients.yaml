@@ -1,7 +1,8 @@
 # @package _global_
-# tmg fit_coefficients: fit the per-subtask success model of the logistic mixer on a finished uniform-source baseline
-# pool (method=none, selection=ours) and write configs/experiment/generator/<generator>/coefficients/<task>.yaml.
-#   tmg fit_coefficients task=hammer_cleanup scene=ours selection=ours generation=rank_human_demos
+# tmg fit_coefficients: fit the SkillMix model of one task on its finished randmix and unmix pools and write the
+# rule file configs/experiment/generator/<generator>/coefficients/<task>.yaml (tmg/generation/fit_coefficients.py).
+#   tmg fit_coefficients task=hammer_cleanup scene=ours selection=ours generation=pool_unmix
+# `make coefficients` builds both pools (scripts/ensure_coefficients.sh) and runs this.
 defaults:
   - /paths: local
   - /cluster: local
@@ -9,14 +10,19 @@ defaults:
   - /task: ???
   - /scene: ours
   - /selection: ours
-  - /generation: rank_human_demos
+  - /generation: pool_unmix
   - _self_
 
-# The baseline pool to read (the output folder of `tmg generate` with method=none and the same choices).
-pool: ${paths.pools}/${generator.name}/${task.name}/${scene.name}/${selection.name}/none/${generation.name}
-output: ${paths.reports}/fit_coefficients/${generator.name}/${task.name}/${scene.name}/${selection.name}/${generation.name}
+# The pools to read (output folders of `tmg generate` with the same choices). Randmix: method skillmix with
+# mixing.rule=randmix and method.name=skillmix_randmix (random Dirichlet weights); unmix: method none. More
+# pools of the same code and settings can be listed (a chunk name already read from an earlier pool is skipped).
+randmix_pools:
+  - ${paths.pools}/${generator.name}/${task.name}/${scene.name}/${selection.name}/skillmix_randmix/pool_randmix
+unmix_pools:
+  - ${paths.pools}/${generator.name}/${task.name}/${scene.name}/${selection.name}/none/${generation.name}
+output: ${paths.reports}/fit_coefficients/${generator.name}/${task.name}/${scene.name}/${selection.name}
 command: fit_coefficients
-source: ${task.source}           # source demonstrations with datagen_info (each source's in-hand pose)
+source: ${task.source}           # source demonstrations with datagen_info (each source's in-hand pose, MimicGen)
 overrides: []
 write_config: true                # also write configs/experiment/generator/<generator>/coefficients/<task>.yaml
-min_attempts: 100                 # refuse to fit on fewer attempts
+min_attempts: 100                 # refuse to fit on fewer attempts (per kind of pool)

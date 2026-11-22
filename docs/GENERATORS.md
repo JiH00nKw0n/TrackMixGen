@@ -1,6 +1,6 @@
 # 생성기 어댑터와 접목 지점
 
-이 문서는 공식 생성기 코드에 TrackMix와 기록 기능을 끼워 넣는 방법을 적는다. 공식 코드는 복사하지도 수정하지도 않는다.
+이 문서는 공식 생성기 코드에 SkillMix와 기록 기능을 끼워 넣는 방법을 적는다. 공식 코드는 복사하지도 수정하지도 않는다.
 실행 시점에 공식 함수의 소스를 읽어 해시를 확인하고, 구문 트리(AST)의 정해진 자리(앵커)에 우리 함수 호출 한 줄씩을 끼운 뒤
 다시 컴파일해 바꿔 끼운다. 끼우는 코드는 `tmg/generation/generators/<생성기>/runtime.py`에, 끼우는 도구는
 `tmg/generation/graft.py`에 있다.
@@ -28,40 +28,34 @@
 
 | 앵커 | 바뀌는 내용 | 하는 일 |
 |---|---|---|
-| `for seq in self.waypoint_sequences:` 몸통 첫 줄 | `_tmg.begin_segment(seq, self)` | 구간 기록 시작. 경로 추종이 켜져 있으면 이 구간의 추종기를 만든다 |
-| `for j in range(len(seq)):` | `for j in _tmg.step_indices(seq):` | 끄면 `range(len(seq))` 그대로. 켜면 추종기가 끝날 때까지 j를 낸다 |
-| `waypoint = seq[j]` | `waypoint = _tmg.waypoint(seq, j, env_interface)` | 끄면 `seq[j]`. 켜면 측정한 말단 자세로 다음 목표를 정한다 |
-| `action_pose = env_interface.target_pose_to_action(...)` 다음 | `_tmg.pre_noise(action_pose)` | 잡음 전 명령을 보관한다. 추가 스텝이면 비공개 난수로 같은 잡음을 더한다 |
+| `for seq in self.waypoint_sequences:` 몸통 첫 줄 | `_tmg.begin_segment(seq, self)` | 구간 기록 시작 |
+| `action_pose = env_interface.target_pose_to_action(...)` 다음 | `_tmg.pre_noise(action_pose)` | 잡음 전 명령을 보관한다(잡음은 공식 문장이 더한다) |
 | `datagen_info = env_interface.get_datagen_info(...)` 다음 | `_tmg.record_step(waypoint, datagen_info, play_action)` | 스텝 기록(목표 자세, 실제 자세, 잡음 전 명령, 실행 명령, 종료 신호) |
 | `cur_success_metrics = env.is_success()` 다음 | `_tmg.record_success(cur_success_metrics, env_interface)` | 스텝 뒤 상태의 성공 판정과 하위작업 종료 신호를 기록한다 |
 
 끼운 문장들은 공식 지역 변수를 공통 계층에 넘기는 일만 한다. 기록은 `tmg/core/records.py`, 혼합은 `tmg/generation/method/`,
-실행 중의 경로 추종과 난수 회계와 라벨은 `tmg/generation/execution.py`의 `TrajectoryExecution`이 맡는다. 이 계층은
-생성기와 무관하므로 Isaac Lab 어댑터도 같은 코드를 쓴다.
+실행 중의 구간과 라벨은 `tmg/generation/execution.py`의 `TrajectoryExecution`이 맡는다.
 
 난수 흐름에 대한 약속은 다음과 같다. 공식 실행기는 경로점마다 `np.random.randn(6)`을 한 번 부른다(`waypoint.noise`는 항상 실수라
-분기가 늘 실행된다). 방법이 꺼져 있으면 끼운 문장은 난수를 뽑지 않으므로 전역 난수 흐름이 공식 실행과 같다. 경로 추종이 켜지면
-한 하위작업의 궤적(이음 구간과 기술 구간 전부)을 하나의 경로로 따라가며, 스텝마다 새로 지나친 원 경로점 하나당 전역 난수를
-하나씩 순서대로 뽑아 그 경로점을 명령하는 스텝에 적용하고, 추가 스텝에는 청크 시드로 만든 비공개 난수를 쓴다. 끼운 경로점은
-`noise=None`으로 넘겨 공식 분기가 난수를 뽑지 않게 하고, `pre_noise`가 공식 문장과 같은 식으로 잡음을 더하고 자른다. 그래서 한
-하위작업에서 전역 난수를 뽑는 횟수가 공식 실행과 같고, 같은 시드의 기준선 실행과 방법 실행이 같은 장면 순서를 본다. 혼합이 일어난
-구간은 길이가 바뀌므로 그 시도부터는 짝이 맞지 않는다.
+분기가 늘 실행된다). 끼운 문장은 난수를 뽑지 않으므로 전역 난수 흐름이 공식 실행과 같다. SkillMix가 섞으면 그 하위작업의 구간
+길이가 바뀌므로 그 시도부터는 같은 시드의 기준선 실행과 짝이 맞지 않는다. 경로 추종(2026-11-22에 삭제)은 이 자리에서 경로점을
+바꾸고 난수를 따로 회계했다.
 
 ### 1.3 양팔 과제에서 지켜야 할 것 (Isaac Lab 어댑터가 따르는 규칙)
 
-한 하위작업의 양팔 경로는 추종기 하나가 같은 경로 변수로 전진시킨다. 손가락 명령의 손 구분은 환경 설정의 관절 이름
+손가락 명령의 손 구분은 환경 설정의 관절 이름
 (`L_`, `R_` 접두사, `tmg/core/actions.py`의 `split_by_prefix`)으로 만들고, 공식 mimic 환경의 `actions[:, 14:25]` 분할은
 쓰지 않는다. 집게 사건은 두 손 모두에서 찾아 합친다(`tmg/generation/method/grippers.py`의 `closure` 검출기).
 
-추종기의 오차는 목표 자세와 같은 좌표계의 측정 자세로 재야 한다. GR1 공식 환경은 역기구학 목표를 `*_hand_pitch_link`에
+측정 자세는 목표 자세와 같은 좌표계로 재야 한다. GR1 공식 환경은 역기구학 목표를 `*_hand_pitch_link`에
 걸지만 관측의 말단 자세 `*_eef_pos`, `*_eef_quat`는 `*_hand_roll_link`를 읽는다. 두 링크는 손목 피치 관절 하나로 이어져 있어
-그 사이의 회전(0.3에서 0.7 rad)이 "추적 오차"로 잡히고, 기다려도 줄지 않는다. Isaac Lab 어댑터는 역기구학 목표 링크의 자세를
-직접 읽어 오차를 계산한다(2026-10-26 Dex 분석).
+그 사이의 회전(0.3에서 0.7 rad)이 차이로 잡힌다. Isaac Lab 어댑터는 역기구학 목표 링크의 자세를 직접 읽어 기록한다
+(`generator.measure_links`, 2026-10-26 Dex 분석).
 
 ### 1.4 원본 시연 선택 방식: 지금은 우리 값, 최종 평가는 MimicGen 공식 값 (2026-10-27 결정)
 
 생성 프로토콜은 `configs/experiment/generation/pool_robosuite_image.yaml`의 `protocol` 블록에 있고, 다른 generation 설정(`pool_robosuite_lowdim`,
-`rank_human_demos`, `pool_isaac`, `test/` 아래의 시험용 설정들)은 이 블록을 물려받는다. 지금 값은 하위작업마다 원본 시연을 독립적으로 고르고
+`pool_unmix`, `pool_isaac`, `test/` 아래의 시험용 설정들)은 이 블록을 물려받는다. 지금 값은 하위작업마다 원본 시연을 독립적으로 고르고
 (`select_src_per_subtask: true`) 고르는 방식은 무작위다(`selection_strategy: random`). MimicGen 공식 설정 템플릿
 (`mimicgen/exps/templates/robosuite/*.json`)은 일곱 과제 모두 `select_src_per_subtask: false`(한 시도의 모든 하위작업이 같은 원본
 시연을 쓴다)다. 그러나 MimicGen이 논문 데이터를 만들 때 쓴 설정은 템플릿이 아니라 템플릿 위에 과제별 값을 덮어쓰는
@@ -184,21 +178,12 @@ robosuite 1.4.1, CPU torch 2.6)의 학습과 평가를 돌렸다. 설정은 공�
 공식 기록기는 실행된 행동만 hdf5에 쓰므로 라벨은 우리 기록(`labels_%06d.npz`)에 있고, `tmg dataset`은 이 생성기들에서
 `actions_pre_noise`를 거기서 읽는다(`demo_layout()`의 `labels_from_records`).
 
-추종(`method.tracking.enabled`)이 켜지면 공식 반복문을 그대로 쓸 수 없다. 공식 반복문은 말단마다 한 걸음에 경유점 하나씩
-따로 전진시키는데, 추종기는 두 손을 경로 변수 하나로 움직여야 하기 때문이다. 그래서 `make_tracking_generate`가
-시도 동안 `DataGenerator.generate`를 바꿔 끼운다. 반복문 본체는 `tmg/generation/generators/isaaclab/tracking_loop.py`의 `TrackingLoop` 하나이고, 패키지마다 다른 단계(초기화, 궤적 생성기 호출, 집게·통과 명령 읽기, 경유점 만들기, `MultiWaypoint.execute` 호출, 결과 수집)는 Soft의 `IsaacLabTrackingLoop`와 Dex의 `AutoDataTrackingLoop`가 훅으로 채운다. 바뀐 함수도 공식 궤적 생성기(`generate_*trajectory`,
-`merge_eef_subtask_trajectory`), `MultiWaypoint.execute`, 공식 기록기를 그대로 부르고, 두 말단이 모두 궤적을 가진 원본
-시간 구간마다 `ErrorAdaptiveFollower` 하나를 만든다(`tracking_loop.cut_interval`이 구간을 자른다). 오차는 설정된 링크
-(`generator.measure_links`, Dex는 `*_hand_pitch_link`)의 자세로 재고, 집게 사건은 두 손의 명령 사건을 합쳐 쓰며, 공식
-걸음별 잡음 뽑기는 `tracking_loop.NoiseLedger`가 보존한다(원본 경유점마다 공식 뽑기 한 묶음, 추가 걸음은 사설 난수). `method=none`은
-항상 공식 `generate`를 돈다.
-
 SoftMimicGen의 Rope 성공 판정(`rope_ends_close_tracked`)은 호출 시점에 민감하다. 이 함수는 에피소드마다 밧줄의 두 끝 마디를
 "가장 멀리 떨어진 두 마디"로 처음 호출될 때 정하고(`env._rope_end_indices`), 그 뒤로는 그 마디 번호를 계속 쓴다. 리셋 사건
 `reset_rope_end_tracking`이 리셋 때 이 캐시를 지운다. 공식 생성기와 공식 평가기는 모두 **첫 행동을 실행한 뒤** 처음으로 성공
 판정을 부르는데, 리셋 직후에 부르면 밧줄이 아직 자리 잡기 전이라 다른 마디(예를 들어 0번·11번 대신 1번·10번)가 끝으로 잡히고
 같은 공식 수식이 다른 성공 결과를 낸다(2026-10-27 Codex 감사). tmg가 지키는 규칙은 다음과 같다. 생성에서는 공식
-`MultiWaypoint.execute` 안의 `success` 값을 읽기만 하고 성공 판정을 따로 부르지 않는다(추종 반복문도 공식 `execute`를 그대로 쓴다).
+`MultiWaypoint.execute` 안의 `success` 값을 읽기만 하고 성공 판정을 따로 부르지 않는다.
 Isaac Lab 평가를 만들 때도 성공 판정은 첫 행동 뒤부터 매 걸음 부르고, 리셋 직후에는 부르지 않으며, 리셋 사건이 캐시를 지우도록
 그대로 둔다. 이 규칙은 `configs/experiment/generator/softmimicgen/task/rope.yaml`의 `success_term`에 적혀 있다.
 
@@ -245,7 +230,7 @@ Isaac Lab 평가를 만들 때도 성공 판정은 첫 행동 뒤부터 매 걸�
 공식 성공 수 보장은 Soft 세 과제(`generation_guarantee`)와 Pick Place(`guarantee_success: true`)에서 켜져 있고, Microwave와 Bottle
 Placement and Door Closing에서는 꺼져 있다(`guarantee_success: false`, 공식 `num_trials`는 50과 100). 우리 `generation=pool_isaac`(성공
 250개 청크 4개, `protocol.guarantee: true`)은 모든 과제에서 `--generation_num_trials`가 성공 수를 뜻하게 하므로, 뒤의 두 과제에서는
-공식과 다르다. 기록기는 실패 시도까지 모두 남기므로 생성 성공률은 기록에서 계산한다. 시험용 설정과 순위 풀(`rank_human_demos`)은
+공식과 다르다. 기록기는 실패 시도까지 모두 남기므로 생성 성공률은 기록에서 계산한다. 시험용 설정과 SkillMix 적합 풀(`pool_unmix`)은
 `guarantee: false`여서 어댑터가 보장을 꺼 적힌 수만큼만 시도한다(2026-10-29부터).
 
 원본 시연 파일의 공개 여부는 다음과 같다. 측정한 사실이다.
@@ -358,7 +343,7 @@ isaaclab_arena.environments.isaaclab_interop.environment_registration_callback -
 --task_descriptor <청크 사본> --embodiment autodata_examples/embodiments/gr1_ik_abs.yaml --enable_cameras`이고, `--` 뒤의 `--seed`는
 Arena에 전달된다. 기록 그라프트는 AutoData의 자리(`initial_state` 대입 뒤, 두 `return GenerationResult` 앞, `seq = WaypointSequence.from_poses`
 뒤, `play_action = datastream.target_eef_pose_to_action` 뒤, `execute`의 마지막 반환값)에 들어가며, 잡음 전 라벨은
-`datastream.target_eef_pose_to_action`을 감싸 얻는다. 혼합과 추종은 AutoData에 아직 연결하지 않았다(`method=none`만 된다).
+`datastream.target_eef_pose_to_action`을 감싸 얻는다.
 
 관측은 Arena GR1 임바디먼트의 `left_eef_pos`, `left_eef_quat`, `right_eef_pos`, `right_eef_quat`, `hand_joint_state`(Isaac Lab Pick Place와
 같은 이름)와 머리 카메라 `robot_pov_cam_rgb`(512×512, 관측 그룹 `camera_obs`)다. 데이터셋 단계와 평가기가 같은 함수로 128×128로
@@ -510,14 +495,10 @@ x 상한을 +0.12 m로 낮추고, Microwave 회전을 −15°에서 +5°로 자�
   살아 있던 "물체 낙하" 종료 조건은 더 이상 에피소드를 끊지 않는다(상한까지 돈다).
 - 섞기(`mix_segment`)는 AutoData의 `generate_eef_subtask_trajectory`에서 `src_subtask_object_pose` 대입 뒤에 끼운다. 원본마다 구간
   시작의 말단 자세, 목표 자세, 그 손의 통과 명령(11개 관절)과 기준 물체 자세를 섞기 모듈에 넘기는 것은 Isaac Lab 런타임과 같다.
-  추종은 `DataGenerator.generate`를 공유 경로 반복문으로 바꾼다(AutoData의 궤적 생성·병합 함수와 `MultiWaypoint.execute`, 기록기
-  수명주기를 그대로 쓴다). 잡음 장부의 draw 모양은 AutoData 순서(왼손 위치 3, 왼손 사원수 4, 오른손 위치 3, 오른손 사원수 4)이고,
-  잡음 크기가 0인 손은 draw를 하지 않으므로 장부의 묶음을 다 쓰지 않을 수 있다(공식 난수열과의 일치는 분포 수준이다).
-- 추종이 돌 수 있는 조건은 한 시도의 모든 하위작업이 같은 원본을 쓰는 것이다. Pick Place는 공식 설정이 그렇다. Microwave와 Bottle은
-  공식 기술 파일이 `select_src_per_subtask: true`라 추종을 켜면 첫 시도 전에 `NotImplementedError`로 멈춘다. 섞기는 세 과제 모두 된다.
+  섞기는 세 과제 모두 된다. SkillMix 규칙 파일은 아직 MimicGen과 CP-Gen 과제에만 있다.
 - 손가락 열림·닫힘 사건의 열(`gripper_events.columns: [0, 1, 2, 3]`)은 AutoData 임바디먼트 파일 `gr1_ik_abs.yaml`의 손 명령 순서
   (근위 손가락 관절 index, middle, pinky, ring가 앞 네 개)에서 Isaac Lab 2.x 런타임과 같은 관절을 가리킨다.
-- 추종 오차는 Pink IK가 목표로 삼는 `*_hand_pitch_link`에서 잰다. Arena의 GR1 Pink 임바디먼트는 Isaac Lab Pick Place의 `ActionsCfg`를
+- 측정 자세는 Pink IK가 목표로 삼는 `*_hand_pitch_link`에서 잰다. Arena의 GR1 Pink 임바디먼트는 Isaac Lab Pick Place의 `ActionsCfg`를
   그대로 쓰므로 세 과제의 목표 링크가 같다.
 - 파드용 네이티브 실행(`scripts/native_runtime.py`)은 `isaaclab-dex`를 거부한다. 그 이름의 네이티브 환경은 옛 Isaac Lab 2.x 설치이고,
   AutoData 스택의 부트스트랩 단계는 아직 없다.
@@ -677,8 +658,8 @@ MimicGen은 MimicGen 환경에서 따로"다. CP-Gen의 공식 장면 `official_
   2026-10-29에 서버에서 발견해 고쳤다).
 - **시도별 원본 선택.** CP-Gen은 특정 모드(`use_reset_near_constraint`)에서만 제약 열(원본)을 고르고 그 밖에는 늘 0번을 쓰므로, 런타임이 시도 시작에서
   묶음 시드로 고정된 난수열로 원본을 무작위로 고른다(`CPGenRuntime.begin_attempt`가 부르는 `SourcePicker`, 난수열은 `tmg.generation.seeds.source_pick_rng`). 어댑터는 `selection=ours`일 때 원본을 전부 불러오고 공식 주석 파일을
-  넘기지 않는다(시범 안의 제약 데이터가 쓰인다). 고른 원본 번호는 시도 기록(`src_demo_inds`)에 남아 `tmg rank_sources`가 다른 생성기와 같은 방식으로
-  순위를 매긴다. 섞기는 CP-Gen에 대응물이 없으므로 여전히 끄고, 방법은 추종만 쓴다.
+  넘기지 않는다(시범 안의 제약 데이터가 쓰인다). 고른 원본 번호는 시도 기록(`src_demo_inds`)에 남는다. SkillMix는 CP-Gen에서 다시 푼 제약의 목표 자세를
+  섞는다(`tmg.generation.generators.cpgen.mixing`).
 
 CP-Gen은 원본 구간을 다시 재생하지 않는다. 시도마다 주석된 키포인트 제약을 새 물체 자세에 맞춰 다시 풀고(제약 걸음),
 그 시작점까지 cuRobo로 운동 계획을 세운다(계획 걸음). `CPPolicy.get_action`은 대기열이 비면 다음 제약을 풀어 계획 걸음과
@@ -693,16 +674,19 @@ CP-Gen은 원본 구간을 다시 재생하지 않는다. 시도마다 주석된
 | 앵커(대입되는 이름) | 끼우는 문장 | 하는 일 |
 |---------------------|-------------|---------|
 | 첫 `state = self.env.get_state()` 뒤 | `_tmg.begin_attempt(self)` | 시도 기록을 열고 장면 메타데이터를 읽는다 |
-| `action_dct = self.policy.get_action(obs)` | `action_dct = _tmg.get_action(self, obs)`로 바꾼다 | 공식 `get_action`을 부르고, 새 구간이 계획되면 구간(계획=연결, 제약=기술)과 원본 번호를 기록한다. 추종이 켜지면 계획된 행동들을 경로 하나로 삼아 추종기가 다음 목표를 낸다 |
+| `action_dct = self.policy.get_action(obs)` | `action_dct = _tmg.get_action(self, obs)`로 바꾼다 | 공식 `get_action`을 부르고, 새 구간이 계획되면 구간(계획=연결, 제약=기술)과 원본 번호를 기록한다 |
 | 반복문 안 `state = self.env.get_state()` 뒤 | `_tmg.record_step(action, action_to_take, reward, in_constraint_segment, system_noise_cfg)` | 목표 자세, 측정 자세, 라벨, 실행 행동, 잡음 크기를 기록한다 |
 | 마지막 `return episode_data` 앞 | `_tmg.end_attempt(self, episode_data)` | 기록을 쓴다 |
 
-추종기가 움직일 때는 정책의 `action_queue`를 추종기의 기준 걸음 번호에 맞춰 잘라 두어, 공식 잡음 규칙
-(`in_constraint_segment`)이 올바른 구간을 읽게 한다. 경로가 끝나면 대기열을 비우고 `check_constraint`를 켠다. 공식 코드가
-마지막 행동을 꺼낸 뒤 남기는 상태와 같다.
+생성기 설정(`configs/experiment/generator/cpgen.yaml`)은 모든 방법에서 라벨을 `pre_noise`로 둔다. 공식 출력이 이미 잡음 전이기
+때문이다. SkillMix는 `CPPolicy.solve_constraint`에 두 번째 그라프트를 끼워 다시 푼 제약의 목표 자세를 섞는다(`selection=ours`).
 
-생성기 설정(`configs/experiment/generator/cpgen.yaml`)은 모든 방법에서 혼합을 끄고 라벨을 `pre_noise`로 둔다. 혼합은 CP-Gen에
-대응물이 없고, 라벨은 공식 출력이 이미 잡음 전이기 때문이다. 소스 해시는 고정되어 있고, 같은 본문이
+연결 동작(bridge) 뒤 재풀이(생성기 설정 `resolve_after_bridge`, 기본 켜짐): CP-Gen은 하위작업의 제약을 먼저 풀고 그 시작점까지
+손을 옮기는 연결 동작을 계획한다. 물건을 든 채 옮기면 손 안의 물건 자세가 처음 계산과 달라질 수 있으므로, 연결 동작이 끝난
+걸음에서 지금 관측으로 제약을 다시 풀고 걸음 수가 같으면 남은 제약 걸음을 바꾼다(`CPGenRuntime._resolve_after_bridge`). 아무것도
+들지 않은 제약(잡기)은 그대로 둔다. Threading 성공률이 같은 장면에서 6 %에서 65 %로 올랐다(2026-11-17). SkillMix가 켜져 있으면
+재풀이도 다시 섞고, 하위작업 기록의 `mix`에는 실제로 실행된 재풀이의 섞기 기록이, `mix_before_resolve`에는 첫 풀이의 기록이,
+`resolve_after_bridge`에는 결과(`replaced` 또는 유지한 이유)가 남는다. 소스 해시는 고정되어 있고, 같은 본문이
 `tests/unit/fixtures/cpgen_generate_demo.py`에 있어 시험이 가짜 환경과 가짜 계획기로 접목된 함수를 실제로 돌린다.
 
 청크 출력은 CP-Gen의 `main`이 만든다. `generated_obs.hdf5`가 성공 시도들의 상태로부터 두 카메라(84x84)와 로봇·물체 상태를
@@ -810,11 +794,15 @@ CP-Gen의 행동은 절대 자세 7개 값이다. 위치 3개, 축-각 회전 3�
   CP-Gen 이미지에서 그 설정 폴더 위에 호스트의 쓰기 가능한 복사본(`<data_root>/cpgen_writable/curobo_task`, 처음 쓸 때 이미지에서
   채운다)을 붙이고, 조각 프로세스는 자기 조각 폴더의 `cwd/`(체크아웃 최상위를 심볼릭 링크로 비춘 폴더)를 작업 폴더로 쓴다. 그래서
   조각 프로세스 여러 개가 같은 임시 파일을 두고 겹쳐 쓰는 일도 없다.
-- 화면 밖 렌더링 장치. robosuite 1.5의 EGL 문맥은 `MUJOCO_EGL_DEVICE_ID`가 없으면 `CUDA_VISIBLE_DEVICES`의 값을 EGL 장치
-  번호로 쓴다. A100 서버의 Singularity는 NVIDIA EGL 라이브러리를 넣어 주지 않아(nvidia-container-cli 방식, graphics 기능 없음)
-  Mesa 소프트웨어 렌더링만 가능하고, Mesa는 사용자가 열 수 없는 GPU 8대의 DRM 장치 다음에 소프트웨어 장치를 9번째(번호 8)로
-  나열한다. 그래서 `configs/machine/cluster/a100.yaml`의 `egl_device_id: 8`을 Makefile이 CP-Gen 이미지 실행에
-  `MUJOCO_EGL_DEVICE_ID`로 넘기고, `tmg.core.egl.apply`가 그 번호를 `CUDA_VISIBLE_DEVICES` 뒤에 덧붙인다(robosuite 1.5가 두 변수의 일치를 확인하는데, CUDA는 존재하지 않는 번호부터는 무시하므로 보이는 GPU는 바뀌지 않는다). 도커(Isaac)에서는 이미지의 `NVIDIA_DRIVER_CAPABILITIES`에 graphics를 넣어 NVIDIA EGL을 쓴다.
+- 화면 밖 렌더링 장치. robosuite 1.5의 EGL 문맥은 `MUJOCO_EGL_DEVICE_ID`를 EGL 장치 번호로 쓰고, `CUDA_VISIBLE_DEVICES`가 비어 있지
+  않으면 그 번호가 거기 들어 있는지 확인한다. 기본 렌더링(`render: egl`, 2026-11-22부터)은 GPU의 NVIDIA EGL이다. Makefile이 그리는 GPU
+  (`CUDA_VISIBLE_DEVICES`의 첫 번호)의 EGL 번호를 머신 설정 `egl_device_of_gpu`로 찾아 `MUJOCO_EGL_DEVICE_ID`로 넘기고(A100: GPU 0 = EGL 2,
+  GPU 3 = EGL 1), CP-Gen 이미지에는 cuRobo용으로 그 GPU를 `CUDA_VISIBLE_DEVICES`로 넘긴다. `tmg.core.egl.apply`가 EGL 번호를
+  `CUDA_VISIBLE_DEVICES` 뒤에 덧붙여 확인을 통과시킨다(계산은 첫 번호 GPU, `cuda:0`에서 한다). A100의 Singularity `--nv`는 NVIDIA EGL
+  라이브러리를 넣어 주지 않으므로(nvidia-container-cli 방식, graphics 기능 없음) 머신 설정 `nvidia_egl_dir`의 드라이버 EGL 라이브러리
+  복사본과 `10_nvidia.json`을 컨테이너에 붙인다. `render: mesa`는 2026-11-22 이전 방식이다: Mesa가 사용자가 열 수 없는 GPU 8대의 DRM
+  장치 다음에 소프트웨어 장치를 9번째(번호 8)로 나열하므로 `egl_device_id: 8`을 넘긴다. 두 렌더러의 화소는 다르므로(2026-11-22 측정,
+  화소 50–61 %가 평균 0.7–1.4 단계, 최대 76 단계 차이) 학습 데이터와 평가는 같은 렌더러로 만든다.
 
 ### 3.y Coffee 재현 결과 (2026-10-27, A100 GPU 7, 영상 기반 Diffusion Policy)
 
@@ -837,7 +825,7 @@ CP-Gen의 행동은 절대 자세 7개 값이다. 위치 3개, 축-각 회전 3�
 
 청크 폴더 `records/`에 시도마다 `attempt_%06d.npz`와 `attempts.jsonl` 한 줄을 남긴다. 열 정의는 `tmg/core/records.py`의
 모듈 문서에 있다. 핵심은 스텝마다 목표 자세와 실제 말단 자세(추적 오차 계산용), 잡음 전 명령과 실행 명령, 구간 종류(이음 또는
-기술), 하위작업 종료 신호, 성공 판정, 경로 추종의 경로 변수와 전진량과 영역이고, 시도마다 장면 조건(물체 초기 자세), 하위작업마다
+기술), 하위작업 종료 신호, 성공 판정이고(경로 추종 열 `track_*`은 형식 호환을 위해 남아 있고 비어 있다), 시도마다 장면 조건(물체 초기 자세), 하위작업마다
 고른 원본과 혼합 기록이다.
 
 ## 5. 공식 실행과의 동일성 시험

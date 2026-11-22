@@ -28,7 +28,7 @@ def square_generator(tmp_path, monkeypatch, *overrides):
 
 
 def test_prepare_chunk_spec(tmp_path, monkeypatch):
-    gen = square_generator(tmp_path, monkeypatch, "scene=ours", "method=trackmix")
+    gen = square_generator(tmp_path, monkeypatch, "scene=ours", "method=skillmix")
     folder = tmp_path / "chunk"
     spec = gen.prepare_chunk(plan_chunks(20, 20, 9000)[0], folder)
     assert isinstance(spec, ChunkSpec)
@@ -44,7 +44,7 @@ def test_prepare_chunk_spec(tmp_path, monkeypatch):
                           "commit": "72bd767"}
     assert spec.protocol["camera_size"] == [84, 84]            # filled from task.image_size when the protocol leaves it null
     assert spec.task is gen.task and spec.method is gen.method and spec.scene == gen.scene_chain()
-    assert set(spec.identity()) == {"generator", "chunk", "task", "scene", "method", "protocol", "extra"}
+    assert set(spec.identity()) == {"generator", "chunk", "task", "scene", "method", "protocol", "extra", "render"}
     assert json.loads(json.dumps(asdict(spec))) == asdict(spec)          # the spec is plain JSON
     assert gen.chunk_command(spec, folder / "chunk_spec.json") == [
         sys.executable, "-m", "tmg.generation.generators.mimicgen.entrypoint", "--spec", str(folder / "chunk_spec.json")]
@@ -202,15 +202,11 @@ def test_download_moves_the_file_atomically_and_makes_it_writable(tmp_path, monk
     assert sorted(p.name for p in dest.parent.iterdir()) == ["source.hdf5"]       # no .partial, no temp dir left behind
 
 
-def test_runtime_private_noise_stream_is_seeded_with_chunk_seed_plus_7919(tmp_path):
-    """Finished pools were produced with this stream; its seed must stay ``chunk_seed + 7919``."""
+def test_runtime_records_folder(tmp_path):
     from tmg.generation.generators.mimicgen.runtime import MimicGenRuntime
     from tmg.generation.method import build_method
 
     method = build_method({"name": "none", "mixing": {"enabled": False}, "tracking": {"enabled": False}}, chunk_seed=9001)
     runtime = MimicGenRuntime(method, chunk_seed=9001, records_dir=tmp_path / "records")
-    expected = np.random.RandomState(9001 + 7919)
-    assert np.array_equal(runtime.exec.private_draw(6), expected.randn(6))
-    assert np.array_equal(runtime.exec.private_draw(3), expected.randn(3))
     assert runtime.rec.dir == tmp_path / "records" and runtime.rec.enabled and (tmp_path / "records").is_dir()
     assert MimicGenRuntime(method, chunk_seed=9001, records_dir=None).rec.enabled is False

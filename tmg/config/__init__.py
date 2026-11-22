@@ -51,10 +51,8 @@ COMMANDS: dict[str, CommandSpec] = {
     "check_scene": CommandSpec("tmg.generation.scene_check:check_scene",
                                "reset a (task, scene) environment many times and report edge overhang, contacts, falls, reach",
                                exit_code="ok"),
-    "rank_sources": CommandSpec("tmg.generation.rank_sources:rank_sources",
-                                "order a task's source demonstrations by their generation success in a baseline pool"),
     "fit_coefficients": CommandSpec("tmg.generation.fit_coefficients:fit_coefficients",
-                                    "fit the per-subtask success model of the logistic mixer on a uniform-source baseline pool"),
+                                    "fit the SkillMix rule of a task on its randmix and unmix pools"),
     "dataset": CommandSpec("tmg.data.dataset:build_dataset",
                            "select successful attempts of a finished pool and write one training hdf5"),
     "train": CommandSpec("tmg.policy.trainer:train", "train one policy on one dataset (train image)"),
@@ -85,7 +83,7 @@ def compose(command: str, overrides: Iterable[str] = (), *, configs_root: Path |
     generator = _generator_choice(root / "command" / f"{command}.yaml", overrides)
     layers = [root / layer for layer in LAYERS]
     if generator:
-        layers.append(root / "experiment" / "generator" / generator)   # task, scene (and ranking data) of that generator
+        layers.append(root / "experiment" / "generator" / generator)   # task and scene (and coefficient data) of that generator
     searchpath = "hydra.searchpath=[" + ",".join(f"file://{p}" for p in layers) + "]"
     with initialize_config_dir(config_dir=str(root), version_base="1.3", job_name=f"tmg-{command}"):
         cfg = _hydra_compose(config_name=f"command/{command}", overrides=[searchpath, *overrides])

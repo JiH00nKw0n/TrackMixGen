@@ -38,6 +38,7 @@ images and states; actions and records stay those of the chunk). The sidecar
 from __future__ import annotations
 
 import json
+import shutil
 from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import TypedDict
@@ -320,6 +321,8 @@ def build_dataset(cfg) -> dict:
     if output.exists() and not plain.get("overwrite", False):
         print(f"[tmg] dataset exists, keeping it: {output}")
         return read_json(summary_path) if summary_path.exists() else {"path": str(output)}
+    if (plain.get("generation") or {}).get("hub"):
+        return fetch_hub_dataset(plain, output)
     if not (pool / POOL_DONE).exists():
         raise DatasetError(f"pool {pool} is not finished (no {POOL_DONE}); finished chunks would be used only partially")
     from tmg.generation.generators import make_generator
@@ -345,4 +348,52 @@ def build_dataset(cfg) -> dict:
     write_provenance(output.parent, extra={"command": "dataset", "output": str(output)})
     print(f"[tmg] dataset {output}: {stats['demos']} demos, {stats['steps']} steps, images {stats['image_shape']} "
           f"from {len(cands)} successes")
+    return summary
+
+
+def count_demos(path: Path) -> int:
+    """Number of ``data/demo_*`` groups of a dataset file."""
+    with h5py.File(path, "r") as f:
+        if "data" not in f:
+            raise DatasetError(f"{path} has no 'data' group: not a training dataset")
+        return sum(1 for k in f["data"].keys() if k.startswith("demo_"))
+
+
+def fetch_hub_dataset(plain: dict, output: Path, download=None) -> dict:
+    """``generation.hub``: download a published dataset file instead of building one from a pool.
+
+    Downloads ``hub.filename`` of the Hugging Face repository ``hub.repo_id`` (``hub.repo_type``, ``hub.revision``) with
+    ``huggingface_hub.hf_hub_download`` (cache under ``HF_HOME``), checks that it holds ``size`` demonstrations and copies
+    it to ``output``. The file is filed under the generator, scene, selection, method and observation of the command, so
+    those must be the ones the published files were made with (``hub.made_with``). ``download`` replaces
+    ``hf_hub_download`` in tests. Returns the sidecar summary.
+    """
+    hub = dict(plain["generation"]["hub"])
+    wrong = {k: plain[k]["name"] for k, v in (hub.get("made_with") or {}).items() if plain[k]["name"] != v}
+    if wrong:
+        raise DatasetError(f"{hub['repo_id']} was made with {dict(hub['made_with'])}; this command asks for {wrong} and "
+                           f"would file the download under those names")
+    if download is None:
+        from huggingface_hub import hf_hub_download as download
+    repo_id, filename = str(hub["repo_id"]), str(hub["filename"])
+    print(f"[tmg] dataset from the Hugging Face Hub: {repo_id} / {filename}", flush=True)
+    local = Path(download(repo_id=repo_id, filename=filename, repo_type=str(hub.get("repo_type") or "dataset"),
+                          revision=hub.get("revision")))
+    demos = count_demos(local)
+    if demos != int(plain["size"]):
+        raise DatasetError(f"{repo_id}/{filename} holds {demos} demonstrations, the dataset path asks for size="
+                           f"{plain['size']}; pass size={demos}")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    part = part_file(output)
+    shutil.copyfile(local, part)
+    part.replace(output)
+    summary = {"path": str(output), "demos": demos,
+               "hub": {"repo_id": repo_id, "filename": filename, "repo_type": hub.get("repo_type"), "revision": hub.get("revision")},
+               "task": plain["task"]["name"], "generator": plain["generator"]["name"], "scene": plain["scene"]["name"],
+               "method": plain["method"]["name"], "generation": plain["generation"]["name"],
+               "observation": plain["observation"]["name"]}
+    write_json(sidecar(output, SIDECAR), summary)
+    dump_yaml(plain, sidecar(output, RESOLVED_CONFIG))
+    write_provenance(output.parent, extra={"command": "dataset", "output": str(output), "hub": summary["hub"]})
+    print(f"[tmg] dataset {output}: {demos} demos from {repo_id}/{filename}", flush=True)
     return summary

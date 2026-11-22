@@ -1,0 +1,17 @@
+defaults:
+  - pool_robosuite_image
+  - _self_
+# Training datasets made elsewhere and published on the Hugging Face Hub, for training and evaluation without generating
+# a pool. `tmg dataset` (`make dataset GENERATION=hub`) downloads `hub.filename` of `hub.repo_id` into the usual dataset
+# path (.../<method>/hub/<observation>/n<size>_seed<seed>.hdf5) when that file is missing; train, validate and evaluate
+# with the same GENERATION=hub. The file is used as it is: it must hold `size` demonstrations (1,000 per task), and the
+# command line must name what the files were `made_with` (GENERATOR=mimicgen SCENE=ours SELECTION=ours METHOD=skillmix
+# OBSERVATION=image), because those names are the dataset and run folders; any other choice is refused. There is no pool:
+# `tmg generate` refuses this config. The fixed evaluation scenes (`make resets`) are still drawn locally.
+name: hub
+hub:
+  repo_id: Mayfull/Mimicgen-skillmix   # public dataset repository: one hdf5 per task
+  repo_type: dataset
+  filename: ${task.name}.hdf5          # file name in the repository
+  revision: null                       # branch, tag or commit; null = the default branch
+  made_with: {generator: mimicgen, scene: ours, selection: ours, method: skillmix, observation: image}

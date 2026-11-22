@@ -192,7 +192,7 @@ def test_pick_place_runs_on_the_autodata_stack(tmp_path, monkeypatch):
     (src / "autodata_examples" / "tasks" / "gr1_pick_place.yaml").write_text(yaml.safe_dump(official))
     monkeypatch.setenv("TMG_DATA_ROOT", str(tmp_path))
     monkeypatch.setenv("TMG_AUTODATA_SRC", str(src))
-    cfg = resolved(compose("generate", ["generator=dexmimicgen", "task=pick_place", "scene=ours", "method=trackmix", "generation=test/pilot20_images"]))
+    cfg = resolved(compose("generate", ["generator=dexmimicgen", "task=pick_place", "scene=ours", "method=skillmix", "generation=test/pilot20_images"]))
     assert cfg["generator"]["image"] == "tmg/isaaclab-dex" and cfg["generator"]["package"] == "autodata_core"
     assert cfg["generation"]["protocol"]["camera_names"] == ["front_image", "side_image"]
     gen = make_generator(cfg)
@@ -203,9 +203,9 @@ def test_pick_place_runs_on_the_autodata_stack(tmp_path, monkeypatch):
     assert spec.extra["register_modules"] == ["isaaclab_mimic.envs"] and spec.extra["camera_module"].endswith("gr1_pickplace_cameras")
     assert spec.extra["cameras"] == ["front_image", "side_image"] and spec.extra["layout"]["noise_draw_shapes"] == [3, 4, 3, 4]
     assert spec.extra["layout"]["measure_links"] == {"left": "left_hand_pitch_link", "right": "right_hand_pitch_link"}
-    assert spec.method["mixing"]["max_anchor_rotation_deg"] == 40.0 and spec.method["tracking"]["gripper_events"]["columns"] == [0, 1, 2, 3]
-    # the ranking pools want no images: the official environment is used (no per-step rendering), nothing is captured
-    rank = resolved(compose("generate", ["generator=dexmimicgen", "task=pick_place", "scene=ours", "method=none", "generation=rank_human_demos"]))
+    assert spec.method["mixing"]["gripper_events"]["columns"] == [0, 1, 2, 3] and "tracking" not in spec.method
+    # the SkillMix fit pools (pool_unmix) want no images: the official environment is used (no per-step rendering), nothing is captured
+    rank = resolved(compose("generate", ["generator=dexmimicgen", "task=pick_place", "scene=ours", "method=none", "generation=pool_unmix"]))
     assert rank["generation"]["protocol"]["camera_names"] == []
     spec = make_generator(rank).prepare_chunk(plan_chunks(3000, 250, 20000)[0], tmp_path / "r")
     args = spec.extra["script_args"]

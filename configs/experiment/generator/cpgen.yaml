@@ -28,14 +28,20 @@ config:
 action_rotation: rotation_6d
 noisy_state_replay: {enabled: true, num_retries: 6, action_noise_std: 0.03, num_processes: 12, render_processes: 12,
                      done_mode: 2, compress: true}
+# Re-solve after the bridge (tmg/generation/generators/cpgen/runtime.py, CPGenRuntime.resolve_after_bridge): CP-Gen solves a
+# constraint (subtask) before it plans the bridge (the motion that brings the hand to the subtask's start). When the robot
+# carries an object, the object can sit differently in the hand once the bridge is over, so the constraint is solved again
+# from the state actually reached and its steps replace the planned ones (same length only). It raised Threading from 6 %
+# to 65 % on the same scenes (2026-11-17). On for every method: the SkillMix rules were fitted on pools made with it
+# (randmix and unmix). false gives CP-Gen's own behaviour.
+resolve_after_bridge: true
+# Chunk size of the SkillMix fit pools (configs/experiment/generation/pool_unmix.yaml; other generators: 50). The pools the
+# committed CP-Gen rules were fitted on had chunks of 25 attempts; the chunk size sets the chunk seeds and so the scenes.
+fit_pool_chunk: 25
 # CP-Gen re-solves constraints instead of replaying source segments, so source mixing blends the solved end-effector
-# poses of the retained sources (tmg/generation/generators/cpgen/mixing.py, logistic mixer only, selection=ours).
-# Its saved actions are already noise-free, so labels are pre_noise for every method. trackmix keeps mixing off here.
+# poses of the retained sources (tmg/generation/generators/cpgen/mixing.py, selection=ours).
+# Its saved actions are already noise-free, so labels are pre_noise for every method.
 method_overrides:
   none: {labels: pre_noise}
-  tracking_only: {labels: pre_noise}
-  mixup_only: {labels: pre_noise}
-  rank_top1: {labels: pre_noise}
-  rank_top3: {labels: pre_noise}
-  rank_top5: {labels: pre_noise}
-  trackmix: {mixing: {enabled: false}, labels: pre_noise}
+  skillmix: {labels: pre_noise}
+  skillmix_randmix: {labels: pre_noise}   # the randmix pools of the SkillMix fit (method skillmix, rule randmix)

@@ -7,13 +7,7 @@ from __future__ import annotations
 
 import numpy as np
 
-PRIVATE_SEED_OFFSET = 7919      # chunk_seed + offset seeds the private noise stream (tracking noise that the official code does not draw)
 SOURCE_PICK_KEY = 515151        # spawn key of the per-attempt source-demonstration pick (selection=ours)
-
-
-def private_noise_seed(chunk_seed: int) -> int:
-    """Seed of the private noise stream of a chunk."""
-    return int(chunk_seed) + PRIVATE_SEED_OFFSET
 
 
 def source_pick_rng(chunk_seed: int) -> np.random.Generator:

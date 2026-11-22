@@ -1,22 +1,23 @@
-"""Logistic source mixing for CP-Gen: solve every retained source for the current scene first, then blend.
+"""SkillMix for CP-Gen: solve every retained source for the current scene first, then blend.
 
 CP-Gen does not replay a source segment. For constraint k of the attempt it re-solves the annotated keypoint constraint
 of the attempt's source demonstration (the primary) for the current object poses: for every step t of the constraint
 window ``compute_X_W_eef_des`` gives the desired end-effector pose E_primary(t), inverse kinematics turns it into a joint
 configuration, and cuRobo plans from the current configuration to the first one.
 
-With the logistic mixer (``mixing.type: logistic``) the runtime replaces E_primary(t) by a weighted blend of the same
-constraint of several sources, each solved for the current scene:
+With SkillMix (``mixing.type: skillmix``) the runtime replaces E_primary(t) by a weighted blend of the same constraint of
+several sources, each solved for the current scene:
 
-1. Prediction. For every source j the success model (the task's coefficient file, ``tmg.generation.method.success_model``)
-   predicts the probability that constraint k succeeds with source j from the scene features (x and y distance and
-   rotation angle between the constraint's reference object now and in source j at its window start) and, from the
-   second constraint on, the in-hand features (position distance and rotation angle between the previous constraint's
-   reference object in the end-effector frame now and in source j). These are the quantities the runtime records for
-   every constraint, so the fit and the mixing read the same values.
-2. Weights. The retained set is the sources whose prediction is at least the mean over all sources and whose gripper
-   events match the primary's (only those can be put on the primary's timeline); weights are the predictions normalized
-   over the retained set (``logistic_mix.above_mean_weights`` with the compatible sources).
+1. Features. For every source j the scene features (x and y distance and rotation angle between the constraint's
+   reference object now and in source j at its window start) and, from the second constraint on, the in-hand features
+   (position distance and rotation angle between the previous constraint's reference object in the end-effector frame
+   now and in source j; 0 where unknown). These are the quantities the runtime records for every constraint, so the fit
+   and the mixing read the same values.
+2. Weights (``SkillMixer.decide`` of ``tmg.generation.method.skillmix``, the same call MimicGen's mixing makes). The
+   sources whose gripper events match the primary's (only those can be put on the primary's timeline) are compatible. ``mixing.rule: softmax``: the scores ``s_j = a_j + g . phi_j`` of the
+   task's rule file and the softmax of ``s / d`` over the compatible sources (the best one alone when ``d <= 0``).
+   ``mixing.rule: randmix``: random Dirichlet weights over the compatible sources, drawn once per constraint and
+   attempt (the randmix pools of the fit).
 3. Symmetry alignment and solve. A source can be recorded in a different but equivalent representation of the same
    grasp: the reference object may be symmetric (the constraint's ``symmetries``, e.g. the hammer turned 180 degrees about
    its z axis) and the parallel gripper is symmetric under 180 degrees about its approach axis (CP-Gen's ``reflect_eef``).
@@ -42,13 +43,11 @@ CP-Gen, so their event series is all closed.
 """
 from __future__ import annotations
 
-from collections.abc import Callable
-
 import numpy as np
 from scipy.spatial.transform import Rotation
 
-from tmg.generation.method.event_mix import _matching_events, align_segments
-from tmg.generation.method.logistic_mix import above_mean_weights
+from tmg.generation.method.event_mix import align_segments
+from tmg.generation.method.skillmix import gripper_flip, pose_distance, symmetry_label, symmetry_score
 from tmg.generation.method.success_model import in_hand, inhand_features, scene_features
 
 
@@ -81,7 +80,8 @@ def site_pose(pos, quat_xyzw) -> np.ndarray:
     return out
 
 
-def _quat_key(d) -> str:
+def quat_key(d) -> str:
+    """The end-effector site quaternion's key in an observation (or source observation) mapping."""
     return "robot0_eef_quat_site" if "robot0_eef_quat_site" in d else "robot0_eef_quat"
 
 
@@ -95,7 +95,7 @@ def features(constraints: list, obs: dict, carried: str | None):
         return scene, None
     if f"{carried}_pose" not in obs:
         return scene, np.zeros((len(constraints), 2))
-    now = in_hand(site_pose(obs["robot0_eef_pos"], obs[_quat_key(obs)]), np.asarray(obs[f"{carried}_pose"], dtype=float))
+    now = in_hand(site_pose(obs["robot0_eef_pos"], obs[quat_key(obs)]), np.asarray(obs[f"{carried}_pose"], dtype=float))
     rows = []
     for c in constraints:
         src_obs = getattr(c, "src_obs", None) or {}
@@ -103,30 +103,22 @@ def features(constraints: list, obs: dict, carried: str | None):
         if carried not in src_obj or "robot0_eef_pos" not in src_obs:
             rows.append(np.zeros(2))          # the fit used 0 where the source pose of the carried object is unknown
             continue
-        src = in_hand(site_pose(np.asarray(src_obs["robot0_eef_pos"])[0], np.asarray(src_obs[_quat_key(src_obs)])[0]),
+        src = in_hand(site_pose(np.asarray(src_obs["robot0_eef_pos"])[0], np.asarray(src_obs[quat_key(src_obs)])[0]),
                       np.asarray(src_obj[carried], dtype=float)[0])
         rows.append(inhand_features(now, src))
     return scene, np.array(rows)
 
 
-def decide(model, sequences: list, idx: int, primary: int, obs: dict, carried: str | None) -> tuple[dict, np.ndarray]:
-    """Predictions and weights of constraint ``idx`` (module docstring, steps 1 and 2): ``(record, weights (J,))``."""
+def decide(mixer, sequences: list, idx: int, primary: int, obs: dict, carried: str | None) -> tuple[dict, np.ndarray]:
+    """Features and weights of constraint ``idx`` (module docstring, steps 1 and 2) under ``mixer`` (a ``SkillMixer``):
+    ``(record, weights (J,))``."""
     constraints = [seq[idx] for seq in sequences]
     scene, inhand = features(constraints, obs, carried)
-    sub = model.for_subtask(idx)
-    if inhand is None and any(f in sub.slopes for f in ("inhand_position", "inhand_rotation")):
-        inhand = np.zeros((len(constraints), 2))
-    p = sub.predict(scene, inhand)
+    if inhand is None and idx >= 1:
+        inhand = np.zeros((len(constraints), 2))     # from the second constraint on the in-hand features are recorded (0)
     series = [gripper_series(c)[:, 0] for c in constraints]
-    compatible = [j for j in range(len(constraints)) if j == primary or _matching_events(series[primary], series[j]) is not None]
-    weights = above_mean_weights(p, compatible)
-    record = {"subtask": int(idx), "source_a": int(primary), "rule": "above_mean",
-              "predicted": [round(float(v), 4) for v in p], "weights": [round(float(v), 4) for v in weights],
-              "incompatible": [j for j in range(len(constraints)) if j not in compatible],
-              "scene_features": np.round(scene, 4).tolist(), "carried_object": carried}
-    if inhand is not None:
-        record["inhand_features"] = np.round(inhand, 4).tolist()
-    return record, weights
+    weights, decided = mixer.decide(idx, primary, scene, inhand, series)
+    return {"subtask": int(idx), "source_a": int(primary), **decided, "carried_object": carried}, weights
 
 
 class MultiMixPlan:
@@ -163,21 +155,6 @@ class MultiMixPlan:
         return out
 
 
-W_TRANS, W_ROT = 5.0, 1.0                    # find_best_transform's score: 5 per metre, 1 per radian
-
-
-def _rot_z180() -> np.ndarray:
-    out = np.eye(4)
-    out[:3, :3] = Rotation.from_euler("z", np.pi).as_matrix()
-    return out
-
-
-def _label(kind: str, params: dict, k: int) -> str:
-    if "rot_axis" in params and "rot_param" in params:
-        return f"{kind}:{params['rot_axis']}{int(round(np.degrees(float(params['rot_param']))))}"
-    return f"{kind}:{k}"
-
-
 def symmetry_candidates(official, constraint) -> list[tuple[str, dict]]:
     """Every ``(X_obj0_transf, X_obj1_transf, X_eef_transf)`` combination ``find_best_transform`` tries for the
     constraint, in its loop order (eef outer, obj1 inner), each with a label such as ``"obj0:z180+eef:z180"``."""
@@ -188,7 +165,7 @@ def symmetry_candidates(official, constraint) -> list[tuple[str, dict]]:
         if sym.type == "obj0" and getattr(sym, "skip_default", False):
             lists["obj0"] = []
         mats = official.generate_se3_transforms(sym.transforms)
-        lists[sym.type] += [(_label(sym.type, p, k), np.asarray(T, dtype=float))
+        lists[sym.type] += [(symmetry_label(sym.type, p, k), np.asarray(T, dtype=float))
                             for k, (p, T) in enumerate(zip(sym.transforms, mats))]
     for kind in ("obj0", "obj1"):                    # compositions of two annotated symmetries are symmetries too
         base = [(label, t) for label, t in lists[kind] if label]
@@ -198,7 +175,7 @@ def symmetry_candidates(official, constraint) -> list[tuple[str, dict]]:
                 if la != lb and not any(np.allclose(t, u, atol=1e-9) for _l, u in lists[kind]):
                     lists[kind].append((f"{la}*{lb.split(':', 1)[1]}", t))
     if getattr(constraint, "constraint_type", None) == "robot-object" and getattr(constraint, "reflect_eef", True):
-        lists["eef"].append(("eef:z180", _rot_z180()))
+        lists["eef"].append(("eef:z180", gripper_flip()))
     out = []
     for le, te in lists["eef"]:
         for l0, t0 in lists["obj0"]:
@@ -206,12 +183,6 @@ def symmetry_candidates(official, constraint) -> list[tuple[str, dict]]:
                 out.append(("+".join(x for x in (l0, l1, le) if x) or "identity",
                             dict(X_obj0_transf=t0, X_obj1_transf=t1, X_eef_transf=te)))
     return out
-
-
-def pose_distance(a, b) -> tuple[float, float]:
-    """``(position distance m, rotation angle rad)`` between two 4x4 poses."""
-    a, b = np.asarray(a, dtype=float), np.asarray(b, dtype=float)
-    return float(np.linalg.norm(a[:3, 3] - b[:3, 3])), float(Rotation.from_matrix(a[:3, :3].T @ b[:3, :3]).magnitude())
 
 
 def _same(t: dict, u: dict) -> bool:
@@ -235,7 +206,7 @@ def align_sources(official, policy, sequences: list, idx: int, primary: int, sou
         best, before = None, None
         for label, t in symmetry_candidates(official, c):
             dp, dr = pose_distance(_window_start(official, policy, c, obs, t), reference)
-            score = W_TRANS * dp + W_ROT * dr
+            score = symmetry_score(dp, dr)
             if best is None or score < best[0]:
                 best = (score, label, t, dp, dr)
             if before is None and _same(t, primary_transforms):
@@ -260,7 +231,3 @@ def solve_sources(official, policy, sequences: list, idx: int, sources: list, ob
                           for u in range(window_length(c))])
         out[j] = (poses, gripper_series(c))
     return out
-
-
-def quat_reader(official) -> Callable:
-    return official.quat2mat

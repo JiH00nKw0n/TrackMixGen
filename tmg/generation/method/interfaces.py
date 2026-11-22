@@ -1,20 +1,16 @@
-"""Interfaces of the TrackMix method: what a generator adapter calls, and what a method implementation
-provides.
+"""Interfaces of the generation method: what a generator adapter calls, and what a method implementation provides.
 
-``MixContext`` and ``MixedSegment`` are the input and output of a ``SegmentMixer`` (called once per subtask,
-before the generator transforms the source segment to the current scene). ``PathFollower`` is the object that
-decides the command of every control step while a trajectory executes. ``Method`` bundles the configured
-mixer, the follower factory and the action-label choice; ``build_method`` makes it from a ``method`` config.
+``MixContext`` and ``MixedSegment`` are the input and output of a ``SegmentMixer`` (called once per subtask, before the
+generator transforms the source segment to the current scene). ``Method`` bundles the configured mixer and the
+action-label choice; ``build_method`` makes it from a ``method`` config.
 """
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Protocol
 
 import numpy as np
-
-from tmg.generation.method.tracking import ErrorAdaptiveFollower
 
 
 @dataclass
@@ -31,7 +27,7 @@ class MixContext:
     src_segments: list                             # per source: (eef_start (4,4), targets (T_i,4,4), gripper (T_i,G))
     num_sources: int
     has_reference_object: bool
-    rng: np.random.Generator = field(default_factory=lambda: np.random.default_rng(0))   # unused by GuidedMixer, see README
+    rng: np.random.Generator = field(default_factory=lambda: np.random.default_rng(0))   # unused by the mixers, see README
     extra: dict = field(default_factory=dict)
 
 
@@ -51,116 +47,67 @@ class SegmentMixer(Protocol):
         record of what was done."""
         ...
 
-
-class PathFollower(Protocol):
-    """Decides the command of each control step while one trajectory (all waypoint sequences of a subtask,
-    all end effectors) executes. One instance per trajectory; see ``tmg.generation.method.tracking``."""
-
-    def start_path(self, eefs: list, noises: list, kinds: list, previous_states: dict | None = None) -> None:
-        """Load the flattened path. ``eefs`` are ``EndEffectorPath`` objects (one per end effector, equal
-        length n), ``noises`` and ``kinds`` have one entry per waypoint, ``previous_states`` maps an end
-        effector to its last gripper state before this path (None on the first path of an attempt)."""
-        ...
-
-    def finished(self) -> bool:
-        """True once the path variable reached the last waypoint."""
-        ...
-
-    def final_gripper_states(self) -> dict:
-        """Gripper state per end effector at the end of the path, for the next path's event detection."""
-        ...
-
-    def next_target(self, measured: dict) -> tuple[dict, dict, Any, dict]:
-        """Advance once. ``measured`` maps end-effector names to measured 4x4 poses. Returns (target poses by
-        end effector, gripper commands by end effector, noise scale of the commanded waypoint, record), where
-        ``record`` has the keys documented in ``tmg.generation.method.tracking.ErrorAdaptiveFollower``."""
+    def begin_attempt(self) -> None:
+        """Called by the runtime when an attempt starts (a mixer with per-attempt random choices draws them anew)."""
         ...
 
 
 @dataclass
 class Method:
-    """The configured method: a mixer (or None), a follower factory (or None) and the action label kind."""
+    """The configured method: a mixer (or None) and the action label kind."""
     name: str
     mixer: SegmentMixer | None
-    follower_factory: Any | None                   # callable() -> PathFollower, one per segment
     labels: str = "executed"                       # executed | pre_noise
-    sources: Any | None = None                     # RankBasedSampling (method.sources) or None: the generator's own choice
 
     @property
     def is_identity(self) -> bool:
-        """True when the method changes nothing (no mixer, no follower, executed labels, the generator's sources)."""
-        return self.mixer is None and self.follower_factory is None and self.labels == "executed" and self.sources is None
+        """True when the method changes nothing (no mixer, executed labels)."""
+        return self.mixer is None and self.labels == "executed"
 
 
 class MixerType(Protocol):
     """A mixer implementation as ``build_method`` sees it: a class with ``from_config``."""
-    def from_config(self, cfg: Mapping, *, chunk_seed: int) -> SegmentMixer:
-        """Build the mixer from the ``method.mixing`` block; ``chunk_seed`` seeds its private random choices."""
-        ...
-
-
-class FollowerType(Protocol):
-    """A follower implementation as ``build_method`` sees it: a class with ``factory``."""
-    def factory(self, cfg: Mapping) -> Callable[[], PathFollower]:
-        """Return the zero-argument constructor of the ``method.tracking`` block (one follower per trajectory)."""
+    def from_config(self, cfg: Mapping, *, chunk_seed: int, method_name: str) -> SegmentMixer:
+        """Build the mixer from the ``method.mixing`` block; ``chunk_seed`` seeds its private random choices and
+        ``method_name`` is the method's name (a mixer may tie a setting to the folder name its output goes to)."""
         ...
 
 
 _MIXERS: dict[str, MixerType] = {}                                              # mixing.type -> class; filled lazily
-_FOLLOWERS: dict[str, FollowerType] = {"error_adaptive": ErrorAdaptiveFollower}  # tracking.type -> class
 
 
 def _mixer_types() -> dict[str, MixerType]:
     """Mixer implementations by ``method.mixing.type``."""
     if not _MIXERS:
-        # imported here, not at the top: guided_mix imports MixContext and MixedSegment from this module
-        from tmg.generation.method.guided_mix import GuidedMixer
-        from tmg.generation.method.logistic_mix import LogisticMixer
+        # imported here, not at the top: the mixer module imports MixContext and MixedSegment from this module
+        from tmg.generation.method.skillmix import SkillMixer
 
-        _MIXERS.update(guided=GuidedMixer, logistic=LogisticMixer)
+        _MIXERS.update(skillmix=SkillMixer)
     return _MIXERS
-
-
-def _follower_types() -> dict[str, FollowerType]:
-    """Follower implementations by ``method.tracking.type``."""
-    return _FOLLOWERS
 
 
 def build_method(cfg: Mapping, *, chunk_seed: int) -> Method:
     """Build the method of a ``method`` config block (plain mapping).
 
-    ``mixing.type`` (default ``guided``; ``logistic`` reads the coefficient file) and ``tracking.type`` (default
-    ``error_adaptive``) pick the implementation; ``sources`` (``type: rank_based``, ``top_k``, ``ranking``) restricts the
-    generator's source choice to the best sources of the ranking file (``RankBasedSampling``);
-    a new variant is a class added to ``_mixer_types`` or ``_FOLLOWERS`` plus a method config file naming it.
+    ``mixing.type`` picks the mixer implementation; a new variant is a class added to ``_mixer_types`` plus a method
+    config file naming it. A ``tracking`` or ``sources`` block (path following, rank-based source sampling) is refused:
+    those methods were removed from the repository.
     """
     name = str(cfg.get("name", "none"))
+    for removed in ("tracking", "sources"):
+        block = cfg.get(removed)
+        if block and (removed == "sources" or dict(block).get("enabled", False)):
+            raise ValueError(f"method {name!r}: method.{removed} is no longer supported (removed with TrackMix, "
+                             f"rank-based sampling and path following)")
     mixing = dict(cfg.get("mixing") or {})
-    tracking = dict(cfg.get("tracking") or {})
     labels = str(cfg.get("labels", "executed"))
     if labels not in ("executed", "pre_noise"):
         raise ValueError(f"method.labels must be executed or pre_noise, got {labels!r}")
     mixer = None
     if mixing.get("enabled", False):
-        kind = str(mixing.get("type", "guided"))
+        kind = str(mixing.get("type", "skillmix"))
         types = _mixer_types()
         if kind not in types:
             raise ValueError(f"method.mixing.type {kind!r} unknown; known: {sorted(types)}")
-        mixer = types[kind].from_config(mixing, chunk_seed=chunk_seed)
-    factory = None
-    if tracking.get("enabled", False):
-        kind = str(tracking.get("type", "error_adaptive"))
-        types = _follower_types()
-        if kind not in types:
-            raise ValueError(f"method.tracking.type {kind!r} unknown; known: {sorted(types)}")
-        factory = types[kind].factory(tracking)
-    sources = None
-    source_cfg = dict(cfg.get("sources") or {})
-    if source_cfg:
-        kind = str(source_cfg.get("type", "rank_based"))
-        if kind != "rank_based":
-            raise ValueError(f"method.sources.type {kind!r} unknown; known: ['rank_based']")
-        from tmg.generation.method.rank_sampling import RankBasedSampling
-
-        sources = RankBasedSampling.from_config(source_cfg, chunk_seed=chunk_seed)
-    return Method(name=name, mixer=mixer, follower_factory=factory, labels=labels, sources=sources)
+        mixer = types[kind].from_config(mixing, chunk_seed=chunk_seed, method_name=name)
+    return Method(name=name, mixer=mixer, labels=labels)

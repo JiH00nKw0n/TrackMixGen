@@ -11,7 +11,7 @@ SoftMimicGen (Isaac Lab fork) adapter, each a hook of ``IsaacLabGenerator.prepar
   environment config. The chunk gets a copy of the official descriptor with three fields changed (``chunk_inputs``):
   ``generation_policy.seed`` (the chunk seed), ``num_trials`` (the chunk's count) and ``guarantee_success`` (from
   ``generation.protocol.guarantee``: true in the full pools, so ``num_trials`` counts successes; false in the test pilots
-  and the ranking pools, so it counts attempts). Every other value (source selection per subtask,
+  and the SkillMix fit pools, so it counts attempts). Every other value (source selection per subtask,
   nearest-neighbour selection, action noise, interpolation steps) is the official one.
 - Environment registration: a task with ``external_callback`` (the Arena tasks) passes it to the script with the provider
   options after ``--`` (``provider_args``); a task without it (Pick Place) lists the modules to import before the
@@ -43,7 +43,7 @@ DESCRIPTOR = "task_descriptor.yaml"
 
 def chunk_descriptor(official: dict, *, seed: int, num_trials: int, guarantee: bool = True) -> dict:
     """The official task descriptor with the chunk's seed and trial count; ``guarantee`` (generation.protocol.guarantee)
-    decides whether ``num_trials`` counts successes (true, the full pools) or attempts (false, test pilots and ranking pools)."""
+    decides whether ``num_trials`` counts successes (true, the full pools) or attempts (false, test pilots and SkillMix fit pools)."""
     out = json.loads(json.dumps(official))          # yaml anchors already resolved by the loader; deep copy
     policy = dict(out.get("generation_policy") or {})
     policy["seed"] = int(seed)
@@ -73,7 +73,7 @@ class DexMimicGenGenerator(IsaacLabGenerator):
         descriptor = chunk_descriptor(official, seed=chunk.seed, num_trials=chunk.attempts,
                                       guarantee=bool(self.protocol.get("guarantee", True)))
         (folder / DESCRIPTOR).write_text(yaml.safe_dump(descriptor, sort_keys=False))
-        # generation.protocol.camera_names: null = the task's cameras, a list = those cameras ([] = none, the ranking pools).
+        # generation.protocol.camera_names: null = the task's cameras, a list = those cameras ([] = none, the SkillMix fit pools).
         # Without cameras the official environment is used instead of our camera environment (no per-step rendering).
         names = self.protocol.get("camera_names")
         cameras = list(task.get("cameras") or []) if names is None else [str(c) for c in names]
