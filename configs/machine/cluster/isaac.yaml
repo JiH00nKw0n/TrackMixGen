@@ -8,3 +8,6 @@ workers: auto
 max_workers: 16
 threads_per_worker: 1
 min_free_disk_gib: 20
+render: egl                     # offscreen rendering of the robosuite images: egl (GPU, NVIDIA EGL; EGL device i = GPU i here) |
+                                # mesa (CPU, the renderer of the pools made before 2026-11-22); a dataset and its evaluations
+                                # use the same renderer

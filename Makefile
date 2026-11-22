@@ -6,7 +6,7 @@
 #   make show     TASK=square
 #   make check-scene TASK=hammer_cleanup SCENE=ours
 #   make test
-# CLUSTER=<name> reads runtime, image, sif and data_root from configs/machine/cluster/<name>.yaml (local, isaac, a100);
+# CLUSTER=<name> reads runtime, image, sif, data_root and render from configs/machine/cluster/<name>.yaml (local, isaac, a100);
 # RUNTIME, SIF and DATA_ROOT on the command line override it. RUNTIME=singularity runs the same commands with
 # `singularity exec` on SIF (a .sif built from the docker image with `make sif ARCHIVE=<docker save tar>`).
 SHELL := /bin/bash
@@ -51,14 +51,6 @@ DOCKER_GPU = --runtime=nvidia --gpus $(if $(ISAAC_GPU),device=$(ISAAC_GPU),all) 
 SING_NV    = --nv
 DOCKER_VOL_EXTRA = --shm-size 8g
 endif
-# robosuite (1.4 and 1.5) picks the offscreen EGL rendering device by index; on a host whose /dev/dri the user cannot
-# open (A100 under Singularity: Mesa software rendering, device index = cluster `egl_device_id`) the index must be set
-# explicitly for both robosuite images, or image pools and image evaluations fail with "Cannot initialize a EGL device
-# display" (2026-10-29). Docker hosts leave egl_device_id unset: Mesa inside the container finds its software device itself.
-ifneq (,$(filter robosuite cpgen,$(IMAGE)))
-EGL_DEVICE_ID ?= $(call cluster_value,egl_device_id)
-SING_ENV_EXTRA = $(if $(EGL_DEVICE_ID),--env MUJOCO_EGL_DEVICE_ID=$(EGL_DEVICE_ID),)
-endif
 # the CP-Gen image needs the GPU (cuRobo motion planning) also for generation and evaluation
 ifeq ($(IMAGE),cpgen)
 DOCKER_GPU = --gpus all
@@ -81,13 +73,62 @@ writable_fill = docker run --rm -v $(call host_dir,$(1)):/out --entrypoint cp tm
 endif
 PREP_EXTRA = $(foreach p,$(CPGEN_WRITABLE),&& { test -n "$$(ls -A $(call host_dir,$(p)) 2>/dev/null)" || { mkdir -p $(call host_dir,$(p)) && $(call writable_fill,$(p)); }; })
 endif
+# Offscreen rendering of the robosuite images (robosuite: MimicGen, cpgen: CP-Gen) in every stage that runs them
+# (sources, generate, dataset, resets, eval, check-scene). RENDER (cluster `render`, default egl):
+#   egl   renders on the GPU through NVIDIA EGL (about 4x faster per MimicGen image attempt on the A100, 2026-11-21);
+#   mesa  the rendering of every pool, dataset and evaluation made before 2026-11-22: the robosuite image (and the CP-Gen
+#         image under Singularity) on the CPU with Mesa's software EGL device (RENDER=mesa or cluster `render: mesa`).
+# The two renderers do not draw the same pixels: the same scene rendered both ways differed in 50-61 % of the pixels, by
+# 0.7-1.4 levels on average and up to 76 (2026-11-22). A policy is therefore trained on images of one renderer and
+# evaluated with the same renderer; keep RENDER the same for a dataset and for the evaluation of the policies trained on it.
+RENDER ?= $(or $(call cluster_value,render),egl)
+comma  := ,
+ifneq (,$(filter robosuite cpgen,$(IMAGE)))
+ifeq ($(RENDER),egl)
+# The GPU that renders: the first entry of the caller's CUDA_VISIBLE_DEVICES (the drivers' GPU variable; "0,3" gives 0),
+# else 0. EGL numbers the GPUs in its own order: cluster `egl_device_of_gpu` lists the EGL index of GPU 0, 1, 2, ...
+# (A100: [2, 3, 0, 1, 6, 7, 4, 5], read with EGL_CUDA_DEVICE_NV); unset means the same index (Isaac). EGL_DEVICE_ID on the
+# command line overrides the lookup.
+RENDER_GPU    ?= $(or $(firstword $(subst $(comma), ,$(CUDA_VISIBLE_DEVICES))),0)
+EGL_MAP        = $(subst $(comma), ,$(subst [,,$(subst ],,$(call cluster_value,egl_device_of_gpu))))
+EGL_DEVICE_ID ?= $(if $(EGL_MAP),$(word $(shell echo $$(( $(RENDER_GPU) + 1 ))),$(EGL_MAP)),$(RENDER_GPU))
+# robosuite asserts that MUJOCO_EGL_DEVICE_ID is listed in CUDA_VISIBLE_DEVICES whenever that is not empty, and an EGL
+# index is not a GPU index on the A100. The robosuite image needs no CUDA, so its list is empty inside the container; the
+# CP-Gen image keeps the rendering GPU for cuRobo (cuda:0) and tmg.core.egl.apply appends the EGL index when it differs.
+CONTAINER_CUDA = $(if $(filter cpgen,$(IMAGE)),$(RENDER_GPU),)
+# robomimic asks egl_probe for the EGL devices, which renders a test on every GPU of the host (other users' included) and
+# stalled with many chunk processes (A100, 2026-11-21); docker/egl_stub/egl_probe_init.py returns MUJOCO_EGL_DEVICE_ID only
+EGL_PROBE_FILE = /opt/venv/lib/python3.10/site-packages/egl_probe/__init__.py
+DOCKER_GPU     = --runtime=nvidia --gpus all -e NVIDIA_VISIBLE_DEVICES=all -e NVIDIA_DRIVER_CAPABILITIES=all
+DOCKER_RENDER  = -e CUDA_VISIBLE_DEVICES=$(CONTAINER_CUDA) -e MUJOCO_GL=egl -e PYOPENGL_PLATFORM=egl -e MUJOCO_EGL_DEVICE_ID=$(EGL_DEVICE_ID) \
+                 -v $(REPO)/docker/egl_stub/egl_probe_init.py:$(EGL_PROBE_FILE):ro
+# Singularity's --nv does not bring NVIDIA's EGL library (A100: nvidia-container-cli without the graphics capability), so
+# cluster `nvidia_egl_dir` holds a copy of the driver's EGL libraries and its 10_nvidia.json vendor file (same driver
+# version as the host), bound into the container. CUDA_VISIBLE_DEVICES reaches a --cleanenv container only through
+# SINGULARITYENV_CUDA_VISIBLE_DEVICES, which is set for the one singularity command.
+NVIDIA_EGL_DIR ?= $(call cluster_value,nvidia_egl_dir)
+SING_NV        = --nv
+SING_RENDER    = --env MUJOCO_EGL_DEVICE_ID=$(EGL_DEVICE_ID) -B $(REPO)/docker/egl_stub/egl_probe_init.py:$(EGL_PROBE_FILE) \
+                 $(if $(NVIDIA_EGL_DIR),--env LD_LIBRARY_PATH=/opt/nvegl:/.singularity.d/libs -B $(NVIDIA_EGL_DIR):/opt/nvegl -B $(NVIDIA_EGL_DIR)/10_nvidia.json:/usr/share/glvnd/egl_vendor.d/10_nvidia.json,)
+SING_PREFIX    = SINGULARITYENV_CUDA_VISIBLE_DEVICES=$(CONTAINER_CUDA)
+else ifeq ($(RENDER),mesa)
+# Mesa software rendering picks the EGL device by index too; on a host whose /dev/dri the user cannot open (A100 under
+# Singularity) the index must be set explicitly (cluster `egl_device_id`: Mesa's software device after the GPUs' DRM
+# devices), or image pools and image evaluations fail with "Cannot initialize a EGL device display" (2026-10-29). Docker
+# hosts leave egl_device_id unset: Mesa inside the container finds its software device itself.
+EGL_DEVICE_ID ?= $(call cluster_value,egl_device_id)
+SING_RENDER    = $(if $(EGL_DEVICE_ID),--env MUJOCO_EGL_DEVICE_ID=$(EGL_DEVICE_ID),)
+else
+$(error RENDER must be egl or mesa, got '$(RENDER)')
+endif
+endif
 # Arena assets moved from the staging S3 mirror to production (2026-11-03): mount the patched path module into the Dex image
 ARENA_PATCH = $(if $(filter isaaclab-dex,$(IMAGE)),-v $(DATA_ROOT)/arena_patch/nucleus.py:/opt/src/IsaacLab-Arena/isaaclab_arena/assets/nucleus.py:ro,)
-DOCKER_RUN  = docker run --rm -i $(if $(shell tty -s && echo t),-t,) --network host $(DOCKER_GPU) \
+DOCKER_RUN  = docker run --rm -i $(if $(shell tty -s && echo t),-t,) --network host $(DOCKER_GPU) $(DOCKER_RENDER) \
               -v $(DATA_ROOT):/data -v $(REPO):/opt/tmg $(DOCKER_VOL_EXTRA) $(ARENA_PATCH) \
               -e TMG_DATA_ROOT=/data -e HOME=/tmp -e HF_HOME=/data/.cache/huggingface \
               --user $(shell id -u):$(shell id -g) tmg/$(IMAGE):$(TAG)
-SINGULARITY_RUN = singularity exec $(SING_NV) $(SING_ENV_EXTRA) --cleanenv --no-home --writable-tmpfs --pwd /opt/tmg -B $(DATA_ROOT):/data -B $(REPO):/opt/tmg -B $(CONTAINER_TMP):/tmp $(SING_BIND_EXTRA) \
+SINGULARITY_RUN = $(SING_PREFIX) singularity exec $(SING_NV) $(SING_RENDER) $(SING_ENV_EXTRA) --cleanenv --no-home --writable-tmpfs --pwd /opt/tmg -B $(DATA_ROOT):/data -B $(REPO):/opt/tmg -B $(CONTAINER_TMP):/tmp $(SING_BIND_EXTRA) \
               --env TMG_DATA_ROOT=/data,HOME=/tmp,HF_HOME=/data/.cache/huggingface,MUJOCO_GL=egl,PYOPENGL_PLATFORM=egl $(SIF) tmg
 # the train image (python 3.12, torch, lerobot) runs with the GPU; the data root and repo are mounted the same way
 TRAIN_SIF   ?= $(or $(call cluster_value,train_sif),$(DATA_ROOT)/images/tmg_$(TRAIN_IMAGE).sif)

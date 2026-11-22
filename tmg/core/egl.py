@@ -1,11 +1,12 @@
 """Offscreen-rendering device variables for robosuite 1.5 (the CP-Gen image).
 
 robosuite 1.5 reads the EGL device index from ``MUJOCO_EGL_DEVICE_ID`` (else from ``CUDA_VISIBLE_DEVICES``) and
-asserts at import time that the former appears in the latter. On a host where only Mesa's software EGL device can
-be initialised (A100: the GPUs' DRM devices are not openable by the user), the EGL index is not a GPU index, so
-the assertion would fail. ``apply`` appends the EGL index to ``CUDA_VISIBLE_DEVICES``; CUDA ignores every entry
-from the first invalid index on, so the GPUs the process sees do not change as long as the EGL index is not a
-valid GPU index (cluster ``egl_device_id`` is documented with that constraint).
+asserts at import time that the former appears in the latter. The EGL index is often not the CUDA index of the same GPU:
+with GPU rendering (Makefile ``RENDER=egl``) EGL numbers the GPUs in its own order (A100: GPU 0 is EGL device 2, cluster
+``egl_device_of_gpu``), and with Mesa software rendering on the A100 (``RENDER=mesa``) the index is Mesa's software device
+(8), which is no GPU at all. ``apply`` appends the EGL index to ``CUDA_VISIBLE_DEVICES`` so the assertion passes. The GPU
+the process computes on stays the first entry (``cuda:0``): CUDA ignores an index that is no valid GPU (Mesa's 8), and a
+valid one (GPU rendering on the A100) only becomes a second visible device that nothing uses.
 """
 from __future__ import annotations
 

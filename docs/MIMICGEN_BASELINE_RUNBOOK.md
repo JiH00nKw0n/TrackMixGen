@@ -122,7 +122,7 @@ Assembly만 MimicGen D2 범위를 그대로 쓴다. 그 위에 모든 물체가 
 - NVIDIA GPU 한 장. 학습과 정책 서버가 GPU를 쓴다. 영상 Diffusion Policy 학습 하나가 약 10 GB 안쪽을 쓰고, 기본 설정은 학습·평가
   파이프라인을 두 개 동시에 돌린다(`POLICY_PARALLEL=2`). 메모리 24 GB 이상을 권한다.
 - NVIDIA 드라이버 570 이상(학습 이미지가 CUDA 12.8 기반이다). `nvidia-smi` 출력의 "Driver Version"으로 확인한다.
-- CPU 코어. 생성과 평가 롤아웃은 CPU에서 돈다(robosuite, MuJoCo, 소프트웨어 렌더링). 묶음 하나가 코어 하나를 쓰므로 코어가 많을수록
+- CPU 코어. 생성과 평가 롤아웃의 물리 계산은 CPU에서 돈다(robosuite, MuJoCo; 영상은 GPU로 그린다, 아래 렌더링 항목). 묶음 하나가 코어 하나를 쓰므로 코어가 많을수록
   풀이 빨리 끝난다. 머신 설정의 `max_workers`를 코어 수에 맞춘다(3.5절). 16코어면 돌지만 풀 생성에 며칠이 걸린다(8절).
 - Docker 24 이상과 NVIDIA Container Toolkit. 설치 방법은 3절에 있다.
 - 디스크 약 400 GB. 이미지 두 개가 약 16 GB, 영상 풀이 성공 시도 하나에 약 13 MB(일곱 과제 합계 약 150 GB), 데이터셋이 과제당 약 13 GB,
@@ -419,7 +419,13 @@ Diffusion Policy는 ResNet18 인코더 두 개와 U-Net을 처음부터 학습�
   다음 포트를 쓴다. 평가 중에 중단되면 `tmg-serve-<포트>` 이름의 컨테이너가 남을 수 있다. `docker ps`로 보고 `docker stop`으로 멈춘다.
 - Hammer Cleanup은 서랍 자산을 robosuite_task_zoo에서 읽는다. 이미지에 들어 있으므로 따로 할 일은 없다.
 - Mug Cleanup은 MimicGen이 실행 때 머그잔 자산 폴더에 xml 파일을 쓴다. 이미지 빌드가 그 폴더에 쓰기 권한을 주므로 따로 할 일은 없다.
-- 영상 렌더링은 Mesa 소프트웨어 렌더링이라 GPU를 쓰지 않는다. 그래서 생성과 평가 속도는 CPU 코어 수가 정한다.
+- 영상 렌더링은 기본이 GPU(NVIDIA EGL)다(2026-11-22부터, 머신 설정의 `render: egl`). Makefile이 robosuite·CP-Gen 이미지에 GPU를
+  넘기고, 그리는 GPU는 호출한 쪽 `CUDA_VISIBLE_DEVICES`의 첫 번호(없으면 0)다. EGL의 장치 번호가 GPU 번호와 다른 머신은
+  `egl_device_of_gpu`에 GPU 0, 1, …의 EGL 번호를 적는다(A100: `[2, 3, 0, 1, 6, 7, 4, 5]`). GPU가 없는 머신이나 2026-11-22 이전 풀과
+  같은 렌더러가 필요할 때는 `render: mesa`(또는 `make ... RENDER=mesa`)로 CPU의 Mesa 소프트웨어 렌더링으로 되돌린다.
+- 두 렌더러는 같은 장면을 같은 화소로 그리지 않는다. 2026-11-22에 같은 장면을 Mesa와 EGL로 그려 비교했더니 화소의 50–61 %가 달랐다
+  (평균 0.7–1.4 단계, 최대 76 단계). 그래서 정책의 학습 데이터와 평가는 같은 렌더러여야 한다. Mesa로 만든 데이터셋으로 학습한 정책은
+  `RENDER=mesa`로 평가하고, 끝나지 않은 Mesa 풀을 이어서 만들 때도 `RENDER=mesa`를 준다(렌더러는 조각 설정에 기록되지 않아 섞여도 알 수 없다).
 - 저차원 관측(`OBSERVATION=low_dim`)으로 돌리려면 영상 없는 풀(`GENERATION=pool_robosuite_lowdim`)을 따로 만든다. 원본 선택 규칙은 풀의
   저장 방식과 무관하게 `SELECTION`으로 고르므로, 저차원 풀도 기본값 `official`이면 이 문서의 기준선과 같은 규칙으로 생성된다. 2026-10에
   만든 저차원 탐색 풀은 `ours` 규칙이고 `.../ours/ours/none/pool_robosuite_lowdim/` 폴더에 있다. 이 문서의 기준선은 영상으로 돌린다.
