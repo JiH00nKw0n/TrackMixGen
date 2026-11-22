@@ -32,7 +32,7 @@ from the same call, `SkillMixer.decide`, so both generators apply one rule.
 
 **Rule files, from scratch.** `make coefficients GENERATOR=<g> TASK=<t>` (`scripts/ensure_coefficients.sh`) builds two
 2,000-attempt pools of the same settings and chunk seeds (selection `ours`, generation `pool_ctrl`; chunks of 50, CP-Gen
-25, the sizes of the committed rules' pools): a control pool (method `none`, `none/pool_ctrl`) and a calibration pool
+25 from its generator config, the sizes of the committed rules' pools): a control pool (method `none`, `none/pool_ctrl`) and a calibration pool
 (`skillmix_calibration/pool_calib`, method `skillmix` with `mixing.rule=calibration` and `method.name=skillmix_calibration`: random
 Dirichlet weights), then fits the model on both (`tmg fit_coefficients`). `make generate METHOD=skillmix` does this by
 itself when the rule file is missing. The committed files (MimicGen: seven tasks, CP-Gen: five) were fitted on 2026-11-20;

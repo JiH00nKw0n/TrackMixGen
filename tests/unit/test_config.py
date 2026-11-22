@@ -99,3 +99,14 @@ def test_selection_rule_is_independent_of_the_pool_config(monkeypatch, tmp_path)
     fit = resolved(compose("fit_coefficients", ["generator=mimicgen", "task=square", "scene=ours", "selection=ours"]))
     assert [p.split("/pools/")[1] for p in fit["calibration_pools"]] == ["mimicgen/square/ours/ours/skillmix_calibration/pool_calib"]
     assert [p.split("/pools/")[1] for p in fit["baseline_pools"]] == ["mimicgen/square/ours/ours/none/pool_ctrl"]
+
+
+def test_fit_pools_take_their_chunk_size_from_the_generator(monkeypatch, tmp_path):
+    """The SkillMix fit pools (generation=pool_ctrl) have chunks of 50 attempts, CP-Gen's 25 (the pools of the committed
+    rules), without an override on the command line."""
+    monkeypatch.setenv("TMG_DATA_ROOT", str(tmp_path))
+    sizes = {g: resolved(compose("generate", [f"generator={g}", f"task={t}", "scene=ours", "selection=ours",
+                                              "generation=pool_ctrl"]))["generation"]
+             for g, t in (("mimicgen", "square"), ("cpgen", "coffee"))}
+    assert (sizes["mimicgen"]["attempts"], sizes["mimicgen"]["chunk"]) == (2000, 50)
+    assert (sizes["cpgen"]["attempts"], sizes["cpgen"]["chunk"]) == (2000, 25)

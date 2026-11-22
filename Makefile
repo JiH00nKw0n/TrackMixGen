@@ -207,10 +207,10 @@ generate:  ## generate one pool (TASK, SCENE, SELECTION=official|ours, METHOD, G
 verify-baseline:  ## official generator vs adapter with method=none on one chunk; must be identical
 	$(PREP) && $(CONTAINER_RUN) verify_baseline generator=$(GENERATOR) task=$(TASK) scene=$(SCENE) selection=$(SELECTION) generation=$(GENERATION) cluster=$(CLUSTER) $(OVERRIDES)
 
-fit-coefficients:  ## fit TASK's SkillMix rule on its calibration pool (method skillmix_calibration) and baseline pool (method none), SELECTION=ours, GENERATION=rank_human_demos; writes coefficients/<task>.yaml
+fit-coefficients:  ## fit TASK's SkillMix rule on its calibration pool (skillmix_calibration/pool_calib) and baseline pool (none/GENERATION), SELECTION=ours GENERATION=pool_ctrl; writes coefficients/<task>.yaml
 	$(PREP) && $(CONTAINER_RUN) fit_coefficients generator=$(GENERATOR) task=$(TASK) scene=$(SCENE) selection=$(SELECTION) generation=$(GENERATION) cluster=$(CLUSTER) $(OVERRIDES)
 
-coefficients:  ## build TASK's SkillMix rule file from scratch when missing (baseline and calibration pools of 3,000 attempts, fit-coefficients)
+coefficients:  ## build TASK's SkillMix rule file from scratch when missing (baseline and calibration pools of GENERATION=pool_ctrl, then fit-coefficients)
 	GENERATOR=$(GENERATOR) IMAGE=$(IMAGE) TASK=$(TASK) SCENE=$(strip $(SCENE)) CLUSTER=$(CLUSTER) scripts/ensure_coefficients.sh
 
 dataset:  ## write a training dataset from the finished pool (TASK, SCENE, METHOD, GENERATION, OBSERVATION=image|low_dim; OVERRIDES: size=... seed=...)

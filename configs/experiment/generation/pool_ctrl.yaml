@@ -7,8 +7,8 @@ defaults:
 #   pool_ctrl   method none, the control without mixing (folder none/pool_ctrl)
 #   pool_calib  method skillmix with mixing.rule=calibration and method.name=skillmix_calibration, the same config with
 #               generation.name=pool_calib (folder skillmix_calibration/pool_calib)
-# Chunks of 50 attempts (MimicGen); CP-Gen pools use chunks of 25 (scripts/ensure_coefficients.sh passes generation.chunk=25),
-# as on the server. Replaces rank_human_demos (3,000 attempts, chunks of 250), whose source ranking was removed.
+# Chunks of 50 attempts, or the generator's `fit_pool_chunk` (CP-Gen: 25), as on the server. Replaces rank_human_demos
+# (3,000 attempts, chunks of 250), whose source ranking was removed.
 name: pool_ctrl
 attempts: 2000
-chunk: 50
+chunk: ${oc.select:generator.fit_pool_chunk,50}
