@@ -1,7 +1,7 @@
 """Gripper event detection: when does a commanded gripper or hand change between open and closed?
 
-The path follower never skips such an event and slows down in front of it, so the definition of an event is
-part of the method. Two detectors cover the generators in scope:
+The mixers align segments at these events (``event_mix``), so the definition of an event is part of the method. Two
+detectors cover the generators in scope:
 
 - ``sign``: one scalar command per step, positive = close, negative = open, zero carries the previous state
   (robosuite grippers in MimicGen and the SoftMimicGen Franka hand).
@@ -10,8 +10,7 @@ part of the method. Two detectors cover the generators in scope:
   path, and an event fires when it crosses 0.65 upward (close) or 0.35 downward (open); the hysteresis keeps
   jitter from creating events. Ported from the 2026-10 Dex experiment (dex_hand_alignment.py).
 
-Both return the indices of the steps whose state differs from the step before, plus the state at the start,
-so a path can also be compared with the last state of the previous path.
+Both give the closed/open state of every step; ``change_indices`` turns it into the event steps.
 """
 from __future__ import annotations
 
@@ -50,13 +49,9 @@ def change_indices(states) -> np.ndarray:
 
 
 class GripperEventDetector(Protocol):
-    """Protocol of the open/closed state rule a follower uses to find gripper events."""
+    """Protocol of the open/closed state rule the mixers use to find gripper events."""
     def states(self, commands: np.ndarray) -> np.ndarray:
         """Boolean closed/open state per step for commands of shape (T, G)."""
-        ...
-
-    def state_of(self, command: np.ndarray, previous: bool | None) -> bool | None:
-        """State implied by one command vector (None when the command carries the previous state)."""
         ...
 
 
@@ -68,11 +63,6 @@ class SignGripper:
         """Closed/open per step from the first command column."""
         g = np.asarray(commands, dtype=float).reshape(len(commands), -1)[:, 0]
         return gripper_states(g)
-
-    def state_of(self, command, previous):
-        """State of one command: ``previous`` when the command is zero."""
-        v = float(np.asarray(command, dtype=float).reshape(-1)[0])
-        return previous if v == 0 else v > 0
 
 
 class ClosureGripper:
@@ -113,19 +103,6 @@ class ClosureGripper:
                 closed = False
             out[i] = closed
         return out
-
-    def state_of(self, command, previous):
-        """A single command carries no scale, so the previous state is kept."""
-        return previous      # a single command has no scale; the state is only known over a path
-
-
-def event_indices(detector: GripperEventDetector, commands, previous_state: bool | None) -> list[int]:
-    """Step indices whose state differs from the step before; index 0 counts when ``previous_state`` differs."""
-    states = detector.states(commands)
-    out = [int(i) for i in change_indices(states)]
-    if previous_state is not None and len(states) and bool(states[0]) != bool(previous_state):
-        out.insert(0, 0)
-    return out
 
 
 def build_detector(cfg) -> GripperEventDetector:

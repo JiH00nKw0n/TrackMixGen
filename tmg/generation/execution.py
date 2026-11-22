@@ -64,10 +64,6 @@ class SegmentTable:
         """Number of waypoints covered so far."""
         return self.rows[-1].end if self.rows else 0
 
-    def kinds_per_waypoint(self) -> list[int]:
-        """The kind of every waypoint of the path, in order."""
-        return [row.kind for row in self.rows for _ in range(row.end - row.start)]
-
     def seg_id_of(self, k: int) -> int:
         """Record-segment id of waypoint index ``k`` (last segment when out of range, -1 when empty)."""
         for row in self.rows:

@@ -47,10 +47,10 @@ def test_check_scene_composes_for_every_mimicgen_task(tmp_path):
 def test_generator_method_overrides_merge():
     from tmg.generation.base import apply_method_overrides
 
-    method = {"name": "trackmix", "mixing": {"weight_a": 0.8, "max_anchor_rotation_deg": 20.0}, "tracking": {"ds_min": 0.25}}
-    gen = {"name": "dexmimicgen", "method_overrides": {"trackmix": {"mixing": {"max_anchor_rotation_deg": 40.0}}}}
+    method = {"name": "skillmix", "mixing": {"rule": "softmax", "gripper_events": None}, "labels": "executed"}
+    gen = {"name": "dexmimicgen", "method_overrides": {"skillmix": {"mixing": {"gripper_events": {"type": "closure"}}}}}
     merged = apply_method_overrides(method, gen)
-    assert merged["mixing"] == {"weight_a": 0.8, "max_anchor_rotation_deg": 40.0} and merged["tracking"] == {"ds_min": 0.25}
+    assert merged["mixing"] == {"rule": "softmax", "gripper_events": {"type": "closure"}} and merged["labels"] == "executed"
     assert merged["overrides_from_generator"] == "dexmimicgen" and apply_method_overrides(method, {"name": "mimicgen"}) == method
 
 

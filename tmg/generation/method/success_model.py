@@ -67,10 +67,6 @@ def inhand_features(current_in_hand, source_in_hand) -> np.ndarray:
     return np.array([float(np.linalg.norm(c[:3, 3] - s[:3, 3])), float(rotation_angle(c[:3, :3], s[:3, :3]))])
 
 
-def sigmoid(z):
-    return 1.0 / (1.0 + np.exp(-np.asarray(z, dtype=float)))
-
-
 # outcomes and rows -----------------------------------------------------------------------------------------------
 def subtask_outcomes(attempt: Mapping, steps: Mapping, signals: Sequence) -> list[bool]:
     """Success of every subtask of one attempt (module docstring). ``steps`` holds the attempt's per-step arrays

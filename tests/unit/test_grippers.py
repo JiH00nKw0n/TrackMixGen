@@ -1,17 +1,17 @@
 import numpy as np
 import pytest
 
-from tmg.generation.method.grippers import ClosureGripper, SignGripper, event_indices
+from tmg.generation.method.grippers import ClosureGripper, SignGripper, change_indices
 
 
 def test_gripper_detectors():
     grips = -np.ones((10, 1))
     grips[6:] = 1.0
-    assert event_indices(SignGripper(), grips, None) == [6]
-    assert event_indices(SignGripper(), grips, True) == [0, 6]        # previous path ended closed
+    assert change_indices(SignGripper().states(grips)).tolist() == [6]
     hand = np.zeros((20, 4))
     hand[8:, :] = -1.0                                                  # flexion grows (negated closure)
-    assert event_indices(ClosureGripper(columns=[0, 1, 2, 3]), hand, None) == [8]
+    states = ClosureGripper(columns=[0, 1, 2, 3]).states(hand)
+    assert change_indices(states).tolist() == [8] and not states[0] and states[-1]
 
 
 def test_gripper_state_helpers_live_in_grippers_and_are_re_exported():

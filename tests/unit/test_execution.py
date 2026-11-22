@@ -57,9 +57,9 @@ def test_segment_table_maps_waypoints_to_record_segments():
     from tmg.generation.execution import SegmentTable
 
     table = SegmentTable()
-    assert len(table) == 0 and table.total == 0 and table.seg_id_of(0) == -1 and table.kinds_per_waypoint() == []
+    assert len(table) == 0 and table.total == 0 and table.seg_id_of(0) == -1
     table.add(3, seg_id=7, kind=SEG_BRIDGE)
     table.add(2, seg_id=9, kind=SEG_SKILL)
     assert table.total == 5 and table[1].seg_id == 9 and (table[1].start, table[1].end) == (3, 5)
     assert [table.seg_id_of(k) for k in range(6)] == [7, 7, 7, 9, 9, 9]        # out of range: the last segment
-    assert table.kinds_per_waypoint() == [SEG_BRIDGE] * 3 + [SEG_SKILL] * 2
+    assert [row.kind for row in table.rows] == [SEG_BRIDGE, SEG_SKILL]
