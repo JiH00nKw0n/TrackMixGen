@@ -395,10 +395,9 @@ Dex Pick Place의 공식 문서 기준 생성 1,000개는 RTX 6000 Ada에서 약
 ## 9. 알려진 제한과 문제 해결
 
 - DexMimicGen 세 과제는 NVIDIA AutoData로 `isaaclab-dex` 이미지에서 돈다. Microwave Opening과 Bottle Placement and Door Closing의 Arena
-  자산은 실행 때 Isaac 자산 서버와 Lightwheel 자산 서버(api.lightwheel.net)에서 내려받으므로 그 두 곳에 인터넷이 닿아야 한다. 혼합 방법은
-  세 과제 모두에 연결되어 있고, 추종 방법은 한 시도의 모든 하위작업이 같은 원본을 쓰는 과제에서만 돈다. Pick Place는 그렇고(공식 설정
-  `select_src_per_subtask: false`), Microwave와 Bottle은 공식 설정이 하위작업마다 원본을 고르므로 추종을 켜면 시작하자마자 멈춘다
-  (`NotImplementedError`). 이 두 과제에서 추종을 쓰려면 과제 기술 파일의 원본 선택 방식을 바꾸는 결정이 필요하다.
+  자산은 실행 때 Isaac 자산 서버와 Lightwheel 자산 서버(api.lightwheel.net)에서 내려받으므로 그 두 곳에 인터넷이 닿아야 한다. 혼합 방법
+  (SkillMix)은 세 과제 모두에 연결되어 있지만 이 과제들의 SkillMix 규칙 파일은 아직 없다(`make coefficients`로 만든다). 경로 추종
+  방법은 2026-11-22에 저장소에서 삭제했다.
 - 파드용 네이티브 실행(`scripts/native_runtime.py`)의 `isaaclab-dex`는 옛 Isaac Lab 2.x 환경을 뜻하므로 2026-10-29부터 거부한다.
   `scripts/bootstrap_native.py`에 AutoData 스택 단계가 생기기 전까지 Dex 세 과제는 도커 이미지로만 돈다.
 - Microwave Opening의 공식 환경은 로봇, 전자레인지, 문의 시작 열림 정도를 모두 고정값으로 두고 무작위화 항목이 없다. 그래서 이 과제의
