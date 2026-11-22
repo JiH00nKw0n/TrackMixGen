@@ -7,7 +7,7 @@ methods exist (`configs/experiment/method/`): `none`, the generator as released,
 ```
 interfaces.py    MixContext, MixedSegment, SegmentMixer, Method, build_method and the mixer registry _MIXERS (MixerType)
 skillmix.py      SkillMixer (mixing.type: skillmix), the rule file (SkillMixRule, load_rule), softmax_weights,
-                 CalibrationDraws / calibration_weights (mixing.rule: calibration), symmetry alignment
+                 RandmixDraws / randmix_weights (mixing.rule: randmix), symmetry alignment
 success_model.py the per-source features (scene, in-hand) and the rows of the fit (task-success label)
 event_mix.py     event-aligned blending of segments (mix_many; align_segments for CP-Gen)
 grippers.py      gripper state and event rules: gripper_states / change_indices (scalar sign commands),
@@ -31,12 +31,12 @@ blends its re-solved constraints itself (`tmg/generation/generators/cpgen/mixing
 from the same call, `SkillMixer.decide`, so both generators apply one rule.
 
 **Rule files, from scratch.** `make coefficients GENERATOR=<g> TASK=<t>` (`scripts/ensure_coefficients.sh`) builds two
-2,000-attempt pools of the same settings and chunk seeds (selection `ours`, generation `pool_ctrl`; chunks of 50, CP-Gen
-25 from its generator config, the sizes of the committed rules' pools): a control pool (method `none`, `none/pool_ctrl`) and a calibration pool
-(`skillmix_calibration/pool_calib`, method `skillmix` with `mixing.rule=calibration` and `method.name=skillmix_calibration`: random
+2,000-attempt pools of the same settings and chunk seeds (selection `ours`, generation `pool_unmix`; chunks of 50, CP-Gen
+25 from its generator config, the sizes of the committed rules' pools): an unmix pool (method `none`, `none/pool_unmix`) and a randmix pool
+(`skillmix_randmix/pool_randmix`, method `skillmix` with `mixing.rule=randmix` and `method.name=skillmix_randmix`: random
 Dirichlet weights), then fits the model on both (`tmg fit_coefficients`). `make generate METHOD=skillmix` does this by
 itself when the rule file is missing. The committed files (MimicGen: seven tasks, CP-Gen: five) were fitted on 2026-11-20;
-each file's `basis` names its pools.
+each file's `basis` names its pools. Pools made on the servers before 2026-11-23 keep their folder names (`<method>/pool_calib`, `none/pool_ctrl`); to fit on them, name the folders: `make fit-coefficients GENERATOR=<g> TASK=<t> SCENE=ours SELECTION=ours GENERATION=pool_unmix OVERRIDES="randmix_pools=[/data/pools/<g>/<t>/ours/ours/mixup_only/pool_calib] unmix_pools=[/data/pools/<g>/<t>/ours/ours/none/pool_ctrl]"`.
 
 The rows of the fit are the attempts that reached subtask k, labelled with the attempt's task success (not subtask k's own
 success; `success_model.py` explains why). The fit standardizes the columns and picks an L2 penalty by chunk-grouped
@@ -47,7 +47,7 @@ cross-validation; each block of the rule file also keeps the cross-validated log
 A generator adapter (`tmg/generation/generators/<name>/runtime.py`) calls the mixer once per subtask: after the official
 code has selected a source demonstration for the subtask and cut its segment (end-effector poses, target poses, gripper
 commands) and before it transforms that segment to the current object pose, the adapter calls `mixer.mix(context)`. The
-runtimes also call `mixer.begin_attempt()` when an attempt starts (the calibration rule draws new weights per attempt).
+runtimes also call `mixer.begin_attempt()` when an attempt starts (the randmix rule draws new weights per attempt).
 
 | `MixContext` field | Meaning |
 |---|---|
@@ -57,15 +57,15 @@ runtimes also call `mixer.begin_attempt()` when an attempt starts (the calibrati
 | `src_object_poses` | per source: the reference object's pose (4x4) at that source's segment start, so a mixer can express every segment in the object frame |
 | `src_segments` | per source: (eef_start, targets, gripper) of its segment |
 | `num_sources`, `has_reference_object` | how many sources exist; whether the subtask has a reference object (no object: no frame to mix in) |
-| `rng` | optional (defaults to `default_rng(0)`); SkillMix does not use it (its calibration draws come from their own stream seeded with the chunk seed) |
+| `rng` | optional (defaults to `default_rng(0)`); SkillMix does not use it (its randmix draws come from their own stream seeded with the chunk seed) |
 | `extra` | `current_object_pose`, `reference_object`, and from the second subtask on `current_in_hand` and `source_in_hand` |
 
 The mixer returns a `MixedSegment`: the segment the generator should transform and execute (`eef_start`, `targets`,
 `gripper`) and a `record` dict. Returning the inputs unchanged is the identity (the official behaviour). The record goes
 into the attempt's `subtasks[i]["mix"]` entry of `attempts.jsonl`; SkillMix writes `call`, `subtask`, `source_a`, `rule`,
 `mixed`, `weights`, `incompatible`, `scene_features` (and `inhand_features`), with the softmax rule `scores` and `d`, with
-the calibration rule `dirichlet_c`, on a blend `symmetry` and `alignment`, and when it did nothing `identity_reason`. The fit
-reads `weights`, `scene_features` and `inhand_features` of the calibration pools.
+the randmix rule `dirichlet_c`, on a blend `symmetry` and `alignment`, and when it did nothing `identity_reason`. The fit
+reads `weights`, `scene_features` and `inhand_features` of the randmix pools.
 
 ## 2. Current values
 
@@ -74,14 +74,14 @@ reads `weights`, `scene_features` and `inhand_features` of the calibration pools
 | Block | Key | Value | Meaning |
 |---|---|---|---|
 | `mixing` | `type` | `skillmix` | implementation (`SkillMixer`) |
-| | `rule` | `softmax` | `softmax`: the SkillMix weights; `calibration`: random Dirichlet weights for the calibration pools only |
+| | `rule` | `softmax` | `softmax`: the SkillMix weights; `randmix`: random Dirichlet weights for the randmix pools only |
 | | `coefficients` | `<generator>/<task>` | which rule file to read |
 | | `symmetries` | `task.mixing_symmetries` | object symmetries the sources may be aligned with before blending |
 | | `gripper_events` | `{type: sign}` (default) | DexMimicGen: `{type: closure, columns: [0, 1, 2, 3]}` (`method_overrides` of its generator file) |
 | `labels` | | `executed` | the dataset stores what the simulator received (CP-Gen: `pre_noise`, its saved actions are noise-free) |
 
-A generator overrides values under `method_overrides: {<method name>: {...}}` in its own file; the calibration pools have
-the method name `skillmix_calibration`, so a generator that overrides `skillmix` lists that name too.
+A generator overrides values under `method_overrides: {<method name>: {...}}` in its own file; the randmix pools have
+the method name `skillmix_randmix`, so a generator that overrides `skillmix` lists that name too.
 
 ## 3. Adding a mixer variant
 

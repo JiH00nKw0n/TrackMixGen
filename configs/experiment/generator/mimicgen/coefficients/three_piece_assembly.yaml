@@ -8,8 +8,8 @@ task: three_piece_assembly
 rule: softmax
 basis: 'Fitted on 2026-11-20 on the A100 (scratch_calib/ana/fit_all.py, softmax form, without the older rank_human_demos pool;
   the model and fit of tmg fit_coefficients, which reproduced the CP-Gen Threading rule to 1e-13 from the same records) from
-  /data/pools/mimicgen/three_piece_assembly/ours/ours/mixup_only/pool_calib (method mixup_only with TMG_MIX_DIRICHLET=1: Dirichlet(c)
-  weights, c ~ LogUniform(0.05, 20); selection ours, pool_robosuite_lowdim settings, 2,000 attempts in chunks of 50) and /data/pools/mimicgen/three_piece_assembly/ours/ours/none/pool_ctrl
+  /data/pools/mimicgen/three_piece_assembly/ours/ours/mixup_only/pool_calib [the randmix pool; in this repository skillmix_randmix/pool_randmix] (method mixup_only with TMG_MIX_DIRICHLET=1: Dirichlet(c)
+  weights, c ~ LogUniform(0.05, 20); selection ours, pool_robosuite_lowdim settings, 2,000 attempts in chunks of 50) and /data/pools/mimicgen/three_piece_assembly/ours/ours/none/pool_ctrl [the unmix pool; in this repository none/pool_unmix]
   (method none, the same code, settings and chunk seeds, 2,000 attempts); rows of subtask k: the attempts that reached it,
   label = the attempt''s task success.'
 num_sources: 10
@@ -47,11 +47,11 @@ subtasks:
     d: 0.573457244350014
     c0: -1.6607214472198588
     rows:
-      calibration: 2000
-      baseline: 2000
+      randmix: 2000
+      unmix: 2000
     cv_log_loss_gain_percent:
       all_rows: 5.1
-      calibration_rows: 3.8
+      randmix_rows: 3.8
   1:
     a:
     - -0.170443882117026
@@ -73,11 +73,11 @@ subtasks:
     d: 0.5311797837590867
     c0: -0.5530466623760417
     rows:
-      calibration: 1998
-      baseline: 1994
+      randmix: 1998
+      unmix: 1994
     cv_log_loss_gain_percent:
       all_rows: 9.7
-      calibration_rows: 6.5
+      randmix_rows: 6.5
   2:
     a:
     - 0.4105681034010342
@@ -99,11 +99,11 @@ subtasks:
     d: 0.5364577817647583
     c0: -1.3316118257937553
     rows:
-      calibration: 1855
-      baseline: 1704
+      randmix: 1855
+      unmix: 1704
     cv_log_loss_gain_percent:
       all_rows: 5.2
-      calibration_rows: 2.8
+      randmix_rows: 2.8
   3:
     a:
     - 0.07698701891870065
@@ -125,8 +125,8 @@ subtasks:
     d: 0.4501553774956233
     c0: 3.1064940541515527
     rows:
-      calibration: 1651
-      baseline: 1478
+      randmix: 1651
+      unmix: 1478
     cv_log_loss_gain_percent:
       all_rows: 39.5
-      calibration_rows: 38.9
+      randmix_rows: 38.9

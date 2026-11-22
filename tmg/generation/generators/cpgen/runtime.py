@@ -204,7 +204,7 @@ class CPGenRuntime:
         self.rec.begin_attempt()
         self.picker.pick(generator.policy)
         if self.method.mixer is not None:
-            self.method.mixer.begin_attempt()                 # a new attempt draws new calibration weights
+            self.method.mixer.begin_attempt()                 # a new attempt draws new randmix weights
         robosuite_env = getattr(getattr(generator.env, "env", None), "env", None)
         self.rec.set_scene_meta(getattr(robosuite_env, SCENE_META_ATTR, None))
 

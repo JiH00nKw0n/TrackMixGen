@@ -60,7 +60,7 @@ class MimicGenRuntime:
         self.rec.set_scene_meta(getattr(getattr(env, "env", None), SCENE_META_ATTR, None))
         self.exec.begin_attempt()
         if self.method.mixer is not None:
-            self.method.mixer.begin_attempt()              # a new attempt draws new calibration weights
+            self.method.mixer.begin_attempt()              # a new attempt draws new randmix weights
         self._last_mix = None
         self._traj = None
         self._carried = None

@@ -47,7 +47,7 @@ Pick Place를 우리 카메라 환경으로 돌린다(`tmg/generation/generators
 Isaac Lab 세 과제는 공식 설정이 "성공 수 보장"(generation_guarantee)이어서, 생성 설정 `pool_isaac`(`protocol.guarantee: true`)의 시도 수
 1,000은 성공 1,000개가 나올 때까지 돈다는 뜻이다(성공 250개짜리 청크 4개). AutoData 두 과제의 공식 기술 파일은 성공을 보장하지 않지만,
 우리 청크는 같은 뜻이 되도록 사본에 `guarantee_success: true`를 써 넣는다. 실패 시도도 모두 기록되므로 생성 성공률은 기록에서 계산한다.
-시험용 설정(`test/pilot20`, `test/pilot50`)과 SkillMix 적합 풀(`pool_ctrl`)은 `guarantee: false`라 Isaac Lab 생성기에서도 적힌 수만큼
+시험용 설정(`test/pilot20`, `test/pilot50`)과 SkillMix 적합 풀(`pool_unmix`)은 `guarantee: false`라 Isaac Lab 생성기에서도 적힌 수만큼
 시도하고 끝난다(2026-10-29부터. 그 전에 만든 pilot20, pilot50 풀은 성공 20개와 50개짜리다).
 
 초기 상태의 무작위화 범위(장면)는 두 가지다. `official`은 공식 환경 설정 그대로이고, 드라이버 기본값인 `ours`는 Rope, Towel, Microwave

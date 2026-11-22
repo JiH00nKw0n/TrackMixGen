@@ -1,4 +1,4 @@
-"""SkillMix: the features, the rows of the fit, the softmax and calibration weights, the rule files, the mixer and the fit."""
+"""SkillMix: the features, the rows of the fit, the softmax and randmix weights, the rule files, the mixer and the fit."""
 from pathlib import Path
 
 import numpy as np
@@ -7,13 +7,13 @@ import yaml
 
 from tmg.generation.method.interfaces import MixContext, build_method
 from tmg.generation.method.skillmix import (
-    CALIBRATION_SEED,
+    RANDMIX_SEED,
     MIN_WEIGHT,
-    CalibrationDraws,
+    RandmixDraws,
     SkillMixer,
     SkillMixRule,
     SubtaskRule,
-    calibration_weights,
+    randmix_weights,
     load_rule,
     softmax_weights,
 )
@@ -122,23 +122,23 @@ def test_rule_scores_add_the_feature_slopes_to_the_source_effects():
     assert np.allclose(block.scores(scene, np.array([[0.01, 0.1], [0.0, 0.0]])), [0.5 - 0.65 - 0.1 - 0.1, -0.5])
 
 
-def test_calibration_draws_are_dirichlet_weights_from_their_own_stream():
-    draws = CalibrationDraws(chunk_seed=30001)
+def test_randmix_draws_are_dirichlet_weights_from_their_own_stream():
+    draws = RandmixDraws(chunk_seed=30001)
     first = draws.draw(0, 4)
     assert draws.draw(0, 4) is first                       # one draw per subtask and attempt (CP-Gen may re-solve)
-    rng = np.random.default_rng(np.random.SeedSequence([30001, CALIBRATION_SEED]))
+    rng = np.random.default_rng(np.random.SeedSequence([30001, RANDMIX_SEED]))
     c = float(np.exp(rng.uniform(np.log(0.05), np.log(20.0))))
     gamma = rng.gamma(c, size=4)
     fallback = int(rng.integers(4))
     assert first[0] == c and np.array_equal(first[1], gamma) and first[2] == fallback
-    w = calibration_weights(first, [0, 1, 3])
+    w = randmix_weights(first, [0, 1, 3])
     expected = np.r_[gamma[[0, 1]], 0.0, gamma[3]] / gamma[[0, 1, 3]].sum()
     expected[expected < MIN_WEIGHT] = 0.0
     assert np.allclose(w, expected / expected.sum()) and w[2] == 0.0
     second = draws.draw(1, 4)
     draws.begin_attempt()
     assert draws.draw(0, 4)[0] != first[0] and second[0] != first[0]     # the stream moves on; a new attempt draws anew
-    assert calibration_weights((0.1, np.zeros(4), 5), [1, 2]).tolist() == [0.0, 0.0, 1.0, 0.0]   # all gammas 0: fallback
+    assert randmix_weights((0.1, np.zeros(4), 5), [1, 2]).tolist() == [0.0, 0.0, 1.0, 0.0]   # all gammas 0: fallback
 
 
 # rule files -----------------------------------------------------------------------------------------------------------
@@ -173,7 +173,7 @@ def test_a_coefficient_file_of_the_removed_above_mean_rule_is_refused(tmp_path):
         load_rule(str(tmp_path / "missing.yaml"))
 
 
-def test_build_method_reads_the_rule_file_and_keeps_calibration_out_of_the_skillmix_folders(tmp_path):
+def test_build_method_reads_the_rule_file_and_keeps_randmix_out_of_the_skillmix_folders(tmp_path):
     from tmg.generation.fit_coefficients import write_rule
 
     path = write_rule(tmp_path / "rule.yaml", generator="g", task="t", basis="test", num_sources=2,
@@ -182,14 +182,14 @@ def test_build_method_reads_the_rule_file_and_keeps_calibration_out_of_the_skill
     m = build_method({"name": "skillmix", "mixing": {"enabled": True, "type": "skillmix", "rule": "softmax",
                                                      "coefficients": str(path)}}, chunk_seed=0)
     assert isinstance(m.mixer, SkillMixer) and m.mixer.rule == "softmax" and m.mixer.coefficients.for_subtask(0).d == 0.4
-    with pytest.raises(ValueError, match="skillmix_calibration"):
-        build_method({"name": "skillmix", "mixing": {"enabled": True, "type": "skillmix", "rule": "calibration"}}, chunk_seed=0)
-    with pytest.raises(ValueError, match="skillmix_calibration"):          # and no softmax pool in the calibration folder
-        build_method({"name": "skillmix_calibration", "mixing": {"enabled": True, "type": "skillmix", "rule": "softmax",
+    with pytest.raises(ValueError, match="skillmix_randmix"):
+        build_method({"name": "skillmix", "mixing": {"enabled": True, "type": "skillmix", "rule": "randmix"}}, chunk_seed=0)
+    with pytest.raises(ValueError, match="skillmix_randmix"):          # and no softmax pool in the randmix folder
+        build_method({"name": "skillmix_randmix", "mixing": {"enabled": True, "type": "skillmix", "rule": "softmax",
                                                                  "coefficients": str(path)}}, chunk_seed=0)
-    m = build_method({"name": "skillmix_calibration", "mixing": {"enabled": True, "type": "skillmix", "rule": "calibration",
+    m = build_method({"name": "skillmix_randmix", "mixing": {"enabled": True, "type": "skillmix", "rule": "randmix",
                                                                  "coefficients": str(tmp_path / "missing.yaml")}}, chunk_seed=0)
-    assert m.mixer.rule == "calibration" and m.mixer.coefficients is None          # calibration needs no rule file
+    assert m.mixer.rule == "randmix" and m.mixer.coefficients is None          # randmix needs no rule file
     with pytest.raises(ValueError, match="mixing.rule"):
         SkillMixer(rule="above_mean")
     with pytest.raises(ValueError, match="rule file"):
@@ -232,12 +232,12 @@ def test_skillmix_mixer_identity_without_reference_object():
     assert rec["mixed"] is False and "identity_reason" in rec
 
 
-def test_skillmix_calibration_mixer_draws_new_weights_per_attempt():
+def test_skillmix_randmix_mixer_draws_new_weights_per_attempt():
     segs = [_segment(0.0)] * 3
     objs = [pose(0.0)] * 3
-    mixer = SkillMixer(rule="calibration", chunk_seed=7)
+    mixer = SkillMixer(rule="randmix", chunk_seed=7)
     first = mixer.mix(_context(segs, objs, 0, pose(0.0))).record
-    assert first["rule"] == "calibration" and "dirichlet_c" in first and sum(first["weights"]) == pytest.approx(1.0, abs=1e-3)
+    assert first["rule"] == "randmix" and "dirichlet_c" in first and sum(first["weights"]) == pytest.approx(1.0, abs=1e-3)
     mixer.begin_attempt()
     second = mixer.mix(_context(segs, objs, 0, pose(0.0))).record
     assert second["dirichlet_c"] != first["dirichlet_c"]
@@ -291,7 +291,7 @@ def _write_pool(folder, chunks, attempts):
 
 
 def test_fit_reads_the_pools_of_a_generator_that_stops_at_the_first_failed_subtask(tmp_path):
-    """CP-Gen records: a baseline attempt reached subtask k when it has k + 1 subtask records; a calibration attempt when it
+    """CP-Gen records: a unmix attempt reached subtask k when it has k + 1 subtask records; a randmix attempt when it
     has a mix record of k, also one whose motion plan to k failed (``unplanned_mixes``)."""
     from tmg.generation.fit_coefficients import fit_blocks, read_pools
 
@@ -307,20 +307,20 @@ def test_fit_reads_the_pools_of_a_generator_that_stops_at_the_first_failed_subta
         w = rng.dirichlet([0.5, 0.5]).round(4)
         return {"subtask": k, "weights": [float(w[0]), float(1 - w[0])], "scene_features": rng.random((2, 3)).tolist()}
 
-    def calibration(chunk):
+    def randmix(chunk):
         out = [{"success": bool(rng.random() < 0.5), "subtasks": [sub(0, mix), sub(1, mix)]} for _ in range(20)]
         return [*out, {"success": False, "subtasks": [sub(0, mix)], "unplanned_mixes": [mix(1)]}]      # plan to 1 failed
 
-    def baseline(chunk):
+    def unmix(chunk):
         return [{"success": bool(n == 2 and rng.random() < 0.5), "subtasks": [sub(k, None) for k in range(n)]}
                 for n in (1, 2, 2, 2, 2) * 4]
 
-    _write_pool(tmp_path / "calibration", 4, calibration)
-    _write_pool(tmp_path / "baseline", 3, baseline)
-    blocks = fit_blocks(read_pools([tmp_path / "calibration"]), read_pools([tmp_path / "baseline"]), num_sources=2,
+    _write_pool(tmp_path / "randmix", 4, randmix)
+    _write_pool(tmp_path / "unmix", 3, unmix)
+    blocks = fit_blocks(read_pools([tmp_path / "randmix"]), read_pools([tmp_path / "unmix"]), num_sources=2,
                         signals=None, source=None, with_cv=False)
-    assert sorted(blocks) == [0, 1] and blocks[0]["rows"] == {"calibration": 84, "baseline": 60}
-    assert blocks[1]["rows"] == {"calibration": 84, "baseline": 48}       # the failed plans count, the 12 that stopped do not
+    assert sorted(blocks) == [0, 1] and blocks[0]["rows"] == {"randmix": 84, "unmix": 60}
+    assert blocks[1]["rows"] == {"randmix": 84, "unmix": 48}       # the failed plans count, the 12 that stopped do not
     assert len(blocks[1]["a"]) == 2 and sorted(blocks[1]["g"]) == sorted(["dx", "dy", "rotation", "inhand_position", "inhand_rotation"])
 
 

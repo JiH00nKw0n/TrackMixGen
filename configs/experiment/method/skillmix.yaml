@@ -4,9 +4,9 @@ name: skillmix
 mixing:
   enabled: true
   type: skillmix
-  rule: softmax                     # softmax: the SkillMix rule (training pools) | calibration: random Dirichlet weights,
-                                    # only for the calibration pools the fit reads; give it its own folder with
-                                    # method.name=skillmix_calibration (`make coefficients` does both)
+  rule: softmax                     # softmax: the SkillMix rule (training pools) | randmix: random Dirichlet weights,
+                                    # only for the randmix pools the fit reads; give it its own folder with
+                                    # method.name=skillmix_randmix (`make coefficients` does both)
   coefficients: ${generator.name}/${task.name}   # rule file configs/experiment/generator/<gen>/coefficients/<task>.yaml
                                     # (tmg fit_coefficients); `make generate` builds it when missing (scripts/ensure_coefficients.sh)
   symmetries: ${oc.select:task.mixing_symmetries,null}   # object symmetries the mixer may align sources with before blending

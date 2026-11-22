@@ -33,9 +33,9 @@ noisy_state_replay: {enabled: true, num_retries: 6, action_noise_std: 0.03, num_
 # carries an object, the object can sit differently in the hand once the bridge is over, so the constraint is solved again
 # from the state actually reached and its steps replace the planned ones (same length only). It raised Threading from 6 %
 # to 65 % on the same scenes (2026-11-17). On for every method: the SkillMix rules were fitted on pools made with it
-# (calibration and baseline). false gives CP-Gen's own behaviour.
+# (randmix and unmix). false gives CP-Gen's own behaviour.
 resolve_after_bridge: true
-# Chunk size of the SkillMix fit pools (configs/experiment/generation/pool_ctrl.yaml; other generators: 50). The pools the
+# Chunk size of the SkillMix fit pools (configs/experiment/generation/pool_unmix.yaml; other generators: 50). The pools the
 # committed CP-Gen rules were fitted on had chunks of 25 attempts; the chunk size sets the chunk seeds and so the scenes.
 fit_pool_chunk: 25
 # CP-Gen re-solves constraints instead of replaying source segments, so source mixing blends the solved end-effector
@@ -44,4 +44,4 @@ fit_pool_chunk: 25
 method_overrides:
   none: {labels: pre_noise}
   skillmix: {labels: pre_noise}
-  skillmix_calibration: {labels: pre_noise}   # the calibration pools of the SkillMix fit (method skillmix, rule calibration)
+  skillmix_randmix: {labels: pre_noise}   # the randmix pools of the SkillMix fit (method skillmix, rule randmix)

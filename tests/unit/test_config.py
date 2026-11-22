@@ -87,7 +87,7 @@ def test_every_generation_config_composes_and_is_named_after_its_file(tmp_path, 
 def test_selection_rule_is_independent_of_the_pool_config(monkeypatch, tmp_path):
     """selection=official|ours sets the source selection of any robosuite pool and names a folder after the scene."""
     monkeypatch.setenv("TMG_DATA_ROOT", str(tmp_path))
-    for generation in ("pool_robosuite_image", "pool_robosuite_lowdim", "pool_ctrl", "test/pilot20"):
+    for generation in ("pool_robosuite_image", "pool_robosuite_lowdim", "pool_unmix", "test/pilot20"):
         official = resolved(compose("generate", ["generator=mimicgen", "task=square", "scene=ours", f"generation={generation}"]))
         ours = resolved(compose("generate", ["generator=mimicgen", "task=square", "scene=ours", "selection=ours", f"generation={generation}"]))
         assert official["generation"]["protocol"]["select_src_per_subtask"] is None and official["generation"]["protocol"]["selection_strategy"] is None
@@ -97,16 +97,16 @@ def test_selection_rule_is_independent_of_the_pool_config(monkeypatch, tmp_path)
     ds = resolved(compose("dataset", ["generator=mimicgen", "task=square", "scene=ours", "selection=ours", "generation=pool_robosuite_lowdim", "observation=low_dim"]))
     assert "/square/ours/ours/none/pool_robosuite_lowdim" in ds["pool"] and "/square/ours/ours/none/pool_robosuite_lowdim/low_dim/" in ds["output"]
     fit = resolved(compose("fit_coefficients", ["generator=mimicgen", "task=square", "scene=ours", "selection=ours"]))
-    assert [p.split("/pools/")[1] for p in fit["calibration_pools"]] == ["mimicgen/square/ours/ours/skillmix_calibration/pool_calib"]
-    assert [p.split("/pools/")[1] for p in fit["baseline_pools"]] == ["mimicgen/square/ours/ours/none/pool_ctrl"]
+    assert [p.split("/pools/")[1] for p in fit["randmix_pools"]] == ["mimicgen/square/ours/ours/skillmix_randmix/pool_randmix"]
+    assert [p.split("/pools/")[1] for p in fit["unmix_pools"]] == ["mimicgen/square/ours/ours/none/pool_unmix"]
 
 
 def test_fit_pools_take_their_chunk_size_from_the_generator(monkeypatch, tmp_path):
-    """The SkillMix fit pools (generation=pool_ctrl) have chunks of 50 attempts, CP-Gen's 25 (the pools of the committed
+    """The SkillMix fit pools (generation=pool_unmix) have chunks of 50 attempts, CP-Gen's 25 (the pools of the committed
     rules), without an override on the command line."""
     monkeypatch.setenv("TMG_DATA_ROOT", str(tmp_path))
     sizes = {g: resolved(compose("generate", [f"generator={g}", f"task={t}", "scene=ours", "selection=ours",
-                                              "generation=pool_ctrl"]))["generation"]
+                                              "generation=pool_unmix"]))["generation"]
              for g, t in (("mimicgen", "square"), ("cpgen", "coffee"))}
     assert (sizes["mimicgen"]["attempts"], sizes["mimicgen"]["chunk"]) == (2000, 50)
     assert (sizes["cpgen"]["attempts"], sizes["cpgen"]["chunk"]) == (2000, 25)

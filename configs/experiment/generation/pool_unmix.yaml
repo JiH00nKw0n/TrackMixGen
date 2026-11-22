@@ -4,11 +4,11 @@ defaults:
 # The pools the SkillMix fit reads (tmg fit_coefficients, `make coefficients`), the sizes of the pools the committed rule
 # files were fitted on (2026-11-20): 2,000 attempts, no images, chunk seeds from 30001, with selection=ours (a source drawn
 # for every subtask). Two pools of a task share these settings and chunk seeds (the same scenes):
-#   pool_ctrl   method none, the control without mixing (folder none/pool_ctrl)
-#   pool_calib  method skillmix with mixing.rule=calibration and method.name=skillmix_calibration, the same config with
-#               generation.name=pool_calib (folder skillmix_calibration/pool_calib)
+#   pool_unmix   method none, without mixing (folder none/pool_unmix)
+#   pool_randmix  method skillmix with mixing.rule=randmix and method.name=skillmix_randmix, the same config with
+#               generation.name=pool_randmix (folder skillmix_randmix/pool_randmix)
 # Chunks of 50 attempts, or the generator's `fit_pool_chunk` (CP-Gen: 25), as on the server. Replaces rank_human_demos
 # (3,000 attempts, chunks of 250), whose source ranking was removed.
-name: pool_ctrl
+name: pool_unmix
 attempts: 2000
 chunk: ${oc.select:generator.fit_pool_chunk,50}

@@ -22,11 +22,11 @@ Weights below ``MIN_WEIGHT`` are dropped and the rest renormalized. Nothing is s
 (and with it the temperature) come from the fit. Sources whose gripper open/close events do not match those of the
 selected source cannot be time-aligned with it and get weight 0 (the record lists them under ``incompatible``).
 
-``mixing.rule: calibration`` makes the pools the fit reads: the weights are drawn at random,
+``mixing.rule: randmix`` makes the pools the fit reads: the weights are drawn at random,
 ``w ~ Dirichlet(c, ..., c)`` over the compatible sources with ``c ~ LogUniform(0.05, 20)`` per subtask and attempt (small c:
 nearly one source, large c: nearly uniform), so the fit sees how task success changes with the weights. The draws come
-from a stream of their own seeded with ``(chunk seed, 727272)`` (``CalibrationDraws``). Calibration pools are not
-training data; they are written under the method name ``skillmix_calibration``.
+from a stream of their own seeded with ``(chunk seed, 727272)`` (``RandmixDraws``). Randmix pools are not
+training data; they are written under the method name ``skillmix_randmix``.
 
 The blend itself (both rules), for subtask k of one attempt:
 
@@ -66,12 +66,12 @@ from tmg.generation.method.interfaces import MixContext, MixedSegment
 from tmg.generation.method.success_model import FEATURES, inhand_features, scene_features
 from tmg.generation.simulators.scenes import generator_config_dir
 
-RULES = ("softmax", "calibration")           # mixing.rule
-CALIBRATION_METHOD = "skillmix_calibration"  # method name (pool, dataset and run folder) of the calibration rule
+RULES = ("softmax", "randmix")           # mixing.rule
+RANDMIX_METHOD = "skillmix_randmix"  # method name (pool, dataset and run folder) of the randmix rule
 COEFFICIENTS_DIR = "coefficients"
 MIN_WEIGHT = 1e-3                            # smaller weights are dropped and the rest renormalized
-CALIBRATION_SEED = 727272                    # second seed word of the calibration draws (the chunk seed is the first)
-CALIBRATION_LOG_C = (np.log(0.05), np.log(20.0))   # c ~ LogUniform(0.05, 20) of the Dirichlet(c, ..., c) weights
+RANDMIX_SEED = 727272                    # second seed word of the randmix draws (the chunk seed is the first)
+RANDMIX_LOG_C = (np.log(0.05), np.log(20.0))   # c ~ LogUniform(0.05, 20) of the Dirichlet(c, ..., c) weights
 
 
 # rule file ------------------------------------------------------------------------------------------------------------
@@ -138,7 +138,7 @@ def load_rule(name: str, root: Path | None = None) -> SkillMixRule:
     if not path.exists():
         raise FileNotFoundError(
             f"SkillMix rule file {path} not found. Build it with `make coefficients GENERATOR=<gen> TASK=<task>` (a "
-            f"calibration pool and a baseline pool, then tmg fit_coefficients); `make generate` does this by itself for "
+            f"randmix pool and an unmix pool, then tmg fit_coefficients); `make generate` does this by itself for "
             f"method skillmix.")
     return SkillMixRule.from_mapping(yaml.safe_load(path.read_text()) or {}, name=str(name), path=str(path))
 
@@ -165,12 +165,12 @@ def softmax_weights(scores, d: float, compatible: list[int]) -> np.ndarray:
     return _drop_small(w)
 
 
-class CalibrationDraws:
-    """The random weights of ``mixing.rule: calibration``: one draw ``(c, gamma variates (J,), fallback index)`` per
+class RandmixDraws:
+    """The random weights of ``mixing.rule: randmix``: one draw ``(c, gamma variates (J,), fallback index)`` per
     subtask of an attempt, kept until the next ``begin_attempt`` (CP-Gen may solve a constraint more than once)."""
 
     def __init__(self, chunk_seed: int):
-        self._rng = np.random.default_rng(np.random.SeedSequence([int(chunk_seed), CALIBRATION_SEED]))
+        self._rng = np.random.default_rng(np.random.SeedSequence([int(chunk_seed), RANDMIX_SEED]))
         self._drawn: dict[int, tuple[float, np.ndarray, int]] = {}
 
     def begin_attempt(self) -> None:
@@ -178,15 +178,15 @@ class CalibrationDraws:
 
     def draw(self, subtask: int, num_sources: int) -> tuple[float, np.ndarray, int]:
         if int(subtask) not in self._drawn:
-            c = float(np.exp(self._rng.uniform(*CALIBRATION_LOG_C)))
+            c = float(np.exp(self._rng.uniform(*RANDMIX_LOG_C)))
             gamma = self._rng.gamma(c, size=int(num_sources))
             fallback = int(self._rng.integers(int(num_sources)))
             self._drawn[int(subtask)] = (c, gamma, fallback)
         return self._drawn[int(subtask)]
 
 
-def calibration_weights(draw: tuple[float, np.ndarray, int], compatible: list[int]) -> np.ndarray:
-    """Dirichlet(c, ..., c) weights over ``compatible`` from one ``CalibrationDraws.draw`` (normalized gamma variates)."""
+def randmix_weights(draw: tuple[float, np.ndarray, int], compatible: list[int]) -> np.ndarray:
+    """Dirichlet(c, ..., c) weights over ``compatible`` from one ``RandmixDraws.draw`` (normalized gamma variates)."""
     _c, gamma, fallback = draw
     w = np.zeros(len(gamma))
     gc = np.asarray(gamma, dtype=float)[compatible]
@@ -295,8 +295,8 @@ class SkillMixer:
         if rule == "softmax" and coefficients is None:
             raise ValueError("mixing.rule=softmax needs the task's rule file (mixing.coefficients)")
         self.rule = rule
-        self.coefficients = coefficients                   # the fitted rule file; None for the calibration rule
-        self.draws = CalibrationDraws(chunk_seed)
+        self.coefficients = coefficients                   # the fitted rule file; None for the randmix rule
+        self.draws = RandmixDraws(chunk_seed)
         self.detector = build_detector(gripper_events)
         self.chunk_seed = int(chunk_seed)
         self.calls = 0
@@ -304,15 +304,15 @@ class SkillMixer:
 
     @classmethod
     def from_config(cls, cfg: Mapping, *, chunk_seed: int, method_name: str) -> SkillMixer:
-        """``mixing.coefficients``: ``<generator>/<task>`` or a path to a rule file; ``mixing.rule``: softmax | calibration.
-        The calibration rule needs no rule file (it draws the weights). Random weights are calibration data, not SkillMix,
-        so that rule runs under the method name ``CALIBRATION_METHOD`` and no other rule does: the name is the pool,
+        """``mixing.coefficients``: ``<generator>/<task>`` or a path to a rule file; ``mixing.rule``: softmax | randmix.
+        The randmix rule needs no rule file (it draws the weights). Random weights are randmix data, not SkillMix,
+        so that rule runs under the method name ``RANDMIX_METHOD`` and no other rule does: the name is the pool,
         dataset and run folder and the key of a generator's ``method_overrides``."""
         rule = str(cfg.get("rule", "softmax"))
-        if (rule == "calibration") != (method_name == CALIBRATION_METHOD):
-            raise ValueError(f"method {method_name!r} with mixing.rule={rule}: the calibration rule and the method name "
-                             f"{CALIBRATION_METHOD} go together (method.mixing.rule=calibration method.name={CALIBRATION_METHOD})")
-        coefficients = None if rule == "calibration" else load_rule(str(cfg["coefficients"]))
+        if (rule == "randmix") != (method_name == RANDMIX_METHOD):
+            raise ValueError(f"method {method_name!r} with mixing.rule={rule}: the randmix rule and the method name "
+                             f"{RANDMIX_METHOD} go together (method.mixing.rule=randmix method.name={RANDMIX_METHOD})")
+        coefficients = None if rule == "randmix" else load_rule(str(cfg["coefficients"]))
         return cls(rule=rule, coefficients=coefficients, chunk_seed=chunk_seed, gripper_events=cfg.get("gripper_events"),
                    symmetries=cfg.get("symmetries"))
 
@@ -322,14 +322,14 @@ class SkillMixer:
                 "gripper_events": self.detector.name, "symmetries": self.symmetries}
 
     def begin_attempt(self) -> None:
-        """Called by the runtime when an attempt starts (forgets the calibration draws of the previous attempt)."""
+        """Called by the runtime when an attempt starts (forgets the randmix draws of the previous attempt)."""
         self.draws.begin_attempt()
 
     def weights(self, subtask: int, scene, inhand, compatible: list[int]) -> tuple[np.ndarray, dict]:
         """The weights of one subtask under the configured rule, and what the record keeps about them."""
-        if self.rule == "calibration":
+        if self.rule == "randmix":
             draw = self.draws.draw(subtask, len(scene))
-            return calibration_weights(draw, compatible), {"dirichlet_c": round(draw[0], 5)}
+            return randmix_weights(draw, compatible), {"dirichlet_c": round(draw[0], 5)}
         block = self.coefficients.for_subtask(subtask)
         s = block.scores(scene, inhand)
         return softmax_weights(s, block.d, compatible), {"scores": [round(float(v), 4) for v in s], "d": round(block.d, 4)}

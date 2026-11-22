@@ -31,7 +31,7 @@ def constraint(x, n=6, kind="robot-object", obj="pod", carried=None, grip=None):
 def mixer(n, d=0.05, rule="softmax"):
     g = np.array([-20.0, 0.0, 0.0, -50.0, 0.0])
     fitted = SkillMixRule(name="cpgen/t", num_sources=n, subtasks={k: SubtaskRule(a=np.zeros(n), g=g, d=d, c0=0.0) for k in (0, 1)})
-    return SkillMixer(rule=rule, coefficients=None if rule == "calibration" else fitted, chunk_seed=3)
+    return SkillMixer(rule=rule, coefficients=None if rule == "randmix" else fitted, chunk_seed=3)
 
 
 def test_decide_weighs_the_compatible_sources_by_the_softmax_of_their_scores():
@@ -59,13 +59,13 @@ def test_decide_uses_inhand_features_from_the_second_constraint():
     assert np.allclose(record["inhand_features"], 0)
 
 
-def test_decide_calibration_draws_once_per_constraint_and_attempt():
+def test_decide_randmix_draws_once_per_constraint_and_attempt():
     seqs = [[constraint(0.0)], [constraint(0.05)], [constraint(0.3)]]
     obs = {"pod_pose": pose(0.0), "robot0_eef_pos": [0, 0, 1.0], "robot0_eef_quat_site": [0, 0, 0, 1.0]}
-    m = mixer(3, rule="calibration")
+    m = mixer(3, rule="randmix")
     first, w1 = mixing.decide(m, seqs, 0, 0, obs, None)
     _, w2 = mixing.decide(m, seqs, 0, 0, obs, None)                          # a second solve of the same constraint
-    assert first["rule"] == "calibration" and np.array_equal(w1, w2) and w1.sum() == pytest.approx(1.0)
+    assert first["rule"] == "randmix" and np.array_equal(w1, w2) and w1.sum() == pytest.approx(1.0)
     m.begin_attempt()
     _, w3 = mixing.decide(m, seqs, 0, 0, obs, None)
     assert not np.array_equal(w1, w3)

@@ -16,8 +16,8 @@ several sources, each solved for the current scene:
 2. Weights (``SkillMixer.decide`` of ``tmg.generation.method.skillmix``, the same call MimicGen's mixing makes). The
    sources whose gripper events match the primary's (only those can be put on the primary's timeline) are compatible. ``mixing.rule: softmax``: the scores ``s_j = a_j + g . phi_j`` of the
    task's rule file and the softmax of ``s / d`` over the compatible sources (the best one alone when ``d <= 0``).
-   ``mixing.rule: calibration``: random Dirichlet weights over the compatible sources, drawn once per constraint and
-   attempt (the calibration pools of the fit).
+   ``mixing.rule: randmix``: random Dirichlet weights over the compatible sources, drawn once per constraint and
+   attempt (the randmix pools of the fit).
 3. Symmetry alignment and solve. A source can be recorded in a different but equivalent representation of the same
    grasp: the reference object may be symmetric (the constraint's ``symmetries``, e.g. the hammer turned 180 degrees about
    its z axis) and the parallel gripper is symmetric under 180 degrees about its approach axis (CP-Gen's ``reflect_eef``).

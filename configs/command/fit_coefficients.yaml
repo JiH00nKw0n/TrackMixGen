@@ -1,7 +1,7 @@
 # @package _global_
-# tmg fit_coefficients: fit the SkillMix model of one task on its finished calibration and baseline pools and write the
+# tmg fit_coefficients: fit the SkillMix model of one task on its finished randmix and unmix pools and write the
 # rule file configs/experiment/generator/<generator>/coefficients/<task>.yaml (tmg/generation/fit_coefficients.py).
-#   tmg fit_coefficients task=hammer_cleanup scene=ours selection=ours generation=pool_ctrl
+#   tmg fit_coefficients task=hammer_cleanup scene=ours selection=ours generation=pool_unmix
 # `make coefficients` builds both pools (scripts/ensure_coefficients.sh) and runs this.
 defaults:
   - /paths: local
@@ -10,15 +10,15 @@ defaults:
   - /task: ???
   - /scene: ours
   - /selection: ours
-  - /generation: pool_ctrl
+  - /generation: pool_unmix
   - _self_
 
-# The pools to read (output folders of `tmg generate` with the same choices). Calibration: method skillmix with
-# mixing.rule=calibration and method.name=skillmix_calibration (random Dirichlet weights); baseline: method none. More
+# The pools to read (output folders of `tmg generate` with the same choices). Randmix: method skillmix with
+# mixing.rule=randmix and method.name=skillmix_randmix (random Dirichlet weights); unmix: method none. More
 # pools of the same code and settings can be listed (a chunk name already read from an earlier pool is skipped).
-calibration_pools:
-  - ${paths.pools}/${generator.name}/${task.name}/${scene.name}/${selection.name}/skillmix_calibration/pool_calib
-baseline_pools:
+randmix_pools:
+  - ${paths.pools}/${generator.name}/${task.name}/${scene.name}/${selection.name}/skillmix_randmix/pool_randmix
+unmix_pools:
   - ${paths.pools}/${generator.name}/${task.name}/${scene.name}/${selection.name}/none/${generation.name}
 output: ${paths.reports}/fit_coefficients/${generator.name}/${task.name}/${scene.name}/${selection.name}
 command: fit_coefficients

@@ -39,5 +39,5 @@ noise_draw_shapes: [3, 4, 3, 4]
 method_overrides:
   skillmix:                         # the mixer aligns segments by the hands' closure events (a hand's 11 commands:
     mixing: {gripper_events: {type: closure, columns: [0, 1, 2, 3]}}   # proximal index, middle, pinky, ring first)
-  skillmix_calibration:             # the calibration pools of the SkillMix fit (method skillmix, rule calibration)
+  skillmix_randmix:             # the randmix pools of the SkillMix fit (method skillmix, rule randmix)
     mixing: {gripper_events: {type: closure, columns: [0, 1, 2, 3]}}

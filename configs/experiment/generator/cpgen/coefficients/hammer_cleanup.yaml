@@ -8,10 +8,10 @@ task: hammer_cleanup
 rule: softmax
 basis: 'Fitted on 2026-11-20 on the A100 (scratch_calib/ana/fit_all.py, softmax form, without the older rank_human_demos pool;
   the model and fit of tmg fit_coefficients, which reproduced the CP-Gen Threading rule to 1e-13 from the same records) from
-  /data/pools/cpgen/hammer_cleanup/ours/ours/mixup_only/pool_calib (method mixup_only with TMG_MIX_BETA_RANDOM=1 TMG_MIX_DIRICHLET=1:
+  /data/pools/cpgen/hammer_cleanup/ours/ours/mixup_only/pool_calib [the randmix pool; in this repository skillmix_randmix/pool_randmix] (method mixup_only with TMG_MIX_BETA_RANDOM=1 TMG_MIX_DIRICHLET=1:
   Dirichlet(c) weights, c ~ LogUniform(0.05, 20); selection ours, chunks of 25; for coffee, hammer_cleanup, mug_cleanup and
   three_piece_assembly also the chunks of the same pool made on the Isaac server, scratch_calib/ana/cp_isaac; the A100 runs
-  also set TMG_CPGEN_RESOLVE_AFTER_BRIDGE=1, the re-solve after the bridge, cpgen.yaml resolve_after_bridge: true) and /data/pools/cpgen/hammer_cleanup/ours/ours/none/pool_ctrl
+  also set TMG_CPGEN_RESOLVE_AFTER_BRIDGE=1, the re-solve after the bridge, cpgen.yaml resolve_after_bridge: true) and /data/pools/cpgen/hammer_cleanup/ours/ours/none/pool_ctrl [the unmix pool; in this repository none/pool_unmix]
   (method none, the same code and settings); rows of subtask k: the attempts that reached it, label = the attempt''s task
   success.'
 num_sources: 10
@@ -49,11 +49,11 @@ subtasks:
     d: 0.06346971286919979
     c0: -0.14881205614414117
     rows:
-      calibration: 2000
-      baseline: 966
+      randmix: 2000
+      unmix: 966
     cv_log_loss_gain_percent:
       all_rows: 3.2
-      calibration_rows: 1.3
+      randmix_rows: 1.3
   1:
     a:
     - 0.015002795017995812
@@ -75,11 +75,11 @@ subtasks:
     d: -0.026915094920098238
     c0: -0.3940553794433136
     rows:
-      calibration: 1969
-      baseline: 800
+      randmix: 1969
+      unmix: 800
     cv_log_loss_gain_percent:
       all_rows: 2.6
-      calibration_rows: 2.9
+      randmix_rows: 2.9
   2:
     a:
     - -0.21521736825523782
@@ -101,11 +101,11 @@ subtasks:
     d: -0.2253765841059621
     c0: 1.7180673118738432
     rows:
-      calibration: 1446
-      baseline: 542
+      randmix: 1446
+      unmix: 542
     cv_log_loss_gain_percent:
       all_rows: 5.4
-      calibration_rows: 5.7
+      randmix_rows: 5.7
   3:
     a:
     - 0.40957704402367623
@@ -127,8 +127,8 @@ subtasks:
     d: -0.06849169202202386
     c0: 2.858077526275939
     rows:
-      calibration: 1104
-      baseline: 481
+      randmix: 1104
+      unmix: 481
     cv_log_loss_gain_percent:
       all_rows: 6.5
-      calibration_rows: 5.8
+      randmix_rows: 5.8
