@@ -32,8 +32,10 @@ re-solve is mixed again (the grafted ``solve_constraint`` calls ``prepare_mix``)
 record of the solve that was executed (``mix``), the first one under ``mix_before_resolve``, and the outcome under
 ``resolve_after_bridge`` (``replaced`` or why the plan was kept). Constraints that carry nothing (grasps) keep their plan:
 re-solving every constraint made attempts 1.4-1.7x slower without changing the success where nothing moves, and a rule
-that also skipped carried objects that had not moved in the hand kept Threading at 7 % (2026-11-17). ``method.labels`` is fixed to ``pre_noise`` because the official output already is; the executed (noisy) actions
-are kept in our records.
+that also skipped carried objects that had not moved in the hand kept Threading at 7 % (2026-11-17).
+
+``method.labels`` is fixed to ``pre_noise`` because the official output already is; the executed (noisy) actions are kept
+in our records.
 
 Source mixing (SkillMix, ``mixing.type: skillmix``, selection ours): CP-Gen re-solves constraints instead of
 replaying segments, so the blended quantity is the desired end-effector pose of every solved step, after every retained
@@ -90,6 +92,20 @@ def action_to_pose(action) -> np.ndarray:
 def pose_from_obs(obs: dict) -> np.ndarray:
     """4x4 end-effector pose from robomimic's ``robot0_eef_pos`` and ``robot0_eef_quat`` (x, y, z, w)."""
     return mixing.site_pose(obs["robot0_eef_pos"], obs["robot0_eef_quat"])
+
+
+def carried_objects(constraint, obs: dict) -> list[str]:
+    """The objects the constraint carries in the hand (``attached_object_names``) whose pose ``obs`` has; empty for a
+    constraint that carries nothing (a grasp)."""
+    return [name for name in getattr(constraint, "attached_object_names", None) or [] if f"{name}_pose" in obs]
+
+
+def bridge_just_finished(policy) -> bool:
+    """True when the policy has executed the bridge of its current plan and nothing of the constraint yet: the plan had a
+    bridge and the queue holds exactly the constraint's steps."""
+    queue = getattr(policy, "action_queue", None)
+    return bool(queue) and int(getattr(policy, "curr_motion_plan_steps", 0) or 0) > 0 \
+        and len(queue) == int(getattr(policy, "curr_constraint_steps", 0) or 0)
 
 
 class SourcePicker:
@@ -173,7 +189,8 @@ class CPGenRuntime:
         self._target: np.ndarray | None = None
         self._labels: list[np.ndarray] = []
         self._executed: list[np.ndarray] = []
-        self._prev_ref: str | None = None                  # reference object of the previous constraint (in-hand feature)
+        self._references: dict[int, str] = {}              # reference object of every recorded constraint (by its index)
+        self._resolved_queue: list | None = None           # the action queue whose constraint was already solved again
         self._last_mix = None
         self._mix_plan = None
         self._unplanned_mixes: list[dict] = []             # mix records of solves whose motion plan failed
@@ -259,7 +276,7 @@ class CPGenRuntime:
         mix = {"mix": self._last_mix} if self._last_mix is not None else {}
         self._last_mix, self._mix_plan = None, None
         if scene.get("object_name"):
-            self._prev_ref = scene["object_name"]
+            self._references[int(policy.current_constraint_idx)] = scene["object_name"]
         self.rec.add_subtask(subtask_ind=int(policy.current_constraint_idx),
                              src_demo_ind=int(policy.current_constraint_sequence_idx),
                              constraint_name=getattr(constraint, "name", None), obj_names=list(getattr(constraint, "obj_names", []) or []),
@@ -273,45 +290,43 @@ class CPGenRuntime:
         self._pos = 0
 
     # re-solve after the bridge -----------------------------------------------------------------------------------------
-    def _resolve_after_bridge(self, policy, obs: dict) -> str | None:
-        """When the bridge of the current constraint has just been executed (the queue holds exactly the constraint steps)
-        and the constraint carries an object, solve it again from ``obs`` and replace the queued steps if the new plan has
-        the same length (module docstring). Returns the outcome written to the subtask record, or None when nothing was
-        due (no bridge just finished, or already handled for this queue)."""
-        queue = getattr(policy, "action_queue", None)
-        n = int(getattr(policy, "curr_constraint_steps", 0) or 0)
-        if not queue or int(getattr(policy, "curr_motion_plan_steps", 0) or 0) <= 0 or len(queue) != n:
-            return None
-        if getattr(policy, "_tmg_resolved_queue", None) is queue:
-            return None
-        policy._tmg_resolved_queue = queue
-        if not carried_in_hand(policy, obs):
-            return None                                     # a grasp: nothing in the hand can have moved
-        executed_mix = self._last_mix                         # None here: the first solve's record went to the segment
-        self._last_mix = None
-        try:
-            res = policy.solve_constraint(policy.current_constraint, obs)
-            resolved_mix = self._last_mix                     # the re-solve's mix record (with a mixer)
-        finally:
-            self._last_mix, self._mix_plan = executed_mix, None
-        if not res.success:
+    def _resolve_after_bridge(self, policy, obs: dict) -> None:
+        """When the bridge of the current constraint has just been executed and the constraint carries an object, solve it
+        again from ``obs`` and replace the queued steps if the new plan has the same length (module docstring). The
+        outcome goes to the constraint's subtask record."""
+        queue = policy.action_queue
+        if not bridge_just_finished(policy) or queue is self._resolved_queue:
+            return
+        self._resolved_queue = queue                        # once per plan, whatever the outcome
+        if not carried_objects(policy.current_constraint, obs):
+            return                                          # a grasp: nothing in the hand can have moved
+        result, mix = self._solve_again(policy, obs)
+        actions = list(result.actions) if result.success else []
+        if getattr(policy.current_constraint, "duplicate_actions", False):
+            actions = [a for a in actions for _ in (0, 1)]    # as the official get_action queues them
+        if not result.success:
             outcome = "kept: the re-solve failed"
+        elif len(actions) != len(queue):
+            outcome = f"kept: the re-solve has {len(actions)} steps, the plan {len(queue)}"
         else:
-            actions = list(res.actions)
-            if getattr(policy.current_constraint, "duplicate_actions", False):
-                actions = [a for a in actions for _ in (0, 1)]
-            if len(actions) != n:
-                outcome = f"kept: the re-solve has {len(actions)} steps, the plan {n}"
-            else:
-                queue[:] = actions
-                outcome = "replaced"
+            queue[:] = actions
+            outcome = "replaced"
         meta = {"resolve_after_bridge": outcome}
-        if outcome == "replaced" and resolved_mix is not None:
-            first = self.rec.subtasks[-1].get("mix") if self.rec.subtasks else None
-            meta.update(mix=resolved_mix, mix_before_resolve=first)
+        if outcome == "replaced" and mix is not None:         # the record follows the solve that is executed
+            meta.update(mix=mix, mix_before_resolve=self.rec.subtasks[-1].get("mix") if self.rec.subtasks else None)
         self.rec.update_last_subtask(**meta)
         print(f"[resolve-after-bridge] {outcome}", flush=True)
-        return outcome
+
+    def _solve_again(self, policy, obs: dict):
+        """Solve the current constraint from ``obs``: ``(the official result, its mix record or None)``. The grafted solve
+        leaves its mix record and plan on the runtime for the segment that would follow; this solve belongs to a
+        constraint whose segment is already recorded, so what was pending before is put back."""
+        pending, self._last_mix = self._last_mix, None
+        try:
+            result = policy.solve_constraint(policy.current_constraint, obs)
+            return result, self._last_mix
+        finally:
+            self._last_mix, self._mix_plan = pending, None
 
     # source mixing (grafted into CPPolicy.solve_constraint) ----------------------------------------------------------
     def prepare_mix(self, policy, constraint, obs: dict, X_obj0_transf, X_obj1_transf, X_eef_transf) -> None:
@@ -332,7 +347,7 @@ class CPGenRuntime:
             import demo_aug.generate
 
             self.official = demo_aug.generate
-        carried = self._prev_ref if idx > 0 else None
+        carried = self._carried_into(idx)
         try:
             record, w = mixing.decide(self.method.mixer, sequences, idx, primary, obs, carried)
         except KeyError as err:                              # a pose the model needs is missing from the observation
@@ -350,6 +365,13 @@ class CPGenRuntime:
         weights = {"primary": float(w[primary]), **{j: float(w[j]) for j in others}}
         self._mix_plan = mixing.MultiMixPlan(mixing.gripper_series(constraint), solved, weights)
         record.update(mixed=True, alignment=self._mix_plan.meta)
+
+    def _carried_into(self, idx: int) -> str | None:
+        """The object in the hand when constraint ``idx`` starts: the reference object of the latest recorded constraint
+        before it (None for the first constraint). Asked by index, so a second solve of ``idx`` (after its bridge) gets
+        the same object as the first."""
+        earlier = [k for k in self._references if k < idx]
+        return self._references[max(earlier)] if earlier else None
 
     def mixed_eef_des(self, t_idx: int, primary_pose):
         """Grafted around the step loop's ``compute_X_W_eef_des``: the official pose of step ``t_idx``, blended with the
@@ -425,15 +447,3 @@ def restore() -> None:
         return
     _INSTALLED.restore()
     _INSTALLED = None
-
-
-def carried_in_hand(policy, obs: dict) -> dict:
-    """Pose in the end-effector frame of every object the current constraint carries (``attached_object_names``), from
-    ``obs``; empty when the constraint carries nothing or the observation lacks the poses."""
-    constraint = getattr(policy, "current_constraint", None)
-    names = list(getattr(constraint, "attached_object_names", None) or [])
-    if not names or "robot0_eef_pos" not in obs or "robot0_eef_quat_site" not in obs:
-        return {}
-    eef = mixing.site_pose(obs["robot0_eef_pos"], obs["robot0_eef_quat_site"])
-    return {name: np.linalg.inv(eef) @ np.asarray(obs[f"{name}_pose"], dtype=float)
-            for name in names if f"{name}_pose" in obs}

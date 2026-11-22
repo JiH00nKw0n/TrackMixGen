@@ -230,64 +230,123 @@ def test_source_picker_draws_a_source_per_subtask_with_selection_ours():
 
 
 # re-solve after the bridge ---------------------------------------------------------------------------------------------
-class ResolvePolicy:
-    """A CP-Gen policy at the end of a bridge: the queue holds the constraint's steps only."""
+def _pose(x=0.0, z=0.8):
+    out = np.eye(4)
+    out[:3, 3] = [x, 0.0, z]
+    return out
 
-    def __init__(self, runtime, carried=("pod",), steps=3, new_steps=3, success=True):
-        self.runtime = runtime
-        self.current_constraint = SimpleNamespace(attached_object_names=list(carried), duplicate_actions=False)
-        self.curr_motion_plan_steps, self.curr_constraint_steps = 2, steps
-        self.action_queue = [np.full(7, -1.0) for _ in range(steps)]
-        self.new_steps, self.success, self.solves = new_steps, success, 0
+
+def _constraint(name, kind, objects, carries, x, steps=3):
+    """One annotated CP-Gen constraint as far as the runtime and the mixing read it."""
+    return SimpleNamespace(name=name, constraint_type=kind, obj_names=list(objects), attached_object_names=list(carries),
+                           duplicate_actions=False, timesteps=list(range(steps)), src_gripper_action=np.full(steps, 1.0),
+                           src_obj_pose={o: np.stack([_pose(x)] * steps) for o in objects},
+                           src_obs={"robot0_eef_pos": np.tile([x, 0.0, 1.0], (steps, 1)),
+                                    "robot0_eef_quat_site": np.tile([0, 0, 0, 1.0], (steps, 1))})
+
+
+class GraspThenPlacePolicy:
+    """CP-Gen's policy for a task of two constraints (grasp the pod, place it on the machine) as the grafted
+    ``generate_demo`` drives it: ``get_action`` solves the current constraint when the queue is empty and queues a bridge
+    of ``BRIDGE`` steps plus the solved steps; the solve calls the runtime's ``prepare_mix`` as the grafted
+    ``solve_constraint`` does. ``resolve`` sets what a solve after the first of a constraint returns."""
+    BRIDGE, STEPS = 2, 3
+    robot_configuration = eef_configuration = None
+    ignore_scaling = True
+
+    def __init__(self, runtime, resolve=None):
+        self.runtime, self.resolve = runtime, {"steps": self.STEPS, "success": True, **(resolve or {})}
+        self.constraint_sequences = [[_constraint("grasp", "robot-object", ["pod"], [], x),
+                                      _constraint("place", "object-object", ["pod", "machine"], ["pod"], x)] for x in (0.0, 0.3)]
+        self.current_constraint_sequence_idx, self.current_constraint_idx = 0, 0
+        self.action_queue, self.new_constraint, self.solves = [], False, {0: 0, 1: 0}
+        self.curr_motion_plan_steps = self.curr_constraint_steps = 0
+
+    @property
+    def current_constraint(self):
+        return self.constraint_sequences[self.current_constraint_sequence_idx][self.current_constraint_idx]
 
     def solve_constraint(self, constraint, obs):
-        """The grafted solve: prepare_mix leaves a new mix record and plan on the runtime."""
-        self.solves += 1
-        self.runtime._last_mix = {"subtask": 1, "weights": [0.2, 0.8], "solve": self.solves}
-        self.runtime._mix_plan = object()
-        return SimpleNamespace(success=self.success, actions=[np.full(7, float(self.solves)) for _ in range(self.new_steps)])
+        eye = np.eye(4)
+        self.runtime.prepare_mix(self, constraint, obs, eye, eye, eye)
+        k = self.current_constraint_idx
+        self.solves[k] += 1
+        again = self.solves[k] > 1
+        steps = self.resolve["steps"] if again else self.STEPS
+        return SimpleNamespace(success=self.resolve["success"] if again else True,
+                               actions=[np.full(7, 10.0 * k + self.solves[k]) for _ in range(steps)])
+
+    def get_action(self, obs):
+        self.new_constraint = False
+        if not self.action_queue:
+            if self.solves[self.current_constraint_idx]:
+                self.current_constraint_idx += 1
+            solved = self.solve_constraint(self.current_constraint, obs)
+            self.curr_motion_plan_steps, self.curr_constraint_steps = self.BRIDGE, len(solved.actions)
+            self.action_queue = [np.zeros(7) for _ in range(self.BRIDGE)] + list(solved.actions)
+            self.new_constraint = True
+        return {"action": self.action_queue.pop(0)}
 
 
-OBS = {"robot0_eef_pos": np.zeros(3), "robot0_eef_quat_site": np.array([0, 0, 0, 1.0]), "pod_pose": np.eye(4)}
+def _grasp_then_place(tmp_path, method="none", resolve=None, resolve_after_bridge=True):
+    """Run one attempt of the two-constraint task through the grafted callbacks: ``(executed actions, attempt record,
+    policy)``. The pod sits 2 cm from where the hand left it when the placement starts."""
+    cfg = {"name": method, "mixing": {"enabled": False}}
+    if method == "skillmix":                     # source 0 alone in both constraints (d <= 0), so no other source is solved
+        from tmg.generation.fit_coefficients import write_rule
+
+        block = {"a": [5.0, 0.0], "g": dict.fromkeys(("dx", "dy", "rotation", "inhand_position", "inhand_rotation"), 0.0),
+                 "d": -1.0, "c0": 0.0}
+        path = write_rule(tmp_path / "rule.yaml", generator="cpgen", task="t", basis="test", num_sources=2, blocks={0: block, 1: block})
+        cfg["mixing"] = {"enabled": True, "type": "skillmix", "rule": "softmax", "coefficients": str(path)}
+    runtime = rt.CPGenRuntime(build_method(cfg, chunk_seed=3), chunk_seed=3, records_dir=tmp_path / "records", all_sources=True,
+                              resolve_after_bridge=resolve_after_bridge)
+    runtime.official = SimpleNamespace()                                      # no other source is solved: never called
+    policy = GraspThenPlacePolicy(runtime, resolve)
+    generator = SimpleNamespace(policy=policy, env=SimpleNamespace(env=None))
+    runtime.begin_attempt(generator)
+    policy.current_constraint_sequence_idx = 0                                # the attempt's source, whatever was drawn
+    obs = {"robot0_eef_pos": np.array([0.0, 0.0, 1.0]), "robot0_eef_quat": np.array([0, 0, 0, 1.0]),
+           "robot0_eef_quat_site": np.array([0, 0, 0, 1.0]), "pod_pose": _pose(0.02), "machine_pose": _pose(0.5)}
+    noise = SimpleNamespace(constraint_segment_noise_magnitude=0.0, motion_segment_noise_magnitude=0.0)
+    executed = []
+    for _ in range(2 * (policy.BRIDGE + policy.STEPS)):
+        action = runtime.get_action(generator, obs)["action"]
+        runtime.record_step(action, action, 0.0, False, noise)
+        executed.append(float(action[0]))
+    runtime.end_attempt(generator, {"success": True})
+    record = json.loads((tmp_path / "records" / ATTEMPTS_JSONL).read_text().splitlines()[-1])
+    return executed, record, policy
 
 
-def _resolve_runtime(tmp_path):
-    method = build_method({"name": "none", "mixing": {"enabled": False}, "tracking": {"enabled": False}}, chunk_seed=3)
-    runtime = rt.CPGenRuntime(method, chunk_seed=3, records_dir=tmp_path / "records", resolve_after_bridge=True)
-    runtime.rec.begin_attempt()
-    runtime.rec.add_subtask(subtask_ind=1, mix={"subtask": 1, "weights": [1.0, 0.0], "solve": 0})
-    return runtime
+def test_resolve_after_bridge_executes_the_second_solve_of_a_carrying_constraint(tmp_path):
+    executed, record, policy = _grasp_then_place(tmp_path)
+    # the grasp carries nothing and keeps its plan (solve 1); the placement is solved again after its bridge (solve 2)
+    assert executed == [0, 0, 1, 1, 1, 0, 0, 12, 12, 12] and policy.solves == {0: 1, 1: 2}
+    grasp, place = record["subtasks"]
+    assert "resolve_after_bridge" not in grasp and place["resolve_after_bridge"] == "replaced"
+    off, record, policy = _grasp_then_place(tmp_path / "off", resolve_after_bridge=False)
+    assert off == [0, 0, 1, 1, 1, 0, 0, 11, 11, 11] and policy.solves == {0: 1, 1: 1}
+    assert "resolve_after_bridge" not in record["subtasks"][1]
 
 
-def test_resolve_after_bridge_replaces_the_steps_and_records_the_executed_mix(tmp_path):
-    runtime = _resolve_runtime(tmp_path)
-    policy = ResolvePolicy(runtime)
-    queue = policy.action_queue
-    assert runtime._resolve_after_bridge(policy, OBS) == "replaced"
-    assert policy.action_queue is queue and all(np.all(a == 1.0) for a in queue)      # replaced in place
-    sub = runtime.rec.subtasks[-1]
-    assert sub["resolve_after_bridge"] == "replaced"
-    assert sub["mix"]["solve"] == 1 and sub["mix"]["weights"] == [0.2, 0.8]          # the executed solve's weights
-    assert sub["mix_before_resolve"]["solve"] == 0
-    assert runtime._last_mix is None and runtime._mix_plan is None                   # nothing left for unplanned_mixes
-    assert runtime._resolve_after_bridge(policy, OBS) is None and policy.solves == 1  # once per queue
+def test_resolve_after_bridge_keeps_the_plan_when_the_second_solve_does_not_fit(tmp_path):
+    for i, (resolve, outcome) in enumerate((({"steps": 4}, "kept: the re-solve has 4 steps, the plan 3"),
+                                            ({"success": False}, "kept: the re-solve failed"))):
+        executed, record, policy = _grasp_then_place(tmp_path / str(i), resolve=resolve)
+        assert executed[-3:] == [11, 11, 11] and policy.solves[1] == 2
+        assert record["subtasks"][1]["resolve_after_bridge"] == outcome
 
 
-def test_resolve_after_bridge_keeps_the_plan_and_the_first_mix_otherwise(tmp_path):
-    for policy_kw, outcome in (({"new_steps": 4}, "kept: the re-solve has 4 steps, the plan 3"),
-                               ({"success": False}, "kept: the re-solve failed")):
-        runtime = _resolve_runtime(tmp_path)
-        policy = ResolvePolicy(runtime, **policy_kw)
-        assert runtime._resolve_after_bridge(policy, OBS) == outcome
-        assert all(np.all(a == -1.0) for a in policy.action_queue)
-        sub = runtime.rec.subtasks[-1]
-        assert sub["resolve_after_bridge"] == outcome and sub["mix"]["solve"] == 0 and "mix_before_resolve" not in sub
-        assert runtime._last_mix is None
-    runtime = _resolve_runtime(tmp_path)
-    grasp = ResolvePolicy(runtime, carried=())                                        # carries nothing: no re-solve
-    assert runtime._resolve_after_bridge(grasp, OBS) is None and grasp.solves == 0
-    mid_bridge = ResolvePolicy(runtime)
-    mid_bridge.action_queue.append(np.zeros(7))                                       # bridge steps still queued
-    assert runtime._resolve_after_bridge(mid_bridge, OBS) is None and mid_bridge.solves == 0
-    off = rt.CPGenRuntime(build_method({"name": "none"}, chunk_seed=3), chunk_seed=3, records_dir=None)
-    assert off.resolve_after_bridge is False
+def test_resolve_after_bridge_records_the_mix_that_was_executed(tmp_path):
+    _, record, _ = _grasp_then_place(tmp_path, method="skillmix")
+    place = record["subtasks"][1]
+    first, executed = place["mix_before_resolve"], place["mix"]
+    assert place["resolve_after_bridge"] == "replaced" and executed["weights"] == [1.0, 0.0]
+    # both solves describe the same hand: the in-hand features are those of the pod carried into the placement, 2 cm from
+    # where source 0 held it, not of the machine it is placed on
+    assert first["carried_object"] == executed["carried_object"] == "pod"
+    assert executed["inhand_features"] == first["inhand_features"] and executed["inhand_features"][0][0] == pytest.approx(0.02)
+    assert "unplanned_mixes" not in record                                    # the second solve is not a failed plan
+    _, record, _ = _grasp_then_place(tmp_path / "kept", method="skillmix", resolve={"success": False})
+    assert "mix_before_resolve" not in record["subtasks"][1] and "unplanned_mixes" not in record
