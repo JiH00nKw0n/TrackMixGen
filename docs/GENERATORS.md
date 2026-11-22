@@ -679,7 +679,14 @@ CP-Gen은 원본 구간을 다시 재생하지 않는다. 시도마다 주석된
 | 마지막 `return episode_data` 앞 | `_tmg.end_attempt(self, episode_data)` | 기록을 쓴다 |
 
 생성기 설정(`configs/experiment/generator/cpgen.yaml`)은 모든 방법에서 라벨을 `pre_noise`로 둔다. 공식 출력이 이미 잡음 전이기
-때문이다. SkillMix는 `CPPolicy.solve_constraint`에 두 번째 그라프트를 끼워 다시 푼 제약의 목표 자세를 섞는다(`selection=ours`). 소스 해시는 고정되어 있고, 같은 본문이
+때문이다. SkillMix는 `CPPolicy.solve_constraint`에 두 번째 그라프트를 끼워 다시 푼 제약의 목표 자세를 섞는다(`selection=ours`).
+
+연결 동작(bridge) 뒤 재풀이(생성기 설정 `resolve_after_bridge`, 기본 켜짐): CP-Gen은 하위작업의 제약을 먼저 풀고 그 시작점까지
+손을 옮기는 연결 동작을 계획한다. 물건을 든 채 옮기면 손 안의 물건 자세가 처음 계산과 달라질 수 있으므로, 연결 동작이 끝난
+걸음에서 지금 관측으로 제약을 다시 풀고 걸음 수가 같으면 남은 제약 걸음을 바꾼다(`CPGenRuntime._resolve_after_bridge`). 아무것도
+들지 않은 제약(잡기)은 그대로 둔다. Threading 성공률이 같은 장면에서 6 %에서 65 %로 올랐다(2026-11-17). SkillMix가 켜져 있으면
+재풀이도 다시 섞고, 하위작업 기록의 `mix`에는 실제로 실행된 재풀이의 섞기 기록이, `mix_before_resolve`에는 첫 풀이의 기록이,
+`resolve_after_bridge`에는 결과(`replaced` 또는 유지한 이유)가 남는다. 소스 해시는 고정되어 있고, 같은 본문이
 `tests/unit/fixtures/cpgen_generate_demo.py`에 있어 시험이 가짜 환경과 가짜 계획기로 접목된 함수를 실제로 돌린다.
 
 청크 출력은 CP-Gen의 `main`이 만든다. `generated_obs.hdf5`가 성공 시도들의 상태로부터 두 카메라(84x84)와 로봇·물체 상태를

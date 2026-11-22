@@ -28,6 +28,13 @@ config:
 action_rotation: rotation_6d
 noisy_state_replay: {enabled: true, num_retries: 6, action_noise_std: 0.03, num_processes: 12, render_processes: 12,
                      done_mode: 2, compress: true}
+# Re-solve after the bridge (tmg/generation/generators/cpgen/runtime.py, CPGenRuntime.resolve_after_bridge): CP-Gen solves a
+# constraint (subtask) before it plans the bridge (the motion that brings the hand to the subtask's start). When the robot
+# carries an object, the object can sit differently in the hand once the bridge is over, so the constraint is solved again
+# from the state actually reached and its steps replace the planned ones (same length only). It raised Threading from 6 %
+# to 65 % on the same scenes (2026-11-17). On for every method: the SkillMix rules were fitted on pools made with it
+# (calibration and baseline). false gives CP-Gen's own behaviour.
+resolve_after_bridge: true
 # CP-Gen re-solves constraints instead of replaying source segments, so source mixing blends the solved end-effector
 # poses of the retained sources (tmg/generation/generators/cpgen/mixing.py, selection=ours).
 # Its saved actions are already noise-free, so labels are pre_noise for every method.

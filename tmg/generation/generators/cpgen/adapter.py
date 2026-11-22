@@ -102,7 +102,8 @@ class CPGenGenerator(RobosuiteGenerator):
             expected_outputs=[str(folder / RECORDS_DIR / ATTEMPTS_JSONL)],
             extra={"cpgen_config": config, "source_root": str(self.generator_cfg["source_root"]),
                    "graft_hashes": self.graft_hashes(), "all_sources": self.all_sources(),
-                   "per_subtask_sources": self.per_subtask_sources()})
+                   "per_subtask_sources": self.per_subtask_sources(),
+                   "resolve_after_bridge": bool(self.generator_cfg.get("resolve_after_bridge", False))})
 
     def chunk_result(self, spec: ChunkSpec) -> dict | None:
         """Validate the records and count the rendered successes; None when the chunk did not finish."""

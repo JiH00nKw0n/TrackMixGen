@@ -48,7 +48,9 @@ def test_chunk_spec_and_command(tmp_path, monkeypatch):
     assert spec.generator == "cpgen" and spec.chunk == {"index": 0, "seed": 9001, "attempts": 3} and spec.generator_config == ""
     assert spec.folder == str(folder) and spec.records_dir == str(folder / RECORDS_DIR)
     assert spec.expected_outputs == [str(folder / RECORDS_DIR / ATTEMPTS_JSONL)]
-    assert list(spec.extra) == ["cpgen_config", "source_root", "graft_hashes", "all_sources", "per_subtask_sources"]
+    assert list(spec.extra) == ["cpgen_config", "source_root", "graft_hashes", "all_sources", "per_subtask_sources",
+                                "resolve_after_bridge"]
+    assert spec.extra["resolve_after_bridge"] is True                       # cpgen.yaml: on by default
     assert spec.extra["all_sources"] is False and spec.extra["per_subtask_sources"] is False and spec.extra["graft_hashes"] == {
         "generate_demo": "a497e9da6ef4f84624c9646fd49ee55fae1dedaa93e428c90f8fa312972b40e2",
         "solve_constraint": "efb3f236ae9e51ae2e38f98819ff2f0f5d40b5bdeda75c43df7bb6d984582711"}
@@ -226,3 +228,67 @@ def test_source_picker_draws_a_source_per_subtask_with_selection_ours():
     first = pol.current_constraint_sequence_idx
     pol.advance_constraint(); pol.advance_constraint()
     assert pol.current_constraint_sequence_idx == first
+
+
+# re-solve after the bridge ---------------------------------------------------------------------------------------------
+class ResolvePolicy:
+    """A CP-Gen policy at the end of a bridge: the queue holds the constraint's steps only."""
+
+    def __init__(self, runtime, carried=("pod",), steps=3, new_steps=3, success=True):
+        self.runtime = runtime
+        self.current_constraint = SimpleNamespace(attached_object_names=list(carried), duplicate_actions=False)
+        self.curr_motion_plan_steps, self.curr_constraint_steps = 2, steps
+        self.action_queue = [np.full(7, -1.0) for _ in range(steps)]
+        self.new_steps, self.success, self.solves = new_steps, success, 0
+
+    def solve_constraint(self, constraint, obs):
+        """The grafted solve: prepare_mix leaves a new mix record and plan on the runtime."""
+        self.solves += 1
+        self.runtime._last_mix = {"subtask": 1, "weights": [0.2, 0.8], "solve": self.solves}
+        self.runtime._mix_plan = object()
+        return SimpleNamespace(success=self.success, actions=[np.full(7, float(self.solves)) for _ in range(self.new_steps)])
+
+
+OBS = {"robot0_eef_pos": np.zeros(3), "robot0_eef_quat_site": np.array([0, 0, 0, 1.0]), "pod_pose": np.eye(4)}
+
+
+def _resolve_runtime(tmp_path):
+    method = build_method({"name": "none", "mixing": {"enabled": False}, "tracking": {"enabled": False}}, chunk_seed=3)
+    runtime = rt.CPGenRuntime(method, chunk_seed=3, records_dir=tmp_path / "records", resolve_after_bridge=True)
+    runtime.rec.begin_attempt()
+    runtime.rec.add_subtask(subtask_ind=1, mix={"subtask": 1, "weights": [1.0, 0.0], "solve": 0})
+    return runtime
+
+
+def test_resolve_after_bridge_replaces_the_steps_and_records_the_executed_mix(tmp_path):
+    runtime = _resolve_runtime(tmp_path)
+    policy = ResolvePolicy(runtime)
+    queue = policy.action_queue
+    assert runtime._resolve_after_bridge(policy, OBS) == "replaced"
+    assert policy.action_queue is queue and all(np.all(a == 1.0) for a in queue)      # replaced in place
+    sub = runtime.rec.subtasks[-1]
+    assert sub["resolve_after_bridge"] == "replaced"
+    assert sub["mix"]["solve"] == 1 and sub["mix"]["weights"] == [0.2, 0.8]          # the executed solve's weights
+    assert sub["mix_before_resolve"]["solve"] == 0
+    assert runtime._last_mix is None and runtime._mix_plan is None                   # nothing left for unplanned_mixes
+    assert runtime._resolve_after_bridge(policy, OBS) is None and policy.solves == 1  # once per queue
+
+
+def test_resolve_after_bridge_keeps_the_plan_and_the_first_mix_otherwise(tmp_path):
+    for policy_kw, outcome in (({"new_steps": 4}, "kept: the re-solve has 4 steps, the plan 3"),
+                               ({"success": False}, "kept: the re-solve failed")):
+        runtime = _resolve_runtime(tmp_path)
+        policy = ResolvePolicy(runtime, **policy_kw)
+        assert runtime._resolve_after_bridge(policy, OBS) == outcome
+        assert all(np.all(a == -1.0) for a in policy.action_queue)
+        sub = runtime.rec.subtasks[-1]
+        assert sub["resolve_after_bridge"] == outcome and sub["mix"]["solve"] == 0 and "mix_before_resolve" not in sub
+        assert runtime._last_mix is None
+    runtime = _resolve_runtime(tmp_path)
+    grasp = ResolvePolicy(runtime, carried=())                                        # carries nothing: no re-solve
+    assert runtime._resolve_after_bridge(grasp, OBS) is None and grasp.solves == 0
+    mid_bridge = ResolvePolicy(runtime)
+    mid_bridge.action_queue.append(np.zeros(7))                                       # bridge steps still queued
+    assert runtime._resolve_after_bridge(mid_bridge, OBS) is None and mid_bridge.solves == 0
+    off = rt.CPGenRuntime(build_method({"name": "none"}, chunk_seed=3), chunk_seed=3, records_dir=None)
+    assert off.resolve_after_bridge is False
