@@ -11,7 +11,7 @@ basis: 'Fitted on 2026-11-20 on the A100 (scratch_calib/ana/fit_all.py, softmax 
   /data/pools/cpgen/three_piece_assembly/ours/ours/mixup_only/pool_calib (method mixup_only with TMG_MIX_BETA_RANDOM=1 TMG_MIX_DIRICHLET=1:
   Dirichlet(c) weights, c ~ LogUniform(0.05, 20); selection ours, chunks of 25; for coffee, hammer_cleanup, mug_cleanup and
   three_piece_assembly also the chunks of the same pool made on the Isaac server, scratch_calib/ana/cp_isaac; the A100 runs
-  also set TMG_CPGEN_RESOLVE_AFTER_BRIDGE=1, the re-solve after the bridge that main does not have) and /data/pools/cpgen/three_piece_assembly/ours/ours/none/pool_ctrl
+  also set TMG_CPGEN_RESOLVE_AFTER_BRIDGE=1, the re-solve after the bridge, cpgen.yaml resolve_after_bridge: true) and /data/pools/cpgen/three_piece_assembly/ours/ours/none/pool_ctrl
   (method none, the same code and settings); rows of subtask k: the attempts that reached it, label = the attempt''s task
   success.'
 num_sources: 10
