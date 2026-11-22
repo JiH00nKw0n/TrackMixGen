@@ -11,14 +11,16 @@
 # `singularity exec` on SIF (a .sif built from the docker image with `make sif ARCHIVE=<docker save tar>`).
 SHELL := /bin/bash
 .DEFAULT_GOAL := help
-REPO       := $(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
-# CP-Gen runs (and renders) in its own image, so GENERATOR=cpgen picks it unless IMAGE is given
-IMAGE      ?= $(if $(filter cpgen,$(GENERATOR)),cpgen,robosuite)
-GENERATOR  ?= mimicgen
-TAG        ?= latest
 CLUSTER    ?= local
-# flat `key: value` lines of the cluster file; `null` counts as unset
-cluster_value = $(filter-out null,$(strip $(shell sed -n 's/^$(1):[[:space:]]*\([^\#]*\).*/\1/p' $(REPO)/configs/machine/cluster/$(CLUSTER).yaml)))
+REPO       := $(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
+GENERATOR  ?= mimicgen
+# flat `key: value` lines of a config file; `null` counts as unset
+config_value  = $(filter-out null,$(strip $(shell sed -n 's/^$(2):[[:space:]]*\([^\#]*\).*/\1/p' $(REPO)/configs/$(1).yaml)))
+cluster_value = $(call config_value,machine/cluster/$(CLUSTER),$(1))
+# every generator names the image it runs in (generator config `image: tmg/<IMAGE>`), so GENERATOR picks IMAGE unless given
+IMAGE      ?= $(or $(notdir $(call config_value,experiment/generator/$(GENERATOR),image)),robosuite)
+IMAGE      := $(IMAGE)
+TAG        ?= latest
 DATA_ROOT  ?= $(or $(TMG_DATA_ROOT),$(call cluster_value,data_root),$(HOME)/tmg_data)
 TASK       ?= square
 SCENE      ?= official_d1
@@ -39,45 +41,49 @@ ARCHIVE    ?= $(DATA_ROOT)/images/tmg_$(IMAGE).tar
 # host folder bound to /tmp inside the Singularity containers: the session overlay that backs /tmp is capped at
 # 64 MB (sessiondir max size) and MimicGen assembles each chunk's demo file through a temporary directory there
 CONTAINER_TMP ?= $(or $(call cluster_value,container_tmp),$(DATA_ROOT)/tmp/container_tmp)
-PREP        = mkdir -p $(DATA_ROOT) $(CONTAINER_TMP) $(PREP_EXTRA)
 GEN_ARGS    = generator=$(GENERATOR) task=$(TASK) scene=$(SCENE) selection=$(SELECTION) method=$(METHOD) generation=$(GENERATION) cluster=$(CLUSTER) $(OVERRIDES)
 REVISION   := $(shell git -C $(REPO) rev-parse --short HEAD 2>/dev/null || echo unknown)
-# the Isaac Lab images (SoftMimicGen, DexMimicGen) run Isaac Sim: GPU for generation, resets and evaluation. Kit needs
-# Vulkan; the NVIDIA runtime with NVIDIA_DRIVER_CAPABILITIES=all mounts the driver's Vulkan ICD (/etc/vulkan/icd.d/
-# nvidia_icd.json) into the container, which  alone did not on the Isaac server (2026-10-28)
-ifneq (,$(filter isaaclab-%,$(IMAGE)))
+
+# ---- what a simulator container needs, per image ------------------------------------------------------------------------
+# The image sections below only fill these variables; DOCKER_RUN and SINGULARITY_RUN at the end turn them into the flags of
+# the runtime, so a setting is written once for both runtimes:
+#   CONTAINER_ENV    KEY=VALUE ...                     variables set inside the container
+#   CONTAINER_BINDS  HOST_PATH:CONTAINER_PATH ...      host files and folders mounted into the container
+#   CONTAINER_CUDA   CUDA_VISIBLE_DEVICES inside the container (only when CONTAINER_CUDA_SET is 1; may be empty)
+#   DOCKER_GPU, DOCKER_EXTRA, SING_NV                  runtime-specific options (GPU access, shared memory)
+#   WRITABLE_COPIES  HOST_DIR:IMAGE_DIR ...            image folders that need a writable host copy, filled on first use
+CONTAINER_ENV   =
+CONTAINER_BINDS =
+CONTAINER_CUDA_SET =
+WRITABLE_COPIES =
+host_part  = $(word 1,$(subst :, ,$(1)))
+image_part = $(word 2,$(subst :, ,$(1)))
+comma  := ,
+
+# -- Isaac Lab images (SoftMimicGen, DexMimicGen): Isaac Sim simulates and renders on the GPU in generation, resets and
+# evaluation. Kit needs Vulkan; the NVIDIA runtime with NVIDIA_DRIVER_CAPABILITIES=all mounts the driver's Vulkan ICD
+# (/etc/vulkan/icd.d/nvidia_icd.json) into the container, which `--gpus all` alone did not on the Isaac server (2026-10-28).
 # ISAAC_GPU (a GPU index, e.g. exported by scripts/run_isaaclab_baseline.sh from its GPU variable) exposes only that GPU to
-# the container, where it is device 0; empty exposes all GPUs and Isaac Sim takes device 0 of the host
-DOCKER_GPU = --runtime=nvidia --gpus $(if $(ISAAC_GPU),device=$(ISAAC_GPU),all) -e NVIDIA_VISIBLE_DEVICES=$(or $(ISAAC_GPU),all) -e NVIDIA_DRIVER_CAPABILITIES=all
-SING_NV    = --nv
-DOCKER_VOL_EXTRA = --shm-size 8g
+# the container, where it is device 0; empty exposes all GPUs and Isaac Sim takes device 0 of the host.
+ifneq (,$(filter isaaclab-%,$(IMAGE)))
+DOCKER_GPU   = --runtime=nvidia --gpus $(if $(ISAAC_GPU),device=$(ISAAC_GPU),all) -e NVIDIA_VISIBLE_DEVICES=$(or $(ISAAC_GPU),all) -e NVIDIA_DRIVER_CAPABILITIES=all
+DOCKER_EXTRA = --shm-size 8g
+SING_NV      = --nv
 endif
-# the CP-Gen image needs the GPU (cuRobo motion planning) also for generation and evaluation
+
+# -- CP-Gen image: the GPU also for generation and evaluation (cuRobo motion planning). CP-Gen writes into two folders of
+# the image: cuRobo's task configs (it adds its straight-line cost inside the cuRobo checkout) and MimicGen's ShapeNet mug
+# assets (Mug Cleanup writes a scaled mug xml next to the mesh). Both are read-only in the image (and root-owned under
+# docker --user), so a writable host copy of each is mounted over the folder.
 ifeq ($(IMAGE),cpgen)
 DOCKER_GPU = --gpus all
 SING_NV    = --nv
-# CP-Gen writes into two folders of the image: cuRobo's task configs (it adds its straight-line cost inside the cuRobo
-# checkout) and MimicGen's ShapeNet mug assets (Mug Cleanup writes a scaled mug xml next to the mesh). Both are read-only
-# in the image (and root-owned under docker --user), so a writable host copy of each, filled from the image on first use,
-# is mounted over the folder. Pairs are IMAGE_DIR:HOST_DIR.
-CUROBO_TASK_DIR   = /opt/src/curobo/src/curobo/content/configs/task
-MIMICGEN_MUGS_DIR = /opt/src/mimicgen/mimicgen/models/robosuite/assets/shapenet_core/mugs
-CPGEN_WRITABLE    = $(CUROBO_TASK_DIR):$(DATA_ROOT)/cpgen_writable/curobo_task $(MIMICGEN_MUGS_DIR):$(DATA_ROOT)/cpgen_writable/mimicgen_mugs
-img_dir  = $(word 1,$(subst :, ,$(1)))
-host_dir = $(word 2,$(subst :, ,$(1)))
-SING_BIND_EXTRA  = $(foreach p,$(CPGEN_WRITABLE),-B $(call host_dir,$(p)):$(call img_dir,$(p)))
-DOCKER_VOL_EXTRA = $(foreach p,$(CPGEN_WRITABLE),-v $(call host_dir,$(p)):$(call img_dir,$(p)))
-ifeq ($(RUNTIME),singularity)
-writable_fill = singularity exec $(SIF) cp -r $(call img_dir,$(1))/. $(call host_dir,$(1))/
-else
-# --user: the copy belongs to the calling user like everything else under DATA_ROOT; without it the docker copy was
-# root-owned, CP-Gen could not write its scaled mug xml there (PermissionError) and every validation of the CP-Gen Mug
-# Cleanup policies failed (Isaac, 2026-11-22)
-writable_fill = docker run --rm --user $(shell id -u):$(shell id -g) -v $(call host_dir,$(1)):/out --entrypoint cp tmg/$(IMAGE):$(TAG) -r $(call img_dir,$(1))/. /out/
+WRITABLE_COPIES = $(DATA_ROOT)/cpgen_writable/curobo_task:/opt/src/curobo/src/curobo/content/configs/task \
+                  $(DATA_ROOT)/cpgen_writable/mimicgen_mugs:/opt/src/mimicgen/mimicgen/models/robosuite/assets/shapenet_core/mugs
+CONTAINER_BINDS += $(WRITABLE_COPIES)
 endif
-PREP_EXTRA = $(foreach p,$(CPGEN_WRITABLE),&& { test -n "$$(ls -A $(call host_dir,$(p)) 2>/dev/null)" || { mkdir -p $(call host_dir,$(p)) && $(call writable_fill,$(p)); }; })
-endif
-# Offscreen rendering of the robosuite images (robosuite: MimicGen, cpgen: CP-Gen) in every stage that runs them
+
+# -- Offscreen rendering of the robosuite images (robosuite: MimicGen, cpgen: CP-Gen) in every stage that runs them
 # (sources, generate, dataset, resets, eval, check-scene; for CP-Gen also the noisy-state replay and re-rendering of
 # `make dataset`, which runs in the same container and inherits these variables). RENDER (cluster `render`, default egl):
 #   egl   renders on the GPU through NVIDIA EGL (about 4x faster per MimicGen image attempt on the A100, 2026-11-21);
@@ -88,54 +94,71 @@ endif
 # evaluated with the same renderer; keep RENDER the same for a dataset and for the evaluation of the policies trained on it.
 # The container gets TMG_RENDER and every chunk spec records it, so a pool refuses to continue under the other renderer.
 RENDER ?= $(or $(call cluster_value,render),egl)
-comma  := ,
 ifneq (,$(filter robosuite cpgen,$(IMAGE)))
+ifeq (,$(filter egl mesa,$(RENDER)))
+$(error RENDER must be egl or mesa, got '$(RENDER)')
+endif
+CONTAINER_ENV += TMG_RENDER=$(RENDER) $(if $(EGL_DEVICE_ID),MUJOCO_EGL_DEVICE_ID=$(EGL_DEVICE_ID),)
+
 ifeq ($(RENDER),egl)
-# The GPU that renders: the first entry of the caller's CUDA_VISIBLE_DEVICES (the drivers' GPU variable; "0,3" gives 0),
-# else 0. EGL numbers the GPUs in its own order: cluster `egl_device_of_gpu` lists the EGL index of GPU 0, 1, 2, ...
-# (A100: [2, 3, 0, 1, 6, 7, 4, 5], read with EGL_CUDA_DEVICE_NV); unset means the same index (Isaac). EGL_DEVICE_ID on the
-# command line overrides the lookup.
+# Which EGL device. The GPU that renders is the first entry of the caller's CUDA_VISIBLE_DEVICES (the drivers' GPU variable;
+# "0,3" gives 0), else 0. EGL numbers the GPUs in its own order: cluster `egl_device_of_gpu` lists the EGL index of GPU 0,
+# 1, 2, ... (A100: [2, 3, 0, 1, 6, 7, 4, 5], read with EGL_CUDA_DEVICE_NV); unset means the same index (Isaac).
+# EGL_DEVICE_ID on the command line overrides the lookup.
 RENDER_GPU    ?= $(or $(firstword $(subst $(comma), ,$(CUDA_VISIBLE_DEVICES))),0)
 EGL_MAP        = $(subst $(comma), ,$(subst [,,$(subst ],,$(call cluster_value,egl_device_of_gpu))))
 EGL_DEVICE_ID ?= $(if $(EGL_MAP),$(word $(shell echo $$(( $(RENDER_GPU) + 1 ))),$(EGL_MAP)),$(RENDER_GPU))
-# robosuite asserts that MUJOCO_EGL_DEVICE_ID is listed in CUDA_VISIBLE_DEVICES whenever that is not empty, and an EGL
-# index is not a GPU index on the A100. The robosuite image needs no CUDA, so its list is empty inside the container; the
+# CUDA inside the container. robosuite asserts that MUJOCO_EGL_DEVICE_ID is listed in CUDA_VISIBLE_DEVICES whenever that is
+# not empty, and an EGL index is not a GPU index on the A100. The robosuite image needs no CUDA, so its list is empty; the
 # CP-Gen image keeps the rendering GPU for cuRobo (cuda:0) and tmg.core.egl.apply appends the EGL index when it differs.
-CONTAINER_CUDA = $(if $(filter cpgen,$(IMAGE)),$(RENDER_GPU),)
+CONTAINER_CUDA_SET = 1
+CONTAINER_CUDA     = $(if $(filter cpgen,$(IMAGE)),$(RENDER_GPU),)
 # robomimic asks egl_probe for the EGL devices, which renders a test on every GPU of the host (other users' included) and
-# stalled with many chunk processes (A100, 2026-11-21); docker/egl_stub/egl_probe_init.py returns MUJOCO_EGL_DEVICE_ID only
-EGL_PROBE_FILE = /opt/venv/lib/python3.10/site-packages/egl_probe/__init__.py
-DOCKER_GPU     = --runtime=nvidia --gpus all -e NVIDIA_VISIBLE_DEVICES=all -e NVIDIA_DRIVER_CAPABILITIES=all
-DOCKER_RENDER  = -e TMG_RENDER=egl -e CUDA_VISIBLE_DEVICES=$(CONTAINER_CUDA) -e MUJOCO_GL=egl -e PYOPENGL_PLATFORM=egl -e MUJOCO_EGL_DEVICE_ID=$(EGL_DEVICE_ID) \
-                 -v $(REPO)/docker/egl_stub/egl_probe_init.py:$(EGL_PROBE_FILE):ro
-# Singularity's --nv does not bring NVIDIA's EGL library (A100: nvidia-container-cli without the graphics capability), so
-# cluster `nvidia_egl_dir` holds a copy of the driver's EGL libraries and its 10_nvidia.json vendor file (same driver
-# version as the host), bound into the container. CUDA_VISIBLE_DEVICES reaches a --cleanenv container only through
-# SINGULARITYENV_CUDA_VISIBLE_DEVICES, which is set for the one singularity command.
+# stalled with many chunk processes (A100, 2026-11-21); docker/egl_stub/egl_probe_init.py returns MUJOCO_EGL_DEVICE_ID only.
+CONTAINER_BINDS += $(REPO)/docker/egl_stub/egl_probe_init.py:/opt/venv/lib/python3.10/site-packages/egl_probe/__init__.py
+# GPU access with the graphics capability (docker). Singularity's --nv does not bring NVIDIA's EGL library (A100:
+# nvidia-container-cli without the graphics capability), so cluster `nvidia_egl_dir` holds a copy of the driver's EGL
+# libraries and its 10_nvidia.json vendor file (same driver version as the host), mounted into the container.
+DOCKER_GPU      = --runtime=nvidia --gpus all -e NVIDIA_VISIBLE_DEVICES=all -e NVIDIA_DRIVER_CAPABILITIES=all
+SING_NV         = --nv
 NVIDIA_EGL_DIR ?= $(call cluster_value,nvidia_egl_dir)
-SING_NV        = --nv
-SING_RENDER    = --env TMG_RENDER=egl --env MUJOCO_EGL_DEVICE_ID=$(EGL_DEVICE_ID) -B $(REPO)/docker/egl_stub/egl_probe_init.py:$(EGL_PROBE_FILE) \
-                 $(if $(NVIDIA_EGL_DIR),--env LD_LIBRARY_PATH=/opt/nvegl:/.singularity.d/libs -B $(NVIDIA_EGL_DIR):/opt/nvegl -B $(NVIDIA_EGL_DIR)/10_nvidia.json:/usr/share/glvnd/egl_vendor.d/10_nvidia.json,)
-SING_PREFIX    = SINGULARITYENV_CUDA_VISIBLE_DEVICES=$(CONTAINER_CUDA)
-else ifeq ($(RENDER),mesa)
+ifeq ($(RUNTIME),singularity)
+ifneq (,$(NVIDIA_EGL_DIR))
+CONTAINER_ENV   += LD_LIBRARY_PATH=/opt/nvegl:/.singularity.d/libs
+CONTAINER_BINDS += $(NVIDIA_EGL_DIR):/opt/nvegl $(NVIDIA_EGL_DIR)/10_nvidia.json:/usr/share/glvnd/egl_vendor.d/10_nvidia.json
+endif
+endif
+else
 # Mesa software rendering picks the EGL device by index too; on a host whose /dev/dri the user cannot open (A100 under
 # Singularity) the index must be set explicitly (cluster `egl_device_id`: Mesa's software device after the GPUs' DRM
 # devices), or image pools and image evaluations fail with "Cannot initialize a EGL device display" (2026-10-29). Docker
 # hosts leave egl_device_id unset: Mesa inside the container finds its software device itself.
 EGL_DEVICE_ID ?= $(call cluster_value,egl_device_id)
-SING_RENDER    = --env TMG_RENDER=mesa $(if $(EGL_DEVICE_ID),--env MUJOCO_EGL_DEVICE_ID=$(EGL_DEVICE_ID),)
-DOCKER_RENDER  = -e TMG_RENDER=mesa
+endif
+endif
+
+# ---- the two runtimes ---------------------------------------------------------------------------------------------------
+# A writable copy that is still empty is filled from the image before the first command (PREP). docker --user: the copy
+# belongs to the calling user like everything else under DATA_ROOT; without it the docker copy was root-owned, CP-Gen could
+# not write its scaled mug xml there (PermissionError) and every validation of the CP-Gen Mug Cleanup policies failed
+# (Isaac, 2026-11-22).
+ifeq ($(RUNTIME),singularity)
+fill_copy = singularity exec $(SIF) cp -r $(call image_part,$(1))/. $(call host_part,$(1))/
 else
-$(error RENDER must be egl or mesa, got '$(RENDER)')
+fill_copy = docker run --rm --user $(shell id -u):$(shell id -g) -v $(call host_part,$(1)):/out --entrypoint cp tmg/$(IMAGE):$(TAG) -r $(call image_part,$(1))/. /out/
 endif
-endif
+PREP = mkdir -p $(DATA_ROOT) $(CONTAINER_TMP) $(foreach p,$(WRITABLE_COPIES),&& { test -n "$$(ls -A $(call host_part,$(p)) 2>/dev/null)" || { mkdir -p $(call host_part,$(p)) && $(call fill_copy,$(p)); }; })
 # Arena assets moved from the staging S3 mirror to production (2026-11-03): mount the patched path module into the Dex image
 ARENA_PATCH = $(if $(filter isaaclab-dex,$(IMAGE)),-v $(DATA_ROOT)/arena_patch/nucleus.py:/opt/src/IsaacLab-Arena/isaaclab_arena/assets/nucleus.py:ro,)
-DOCKER_RUN  = docker run --rm -i $(if $(shell tty -s && echo t),-t,) --network host $(DOCKER_GPU) $(DOCKER_RENDER) \
-              -v $(DATA_ROOT):/data -v $(REPO):/opt/tmg $(DOCKER_VOL_EXTRA) $(ARENA_PATCH) \
+DOCKER_RUN  = docker run --rm -i $(if $(shell tty -s && echo t),-t,) --network host $(DOCKER_GPU) $(DOCKER_EXTRA) \
+              $(if $(CONTAINER_CUDA_SET),-e CUDA_VISIBLE_DEVICES=$(CONTAINER_CUDA),) $(addprefix -e ,$(CONTAINER_ENV)) \
+              -v $(DATA_ROOT):/data -v $(REPO):/opt/tmg $(addprefix -v ,$(CONTAINER_BINDS)) $(ARENA_PATCH) \
               -e TMG_DATA_ROOT=/data -e HOME=/tmp -e HF_HOME=/data/.cache/huggingface \
               --user $(shell id -u):$(shell id -g) tmg/$(IMAGE):$(TAG)
-SINGULARITY_RUN = $(SING_PREFIX) singularity exec $(SING_NV) $(SING_RENDER) $(SING_ENV_EXTRA) --cleanenv --no-home --writable-tmpfs --pwd /opt/tmg -B $(DATA_ROOT):/data -B $(REPO):/opt/tmg -B $(CONTAINER_TMP):/tmp $(SING_BIND_EXTRA) \
+# CUDA_VISIBLE_DEVICES reaches a --cleanenv container only through SINGULARITYENV_CUDA_VISIBLE_DEVICES, set for the one command
+SINGULARITY_RUN = $(if $(CONTAINER_CUDA_SET),SINGULARITYENV_CUDA_VISIBLE_DEVICES=$(CONTAINER_CUDA),) singularity exec $(SING_NV) \
+              $(addprefix --env ,$(CONTAINER_ENV)) --cleanenv --no-home --writable-tmpfs --pwd /opt/tmg \
+              -B $(DATA_ROOT):/data -B $(REPO):/opt/tmg -B $(CONTAINER_TMP):/tmp $(addprefix -B ,$(CONTAINER_BINDS)) \
               --env TMG_DATA_ROOT=/data,HOME=/tmp,HF_HOME=/data/.cache/huggingface,MUJOCO_GL=egl,PYOPENGL_PLATFORM=egl $(SIF) tmg
 # the train image (python 3.12, torch, lerobot) runs with the GPU; the data root and repo are mounted the same way
 TRAIN_SIF   ?= $(or $(call cluster_value,train_sif),$(DATA_ROOT)/images/tmg_$(TRAIN_IMAGE).sif)
