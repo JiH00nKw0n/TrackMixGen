@@ -122,11 +122,12 @@ def reached_outcomes(attempt: Mapping, num_subtasks: int) -> list[bool]:
 
 
 def design_rows(attempts: Sequence[Mapping], outcomes: Sequence[Sequence[bool]], k: int, num_sources: int,
-                source_infos: Sequence[Mapping] | None) -> tuple[np.ndarray, np.ndarray, str | None]:
-    """The rows and labels of subtask k: one row per attempt that reached it, labelled with the attempt's task success
-    (module docstring). Columns: J source indicators, the three scene features, and for k >= 1 the two in-hand features."""
-    rows, ys, carried = [], [], None
-    for a, out in zip(attempts, outcomes):
+                source_infos: Sequence[Mapping] | None) -> tuple[np.ndarray, np.ndarray, list[int]]:
+    """The rows of subtask k from single-source attempts: one row per attempt that reached it, labelled with the attempt's
+    task success (module docstring). Returns ``(X, y, kept)``: the columns of ``X`` are the J source indicators and the
+    five ``FEATURES`` (the in-hand features are 0 for k = 0), ``kept`` the index in ``attempts`` of every row."""
+    rows, ys, kept = [], [], []
+    for index, (a, out) in enumerate(zip(attempts, outcomes)):
         if not all(out[:k]):
             continue
         subs = sorted(a["subtasks"], key=lambda s: int(s["subtask_ind"]))
@@ -136,10 +137,8 @@ def design_rows(attempts: Sequence[Mapping], outcomes: Sequence[Sequence[bool]],
         j = int(s["src_demo_ind"])
         x = np.zeros(num_sources)
         x[j] = 1.0
-        parts = [x, scene_features(s["cur_obj_pose"], s["src_obj_pose"])]
-        if k >= 1:
-            carried = str(subs[k - 1]["object_name"])
-            parts.append(_inhand_row(s, j, carried, source_infos))
-        rows.append(np.concatenate(parts))
+        inhand = _inhand_row(s, j, str(subs[k - 1]["object_name"]), source_infos) if k >= 1 else np.zeros(len(INHAND_FEATURES))
+        rows.append(np.concatenate([x, scene_features(s["cur_obj_pose"], s["src_obj_pose"]), inhand]))
         ys.append(float(bool(a["success"])))           # label: task success of an attempt that reached subtask k
-    return np.array(rows), np.array(ys), carried
+        kept.append(index)
+    return np.array(rows).reshape(len(rows), num_sources + len(FEATURES)), np.array(ys), kept

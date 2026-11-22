@@ -74,8 +74,8 @@ def test_design_rows_keep_only_attempts_that_reached_the_subtask():
     infos = [{"eef_pose": np.stack([pose()] * 5), "object_poses": {"a": np.stack([pose(z=-0.1)] * 5)}} for _ in range(2)]
     objects = {"a": pose(z=-0.12), "b": pose(0.5)}
     a = _attempt(0, 1, pose(0.1), pose(0.5), pose(), pose(0.4), pose(), objects)
-    X, y, carried = design_rows([a, a], [[True, True], [False, False]], 1, 2, infos)
-    assert carried == "a" and X.shape == (1, 2 + 3 + 2) and y.tolist() == [1.0]
+    X, y, kept = design_rows([a, a], [[True, True], [False, False]], 1, 2, infos)
+    assert kept == [0] and X.shape == (1, 2 + 3 + 2) and y.tolist() == [1.0]
     assert np.allclose(X[0, :2], [0, 1]) and X[0, 2] == pytest.approx(0.1) and X[0, 5] == pytest.approx(0.02)
 
 
@@ -83,8 +83,10 @@ def test_design_rows_label_is_task_success_not_the_subtask_success():
     objects = {"a": pose(z=-0.12), "b": pose(0.5)}
     ok = _attempt(0, 1, pose(0.1), pose(0.5), pose(), pose(0.4), pose(), objects)
     failed = dict(ok, success=False)                       # the grasp (subtask 0) succeeded, the task did not
-    X, y, _ = design_rows([ok, failed], [[True, True], [True, False]], 0, 2, None)
-    assert X.shape == (2, 2 + 3) and y.tolist() == [1.0, 0.0]
+    X, y, kept = design_rows([ok, failed], [[True, True], [True, False]], 0, 2, None)
+    assert X.shape == (2, 2 + 3 + 2) and y.tolist() == [1.0, 0.0] and kept == [0, 1]
+    assert np.all(X[:, 5:] == 0)                           # no in-hand features in the first subtask
+    assert design_rows([ok], [[False, False]], 1, 2, None)[0].shape == (0, 2 + 3 + 2)      # nobody reached subtask 1
 
 
 # weights --------------------------------------------------------------------------------------------------------------
@@ -275,6 +277,51 @@ def test_fit_recovers_the_sign_of_the_spread_effect():
         block = fit_subtask((rows, list(y), groups), ([], [], []), J, with_cv=False)
         assert np.sign(block["d"]) == np.sign(d_true) and abs(block["d"] - d_true) < 0.5
         assert block["a"][0] > block["a"][2]
+
+
+def _write_pool(folder, chunks, attempts):
+    """A finished pool with ``attempts(chunk)`` as the attempt records of every chunk."""
+    import json
+
+    for c in range(chunks):
+        records = folder / "chunks" / f"seed{c:05d}" / "records"
+        records.mkdir(parents=True)
+        (records.parent / "CHUNK_DONE.json").write_text("{}")
+        (records / "attempts.jsonl").write_text("".join(json.dumps(a) + "\n" for a in attempts(c)))
+
+
+def test_fit_reads_the_pools_of_a_generator_that_stops_at_the_first_failed_subtask(tmp_path):
+    """CP-Gen records: a baseline attempt reached subtask k when it has k + 1 subtask records; a calibration attempt when it
+    has a mix record of k, also one whose motion plan to k failed (``unplanned_mixes``)."""
+    from tmg.generation.fit_coefficients import fit_blocks, read_pools
+
+    rng = np.random.default_rng(1)
+
+    def sub(k, mix):
+        s = {"subtask_ind": k, "object_name": "ab"[k], "src_demo_ind": int(rng.integers(2)), "src_subtask_start": 0,
+             "cur_obj_pose": flat(pose(rng.normal(0, 0.05))), "src_obj_pose": flat(pose()), "eef_pose": flat(pose()),
+             "objects": {}}
+        return dict(s, mix=mix(k)) if mix else s
+
+    def mix(k):
+        w = rng.dirichlet([0.5, 0.5]).round(4)
+        return {"subtask": k, "weights": [float(w[0]), float(1 - w[0])], "scene_features": rng.random((2, 3)).tolist()}
+
+    def calibration(chunk):
+        out = [{"success": bool(rng.random() < 0.5), "subtasks": [sub(0, mix), sub(1, mix)]} for _ in range(20)]
+        return [*out, {"success": False, "subtasks": [sub(0, mix)], "unplanned_mixes": [mix(1)]}]      # plan to 1 failed
+
+    def baseline(chunk):
+        return [{"success": bool(n == 2 and rng.random() < 0.5), "subtasks": [sub(k, None) for k in range(n)]}
+                for n in (1, 2, 2, 2, 2) * 4]
+
+    _write_pool(tmp_path / "calibration", 4, calibration)
+    _write_pool(tmp_path / "baseline", 3, baseline)
+    blocks = fit_blocks(read_pools([tmp_path / "calibration"]), read_pools([tmp_path / "baseline"]), num_sources=2,
+                        signals=None, source=None, with_cv=False)
+    assert sorted(blocks) == [0, 1] and blocks[0]["rows"] == {"calibration": 84, "baseline": 60}
+    assert blocks[1]["rows"] == {"calibration": 84, "baseline": 48}       # the failed plans count, the 12 that stopped do not
+    assert len(blocks[1]["a"]) == 2 and sorted(blocks[1]["g"]) == sorted(["dx", "dy", "rotation", "inhand_position", "inhand_rotation"])
 
 
 # symmetry alignment ----------------------------------------------------------------------------------------------------
