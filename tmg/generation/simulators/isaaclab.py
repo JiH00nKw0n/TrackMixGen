@@ -11,7 +11,7 @@ Three concerns that the robosuite layer has no equivalent for:
   joint order interleaves the hands (``L_* x5, R_* x5, L_* x5, R_* x5, L_thumb, R_thumb``). The official
   ``actions[:, 14:25]`` / ``actions[:, 25:]`` split therefore mixes both hands. ``HandLayout`` maps each hand
   to its joint indices by the ``L_`` / ``R_`` name prefixes read from the action term at run time.
-- **Measured poses.** The follower's error must be measured on the link the controller targets. The GR1 IK
+- **Measured poses.** The recorded tracking error must be measured on the link the controller targets. The GR1 IK
   tasks target ``*_hand_pitch_link`` while the observations ``*_eef_pos`` / ``*_eef_quat`` read
   ``*_hand_roll_link``; ``measured_eef_poses`` reads the configured link's world pose from the robot's body
   state (minus the environment origin), so the error is zero when the controller converged.

@@ -76,7 +76,7 @@ class TrajectoryExecution:
     """Step-by-step bookkeeping for one attempt's trajectories (see the module docstring).
 
     Call order per trajectory: :meth:`begin_trajectory`, then for each waypoint sequence :meth:`enter_sequence`
-    and, for each of its steps, :meth:`apply_noise`, :meth:`before_step`, :meth:`after_step`. :meth:`label_actions` gives the action array to store once the attempt ends.
+    and, for each of its steps, :meth:`keep_pre_noise`, :meth:`before_step`, :meth:`after_step`. :meth:`label_actions` gives the action array to store once the attempt ends.
     """
     def __init__(self, method: Method, recorder: AttemptRecorder):
         """Args:
@@ -114,7 +114,7 @@ class TrajectoryExecution:
         self.seg_id = self.segments[index].seg_id
 
     # step -----------------------------------------------------------------------------------------
-    def apply_noise(self, action: np.ndarray) -> np.ndarray:
+    def keep_pre_noise(self, action: np.ndarray) -> np.ndarray:
         """Keep the pre-noise copy of the arm action (the official line adds its own noise afterwards)."""
         pre = np.array(action, dtype=float)
         self._pre = pre

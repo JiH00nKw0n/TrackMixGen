@@ -176,7 +176,7 @@ class MimicGenRuntime:
 
     def pre_noise(self, action_pose):
         """Grafted after the arm action is computed, before the official noise: keep the pre-noise copy."""
-        self.exec.apply_noise(action_pose)
+        self.exec.keep_pre_noise(action_pose)
 
     def record_step(self, waypoint, datagen_info, play_action):
         """Grafted after ``get_datagen_info``: hand the step's target, measured pose, executed action and gripper

@@ -63,7 +63,7 @@ class IsaacLabLayout:
     arm_action_dims: dict[str, tuple[int, int]]       # eef -> (start, end) of its arm pose block in the action
     hand_prefixes: dict[str, str] | None              # eef -> joint-name prefix (dexterous hands), or None (gripper)
     hand_term: str | None                             # action term holding the hand joint names (GR1: "upper_body_ik")
-    measure_links: dict[str, str] | None              # eef -> body name to measure the follower error on (None: observed eef)
+    measure_links: dict[str, str] | None              # eef -> body whose pose is recorded as the measured pose (None: observed eef)
     noise_draw_shapes: tuple[int, ...] = ()           # per-step torch.randn_like shapes of target_eef_pose_to_action
 
     @classmethod

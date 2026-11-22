@@ -29,7 +29,7 @@ def _run(method):
         ex.enter_sequence(i)
         for w in seq:
             action = np.full(6, 2.0)                       # clipped to 1 in the pre-noise label
-            pre = ex.apply_noise(action)
+            pre = ex.keep_pre_noise(action)
             ex.before_step(target_poses=w.poses, measured_poses={EEF: np.eye(4)},
                            executed_action=np.r_[action, w.grippers[EEF]], grippers=w.grippers, noise_of_waypoint=0.05)
             ex.after_step(task_success=False, term_signals={"grasp": False})

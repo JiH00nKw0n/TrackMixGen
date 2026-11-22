@@ -15,7 +15,7 @@ That function runs after the script's imports and before its ``main()``:
    group (``simulators.isaaclab_lowdim.add_lowdim_terms``), the chunk seed is written into ``datagen_config.seed`` (the
    official scripts take no ``--seed``; they seed random, numpy and torch with that config value), ``generation_guarantee``
    is set from ``generation.protocol.guarantee`` (true: ``--generation_num_trials`` counts successes, the official value;
-   false: it counts attempts, for the test pilots and the ranking pools) and the overrides are logged;
+   false: it counts attempts, for the test pilots and the SkillMix fit pools) and the overrides are logged;
 3. installs the grafts (:func:`install_runtime`): the ``install_from_spec`` of ``spec["extra"]["runtime_module"]`` (AutoData's
    runtime for DexMimicGen) or, when the spec names none, of ``isaaclab.runtime``; both also install the shared-path
    ``generate`` when tracking is on.
@@ -77,7 +77,7 @@ def wrap_setup_env_config(namespace: dict, spec: dict) -> None:
             datagen.seed = chunk_seed
             print(f"[tmg] datagen_config.seed = {chunk_seed} (chunk seed)", flush=True)
             # generation.protocol.guarantee decides what --generation_num_trials counts: successes (true, the official
-            # value of every Isaac Lab task; the full pools) or attempts (false; the test pilots and the ranking pools)
+            # value of every Isaac Lab task; the full pools) or attempts (false; the test pilots and the SkillMix fit pools)
             if hasattr(datagen, "generation_guarantee"):
                 datagen.generation_guarantee = guarantee
                 print(f"[tmg] datagen_config.generation_guarantee = {guarantee} (trials count "

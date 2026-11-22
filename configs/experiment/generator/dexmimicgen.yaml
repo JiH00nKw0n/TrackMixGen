@@ -30,7 +30,7 @@ eefs: [left, right]
 arm_action_dims: {left: [0, 7], right: [7, 14]}
 hand_prefixes: null
 hand_term: null
-# the IK tasks target the pitch links while the observations read the roll links; the follower measures its error on the
+# the IK tasks target the pitch links while the observations read the roll links; the records measure the pose on the
 # target links (2026-10-26 analysis of the Isaac Lab Mimic GR1 controller; Arena's GR1 uses the same links)
 measure_links: {left: left_hand_pitch_link, right: right_hand_pitch_link}
 # randn_like draws of AutoData's target_eef_pose_to_action per step, in order: left pos, left quat, right pos, right quat;
