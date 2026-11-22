@@ -44,7 +44,7 @@ def test_prepare_chunk_spec(tmp_path, monkeypatch):
                           "commit": "72bd767"}
     assert spec.protocol["camera_size"] == [84, 84]            # filled from task.image_size when the protocol leaves it null
     assert spec.task is gen.task and spec.method is gen.method and spec.scene == gen.scene_chain()
-    assert set(spec.identity()) == {"generator", "chunk", "task", "scene", "method", "protocol", "extra"}
+    assert set(spec.identity()) == {"generator", "chunk", "task", "scene", "method", "protocol", "extra", "render"}
     assert json.loads(json.dumps(asdict(spec))) == asdict(spec)          # the spec is plain JSON
     assert gen.chunk_command(spec, folder / "chunk_spec.json") == [
         sys.executable, "-m", "tmg.generation.generators.mimicgen.entrypoint", "--spec", str(folder / "chunk_spec.json")]

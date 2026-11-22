@@ -361,3 +361,22 @@ def test_run_pool_shards_split_the_chunks_and_the_last_one_writes_done(pool, tmp
 def test_run_pool_refuses_a_bad_shard(pool, tmp_path):
     with pytest.raises(runner.PoolError, match="shard"):
         pool(_cfg(tmp_path, shard=[2, 2]))
+
+
+def test_run_pool_refuses_to_continue_a_pool_under_another_renderer(pool, tmp_path, monkeypatch):
+    """Chunk specs record TMG_RENDER; specs written before it count as mesa (2026-11-22)."""
+    monkeypatch.delenv("TMG_RENDER", raising=False)
+    pool(_cfg(tmp_path))
+    output = tmp_path / "pool"
+    (output / POOL_DONE).unlink()
+    spec_path = output / CHUNKS_DIR / "seed101" / CHUNK_SPEC
+    old = read_json(spec_path)
+    old.pop("render", None)                       # a spec written before the renderer was recorded
+    write_json(spec_path, old)
+    monkeypatch.setenv("TMG_RENDER", "mesa")
+    summary, launch = pool(_cfg(tmp_path))        # Mesa continues the old chunks
+    assert launch.calls == [] and summary["attempts"] == 5
+    (output / POOL_DONE).unlink()
+    monkeypatch.setenv("TMG_RENDER", "egl")
+    with pytest.raises(runner.PoolError, match=r"seed101: finished chunk was made under another configuration: \['render'\]"):
+        pool(_cfg(tmp_path))

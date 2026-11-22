@@ -8,6 +8,7 @@ import time, because the runner also runs where the package is absent.
 """
 from __future__ import annotations
 
+import os
 import sys
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
@@ -16,6 +17,12 @@ from pathlib import Path
 
 from tmg.core.chunks import Chunk
 from tmg.core.records import RECORDS_DIR
+
+# Offscreen renderer of the chunk (the Makefile's RENDER, passed into the container as TMG_RENDER: egl | mesa). A chunk spec
+# without it was written before 2026-11-22, when the robosuite images rendered with Mesa; it counts as "mesa". The Isaac
+# Lab images render with Isaac Sim, get no TMG_RENDER and keep "mesa" as a constant that never differs.
+RENDER_ENV = "TMG_RENDER"
+LEGACY_RENDER = "mesa"
 
 
 @dataclass
@@ -32,12 +39,15 @@ class ChunkSpec:
     generator_config: str           # path of the official generator's own config file
     expected_outputs: list = field(default_factory=list)   # files that must exist when the chunk finished
     extra: dict = field(default_factory=dict)
+    render: str | None = None       # offscreen renderer (TMG_RENDER); None in specs written before 2026-11-22
 
     def identity(self) -> dict:
-        """What must be equal for a finished chunk to be reused (machine-specific paths excluded)."""
+        """What must be equal for a finished chunk to be reused (machine-specific paths excluded). The renderer is part of
+        it: Mesa and EGL images differ (2026-11-22: 50-61 % of the pixels), so a pool started with one renderer refuses
+        chunks of the other."""
         return {"generator": self.generator, "chunk": self.chunk, "task": _without_paths(self.task),
                 "scene": self.scene, "method": _without_paths(self.method), "protocol": self.protocol,
-                "extra": self.extra}
+                "extra": self.extra, "render": self.render or LEGACY_RENDER}
 
 
 def _deep_merge(base: dict, extra: Mapping) -> dict:
@@ -137,7 +147,7 @@ class SyntheticDataGenerator(ABC):
             chunk={"index": chunk.index, "seed": chunk.seed, "attempts": chunk.attempts},
             folder=str(folder), records_dir=str(folder / RECORDS_DIR), task=self.task, scene=scene, method=self.method,
             protocol=self.protocol if protocol is None else protocol, generator_config=generator_config,
-            expected_outputs=list(expected_outputs), extra=extra)
+            expected_outputs=list(expected_outputs), extra=extra, render=os.environ.get(RENDER_ENV) or None)
 
     def graft_hashes(self) -> dict:
         """``generator.graft_hashes`` as a plain dict (the pinned source hashes the chunk process verifies)."""

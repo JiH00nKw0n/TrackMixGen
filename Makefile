@@ -86,6 +86,7 @@ endif
 # The two renderers do not draw the same pixels: the same scene rendered both ways differed in 50-61 % of the pixels, by
 # 0.7-1.4 levels on average and up to 76 (2026-11-22). A policy is therefore trained on images of one renderer and
 # evaluated with the same renderer; keep RENDER the same for a dataset and for the evaluation of the policies trained on it.
+# The container gets TMG_RENDER and every chunk spec records it, so a pool refuses to continue under the other renderer.
 RENDER ?= $(or $(call cluster_value,render),egl)
 comma  := ,
 ifneq (,$(filter robosuite cpgen,$(IMAGE)))
@@ -105,7 +106,7 @@ CONTAINER_CUDA = $(if $(filter cpgen,$(IMAGE)),$(RENDER_GPU),)
 # stalled with many chunk processes (A100, 2026-11-21); docker/egl_stub/egl_probe_init.py returns MUJOCO_EGL_DEVICE_ID only
 EGL_PROBE_FILE = /opt/venv/lib/python3.10/site-packages/egl_probe/__init__.py
 DOCKER_GPU     = --runtime=nvidia --gpus all -e NVIDIA_VISIBLE_DEVICES=all -e NVIDIA_DRIVER_CAPABILITIES=all
-DOCKER_RENDER  = -e CUDA_VISIBLE_DEVICES=$(CONTAINER_CUDA) -e MUJOCO_GL=egl -e PYOPENGL_PLATFORM=egl -e MUJOCO_EGL_DEVICE_ID=$(EGL_DEVICE_ID) \
+DOCKER_RENDER  = -e TMG_RENDER=egl -e CUDA_VISIBLE_DEVICES=$(CONTAINER_CUDA) -e MUJOCO_GL=egl -e PYOPENGL_PLATFORM=egl -e MUJOCO_EGL_DEVICE_ID=$(EGL_DEVICE_ID) \
                  -v $(REPO)/docker/egl_stub/egl_probe_init.py:$(EGL_PROBE_FILE):ro
 # Singularity's --nv does not bring NVIDIA's EGL library (A100: nvidia-container-cli without the graphics capability), so
 # cluster `nvidia_egl_dir` holds a copy of the driver's EGL libraries and its 10_nvidia.json vendor file (same driver
@@ -113,7 +114,7 @@ DOCKER_RENDER  = -e CUDA_VISIBLE_DEVICES=$(CONTAINER_CUDA) -e MUJOCO_GL=egl -e P
 # SINGULARITYENV_CUDA_VISIBLE_DEVICES, which is set for the one singularity command.
 NVIDIA_EGL_DIR ?= $(call cluster_value,nvidia_egl_dir)
 SING_NV        = --nv
-SING_RENDER    = --env MUJOCO_EGL_DEVICE_ID=$(EGL_DEVICE_ID) -B $(REPO)/docker/egl_stub/egl_probe_init.py:$(EGL_PROBE_FILE) \
+SING_RENDER    = --env TMG_RENDER=egl --env MUJOCO_EGL_DEVICE_ID=$(EGL_DEVICE_ID) -B $(REPO)/docker/egl_stub/egl_probe_init.py:$(EGL_PROBE_FILE) \
                  $(if $(NVIDIA_EGL_DIR),--env LD_LIBRARY_PATH=/opt/nvegl:/.singularity.d/libs -B $(NVIDIA_EGL_DIR):/opt/nvegl -B $(NVIDIA_EGL_DIR)/10_nvidia.json:/usr/share/glvnd/egl_vendor.d/10_nvidia.json,)
 SING_PREFIX    = SINGULARITYENV_CUDA_VISIBLE_DEVICES=$(CONTAINER_CUDA)
 else ifeq ($(RENDER),mesa)
@@ -122,7 +123,8 @@ else ifeq ($(RENDER),mesa)
 # devices), or image pools and image evaluations fail with "Cannot initialize a EGL device display" (2026-10-29). Docker
 # hosts leave egl_device_id unset: Mesa inside the container finds its software device itself.
 EGL_DEVICE_ID ?= $(call cluster_value,egl_device_id)
-SING_RENDER    = $(if $(EGL_DEVICE_ID),--env MUJOCO_EGL_DEVICE_ID=$(EGL_DEVICE_ID),)
+SING_RENDER    = --env TMG_RENDER=mesa $(if $(EGL_DEVICE_ID),--env MUJOCO_EGL_DEVICE_ID=$(EGL_DEVICE_ID),)
+DOCKER_RENDER  = -e TMG_RENDER=mesa
 else
 $(error RENDER must be egl or mesa, got '$(RENDER)')
 endif
