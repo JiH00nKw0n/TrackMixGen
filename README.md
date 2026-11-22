@@ -263,8 +263,10 @@ This runs the unit tests without a simulator. `make test` runs them inside the i
 
 The SkillMix training datasets of the MimicGen tasks (1,000 demonstrations per task) are published on the Hugging Face
 Hub (`Mayfull/Mimicgen-skillmix`, dataset repository, one `<task>.hdf5` per task). `GENERATION=hub`
-(`configs/experiment/generation/hub.yaml`) uses them: no sources and no pool are needed. `make dataset` downloads the file
-into the usual dataset path when it is missing; train, validate and evaluate with the same values:
+(`configs/experiment/generation/hub.yaml`) uses them: no sources and no pool are needed (`make generate` refuses it).
+`make dataset` downloads the file into the usual dataset path when it is missing; train, validate and evaluate with the
+same values. The values must be the ones below (`hub.made_with` in the config), since they name the dataset and run folders;
+`make dataset` refuses any other scene, selection, method or observation instead of filing the download under it:
 
 ```bash
 C="TASK=square SCENE=ours SELECTION=ours METHOD=skillmix GENERATION=hub OBSERVATION=image"

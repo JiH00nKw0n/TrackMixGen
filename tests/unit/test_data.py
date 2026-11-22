@@ -266,8 +266,9 @@ def test_hub_generation_downloads_the_published_dataset_instead_of_reading_a_poo
     monkeypatch.setenv("TMG_DATA_ROOT", str(tmp_path))
     plain = resolved(compose("dataset", ["task=square", "scene=ours", "selection=ours", "method=skillmix", "generation=hub",
                                          "size=2"]))
-    assert plain["generation"]["hub"] == {"repo_id": "Mayfull/Mimicgen-skillmix", "repo_type": "dataset",
-                                          "filename": "square.hdf5", "revision": None}
+    hub = plain["generation"]["hub"]
+    assert {k: hub[k] for k in ("repo_id", "repo_type", "filename", "revision")} == {
+        "repo_id": "Mayfull/Mimicgen-skillmix", "repo_type": "dataset", "filename": "square.hdf5", "revision": None}
     assert plain["output"].endswith("/datasets/mimicgen/square/ours/ours/skillmix/hub/image/n2_seed0.hdf5")
     published = tmp_path / "hub" / "square.hdf5"
     published.parent.mkdir()
@@ -289,3 +290,17 @@ def test_hub_generation_downloads_the_published_dataset_instead_of_reading_a_poo
     assert any(p.name.endswith("DATASET.json") for p in out.parent.iterdir())
     with pytest.raises(ds.DatasetError, match="size=2"):
         ds.fetch_hub_dataset({**plain, "size": 1000}, out, download=download)
+    # the download is filed under the names of the command: only the ones the files were made with are accepted
+    baseline = resolved(compose("dataset", ["task=square", "scene=ours", "selection=ours", "method=none", "generation=hub"]))
+    with pytest.raises(ds.DatasetError, match="'method': 'none'"):
+        ds.fetch_hub_dataset(baseline, tmp_path / "none.hdf5", download=download)
+    assert len(calls) == 2 and not (tmp_path / "none.hdf5").exists()            # refused before downloading
+
+
+def test_hub_generation_has_no_pool_to_generate(tmp_path, monkeypatch):
+    from tmg.config import compose
+    from tmg.generation import runner
+
+    monkeypatch.setenv("TMG_DATA_ROOT", str(tmp_path))
+    with pytest.raises(runner.PoolError, match="no pool to generate"):
+        runner.run_pool(compose("generate", ["task=square", "scene=ours", "selection=ours", "method=none", "generation=hub"]))

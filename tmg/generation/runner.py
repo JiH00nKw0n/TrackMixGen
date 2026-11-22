@@ -246,10 +246,13 @@ def run_pool(cfg) -> dict:
             ``generation.on_config_change=rebuild``), or failed chunks.
     """
     plain = resolved(cfg)
+    generation = dict(plain["generation"])
+    if generation.get("hub"):
+        raise PoolError(f"generation={generation.get('name')} names a published dataset ({generation['hub'].get('repo_id')}): "
+                        f"there is no pool to generate, `tmg dataset` downloads it")
     generator = make_generator(plain)
     output = Path(str(plain["output"])).expanduser()
     cluster = dict(plain["cluster"])
-    generation = dict(plain["generation"])
     chunks = plan_chunks(int(generation["attempts"]), int(generation["chunk"]), int(generation["seed_offset"]))
     # generation.shard [i, n]: this runner runs the chunks whose index is i modulo n, so n runners (e.g. one container per
     # GPU) share one pool; the runner that finds every chunk done writes DONE.json

@@ -38,6 +38,7 @@ images and states; actions and records stay those of the chunk). The sidecar
 from __future__ import annotations
 
 import json
+import shutil
 from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import TypedDict
@@ -363,11 +364,15 @@ def fetch_hub_dataset(plain: dict, output: Path, download=None) -> dict:
 
     Downloads ``hub.filename`` of the Hugging Face repository ``hub.repo_id`` (``hub.repo_type``, ``hub.revision``) with
     ``huggingface_hub.hf_hub_download`` (cache under ``HF_HOME``), checks that it holds ``size`` demonstrations and copies
-    it to ``output``. ``download`` replaces ``hf_hub_download`` in tests. Returns the sidecar summary.
+    it to ``output``. The file is filed under the generator, scene, selection, method and observation of the command, so
+    those must be the ones the published files were made with (``hub.made_with``). ``download`` replaces
+    ``hf_hub_download`` in tests. Returns the sidecar summary.
     """
-    import shutil
-
     hub = dict(plain["generation"]["hub"])
+    wrong = {k: plain[k]["name"] for k, v in (hub.get("made_with") or {}).items() if plain[k]["name"] != v}
+    if wrong:
+        raise DatasetError(f"{hub['repo_id']} was made with {dict(hub['made_with'])}; this command asks for {wrong} and "
+                           f"would file the download under those names")
     if download is None:
         from huggingface_hub import hf_hub_download as download
     repo_id, filename = str(hub["repo_id"]), str(hub["filename"])
@@ -379,11 +384,11 @@ def fetch_hub_dataset(plain: dict, output: Path, download=None) -> dict:
         raise DatasetError(f"{repo_id}/{filename} holds {demos} demonstrations, the dataset path asks for size="
                            f"{plain['size']}; pass size={demos}")
     output.parent.mkdir(parents=True, exist_ok=True)
-    part = output.with_suffix(output.suffix + ".part")
+    part = part_file(output)
     shutil.copyfile(local, part)
     part.replace(output)
-    summary = {"path": str(output), "demos": demos, "hub": {"repo_id": repo_id, "filename": filename,
-                                                            "repo_type": hub.get("repo_type"), "revision": hub.get("revision")},
+    summary = {"path": str(output), "demos": demos,
+               "hub": {"repo_id": repo_id, "filename": filename, "repo_type": hub.get("repo_type"), "revision": hub.get("revision")},
                "task": plain["task"]["name"], "generator": plain["generator"]["name"], "scene": plain["scene"]["name"],
                "method": plain["method"]["name"], "generation": plain["generation"]["name"],
                "observation": plain["observation"]["name"]}
