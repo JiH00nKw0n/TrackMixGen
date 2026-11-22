@@ -212,3 +212,29 @@ def test_evaluate_with_an_error_writes_nothing_and_a_rerun_plays_the_failed_scen
     assert summary["all"]["n"] == 3 and summary["all"]["errors"] == 0 and summary["all"]["n_success"] == 2
     val_rows = [json.loads(line) for line in (tmp_path / "runs/r/validation.jsonl").read_text().splitlines()]
     assert len(val_rows) == 1 and val_rows[0]["n_success"] == 2
+
+
+def test_policy_client_turns_keepalive_off_only_where_connect_takes_the_argument(monkeypatch):
+    """websockets 14+ sync connect takes ping_interval; websockets 13 (robosuite image) does not and raised TypeError."""
+    import types
+
+    from tmg.evaluation import client
+
+    def new_connect(uri, *, max_size=None, open_timeout=10, ping_interval=20, **kwargs):
+        calls.append(("new", ping_interval, kwargs))
+        return types.SimpleNamespace(close=lambda: None)
+
+    def old_connect(uri, *, max_size=None, open_timeout=10, **kwargs):   # websockets 13.1: extra kwargs go to the socket
+        if kwargs:
+            raise TypeError(f"unexpected {sorted(kwargs)}")
+        calls.append(("old", None, kwargs))
+        return types.SimpleNamespace(close=lambda: None)
+
+    sync_client = pytest.importorskip("websockets.sync.client")
+    for fake, kind in ((new_connect, "new"), (old_connect, "old")):
+        calls = []
+        monkeypatch.setattr(sync_client, "connect", fake)
+        with client.PolicyClient("ws://127.0.0.1:1"):
+            pass
+        assert calls == [(kind, None, {})]
+    assert client.keepalive_off(new_connect) == {"ping_interval": None} and client.keepalive_off(old_connect) == {}

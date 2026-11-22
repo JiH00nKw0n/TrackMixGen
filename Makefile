@@ -69,7 +69,10 @@ DOCKER_VOL_EXTRA = $(foreach p,$(CPGEN_WRITABLE),-v $(call host_dir,$(p)):$(call
 ifeq ($(RUNTIME),singularity)
 writable_fill = singularity exec $(SIF) cp -r $(call img_dir,$(1))/. $(call host_dir,$(1))/
 else
-writable_fill = docker run --rm -v $(call host_dir,$(1)):/out --entrypoint cp tmg/$(IMAGE):$(TAG) -r $(call img_dir,$(1))/. /out/
+# --user: the copy belongs to the calling user like everything else under DATA_ROOT; without it the docker copy was
+# root-owned, CP-Gen could not write its scaled mug xml there (PermissionError) and every validation of the CP-Gen Mug
+# Cleanup policies failed (Isaac, 2026-11-22)
+writable_fill = docker run --rm --user $(shell id -u):$(shell id -g) -v $(call host_dir,$(1)):/out --entrypoint cp tmg/$(IMAGE):$(TAG) -r $(call img_dir,$(1))/. /out/
 endif
 PREP_EXTRA = $(foreach p,$(CPGEN_WRITABLE),&& { test -n "$$(ls -A $(call host_dir,$(p)) 2>/dev/null)" || { mkdir -p $(call host_dir,$(p)) && $(call writable_fill,$(p)); }; })
 endif

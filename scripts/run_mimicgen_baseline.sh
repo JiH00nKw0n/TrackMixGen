@@ -18,13 +18,15 @@
 #   chosen at random for every subtask), METHOD (none: the baseline; a method config such as mixup_only runs the same pipeline
 #   with that method, writes under <...>/<selection>/<method>/ and logs to logs/<generator>_<method>; the evaluation scenes are
 #   shared with the baseline; `make generate` first builds the task's coefficient file if the method needs a missing one),
-#   ONLY_GENERATION (1: stop after the datasets), BUNDLE_NAME,
+#   ONLY_GENERATION (1: stop after the datasets), BUNDLE_NAME, PORT_BASE (8800: first policy-server port; run k uses
+#   PORT_BASE + 40 k ... + 40 k + 39, so two drivers on one machine need bases at least 40 x their runs apart),
 #   MINI (1: an end-to-end check at toy scale: a 200-attempt pool in the folder pilot50, 10-demonstration datasets, 200 training
 #   updates, 6 evaluation scenes per split; same code path as the real run).
 set -uo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 CLUSTER=${CLUSTER:-local}; GPU=${GPU:-0}
 GENERATOR=${GENERATOR:-mimicgen}
+PORT_BASE=${PORT_BASE:-8800}   # first policy-server port; a second driver on the same machine needs its own range
 if [ "$GENERATOR" = cpgen ]; then DEFAULT_TASKS="three_piece_assembly hammer_cleanup mug_cleanup threading coffee"; IMAGE=cpgen
 else DEFAULT_TASKS="three_piece_assembly square stack_three mug_cleanup hammer_cleanup threading coffee"; IMAGE=robosuite; fi
 TASKS=${TASKS:-$DEFAULT_TASKS}   # longest pools first
@@ -114,7 +116,7 @@ generation_lane() {
 }
 
 policy_lane() {   # task x policy x seed, POLICY_PARALLEL pipelines at a time; a pipeline starts when its task's dataset exists
-  local port=8800
+  local port=$PORT_BASE
   for t in $TASKS; do
     until [ -f "$(dataset_of $t)" ] && [ -f "$(resets_of $t)" ]; do
       grep -q "pool $t\|dataset $t\|sources $t\|resets $t" "$LOG/FAILURES" 2>/dev/null && { log "[$t] generation failed, policies skipped"; continue 2; }
