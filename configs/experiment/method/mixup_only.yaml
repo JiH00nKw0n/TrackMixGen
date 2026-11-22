@@ -1,6 +1,11 @@
-defaults:
-  - trackmix
-  - _self_
+# Logistic source mixing, executed actions as labels.
 name: mixup_only
-tracking: {enabled: false}
+mixing:
+  enabled: true
+  type: logistic                    # tmg/generation/method/logistic_mix.py: per subtask, predict every source's success in the
+                                    # current scene and blend the sources at or above the mean prediction, weighted by it
+  coefficients: ${generator.name}/${task.name}   # configs/experiment/generator/<gen>/coefficients/<task>.yaml (tmg fit_coefficients);
+                                    # `make generate` builds it from scratch when missing (scripts/ensure_coefficients.sh)
+  symmetries: ${oc.select:task.mixing_symmetries,null}   # object symmetries the mixer may align sources with before blending
+                                    # (logistic_mix.py step 4; the parallel-gripper 180 deg flip needs no entry)
 labels: executed

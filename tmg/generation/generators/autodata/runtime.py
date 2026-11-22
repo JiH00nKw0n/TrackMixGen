@@ -29,16 +29,6 @@ the segment start, target poses, the hand's passthrough commands) and the refere
 the Isaac Lab runtime does; the mixed segment replaces the selected source's before AutoData transforms it to the current
 object pose. Non-eef passthrough channels (a base command) of the selected source are kept when their length matches.
 
-Tracking (``method.tracking.enabled``): ``make_tracking_generate`` replaces ``DataGenerator.generate`` with the shared-path
-loop of the Isaac Lab runtime (``isaaclab.tracking_loop.TrackingLoop``: one ``ErrorAdaptiveFollower`` per source-time
-interval over both hands, errors measured on the configured links, official noise draws kept per base waypoint by a
-``NoiseLedger``), with ``AutoDataTrackingLoop`` filling the hooks: AutoData's ``generate_eef_subtask_trajectory`` /
-``merge_eef_subtask_trajectory`` / ``MultiWaypoint.execute``, waypoints whose hand command is the eef's entry of the
-``passthrough_action`` dict, and AutoData's recorder lifecycle (``recorder_manager.set_success_to_episodes`` and
-``export_episodes``). It needs one shared source demonstration per attempt (``generation_policy.select_src_per_subtask`` and
-``select_src_per_arm`` false) and a task without coordination constraints or navigation; otherwise it raises
-``NotImplementedError`` before the first attempt.
-
 Images: Isaac Lab's recorder stores the ``policy`` observation group only, and the tasks keep their cameras in a
 ``camera_obs`` group (Arena's head camera; our Pick Place camera environment), so the generated hdf5 has no images. The
 runtime therefore reads the camera frames itself from ``env.obs_buf`` right before each step (the observation the policy
@@ -47,28 +37,21 @@ will see), resizes them to the task's image size and, for a successful attempt, 
 """
 from __future__ import annotations
 
-import copy
 import functools
 import importlib
 import inspect
-from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
 
 from tmg.core.records import IMAGES_FORMAT, record_file
 from tmg.generation.generators.isaaclab.runtime import (
-    Attempt,
-    Interval,
     IsaacLabLayout,
     IsaacLabRuntime,
-    TrackingLoop,
     _np,
-    cut_interval,
     graft_builder,
 )
 from tmg.generation.graft import Graft
-from tmg.generation.seeds import private_noise_seed
 from tmg.generation.simulators.isaaclab import measured_eef_poses
 
 
@@ -210,8 +193,7 @@ def install(runtime: AutoDataRuntime, graft_hashes: dict) -> dict:
 
 
 def install_from_spec(spec: dict, namespace: dict | None = None) -> dict:
-    """Entry used by the chunk entrypoint: build the runtime from the chunk spec, install the grafts (and the tracking loop
-    when the method tracks), and wrap the script's ``setup_async_generation`` so the success term is instantiated with the
+    """Entry used by the chunk entrypoint: build the runtime from the chunk spec, install the grafts, and wrap the script's ``setup_async_generation`` so the success term is instantiated with the
     environment before generation starts."""
     from tmg.generation.method import build_method
 
@@ -235,114 +217,4 @@ def install_from_spec(spec: dict, namespace: dict | None = None) -> dict:
                               cameras=spec["extra"]["cameras"] if "cameras" in spec["extra"] else (spec["task"].get("cameras") or []),
                               image_size=spec["extra"].get("image_size") or spec["task"].get("image_size"))
     info = install(runtime, dict(spec["extra"].get("graft_hashes") or {}))
-    if method.follower_factory is not None:
-        dg = importlib.import_module("autodata_core.data_generator")
-        dg.DataGenerator.generate = make_tracking_generate(runtime, method.follower_factory,
-                                                           private_seed=private_noise_seed(chunk_seed))
-        info["tracking"] = "shared-path generate installed"
     return info
-
-
-# tracking: shared-path loop on AutoData's classes --------------------------------------------------
-def check_tracking_supported(datastream) -> None:
-    """The shared-path loop needs one source per attempt and no coordination constraints or navigation (module docstring)."""
-    policy = datastream.get_generation_policy()
-    if getattr(policy, "select_src_per_subtask", False) or getattr(policy, "select_src_per_arm", False):
-        raise NotImplementedError("tracking generate needs one shared source demonstration per attempt: the task descriptor's "
-                                  "generation_policy must have select_src_per_subtask and select_src_per_arm false")
-    if datastream.get_task_constraints():
-        raise NotImplementedError("tracking generate does not apply the descriptor's coordination constraints")
-    if getattr(policy, "use_navigation_controller", False):
-        raise NotImplementedError("tracking generate does not drive a navigation controller")
-
-
-class AutoDataTrackingLoop(TrackingLoop):
-    """``TrackingLoop`` hooks for ``autodata_core``: the datastream resets and measures, a waypoint's hand command is its
-    ``passthrough_action[eef]`` tensor (other channels are copied along), ``MultiWaypoint.execute`` returns the step's
-    success and the attempt ends in a ``GenerationResult``."""
-
-    def __init__(self, runtime: AutoDataRuntime, follower_factory: Callable, private_seed: int):
-        super().__init__(runtime, follower_factory, private_seed)
-        dg = importlib.import_module("autodata_core.data_generator")
-        wp = importlib.import_module("autodata_core.waypoint")
-        self.GenerationResult, self._optional_lock = dg.GenerationResult, dg._optional_lock
-        self.Waypoint, self.MultiWaypoint = wp.Waypoint, wp.MultiWaypoint
-
-    async def begin(self, generator, env_id: int, success_term, env_reset_queue, env_action_queue) -> Attempt:
-        ds = generator.datastream
-        check_tracking_supported(ds)
-        eefs = sorted(ds.get_eef_names())
-        env_ids, initial_state = await generator._reset_environment_for_generation(env_id=env_id, env_reset_queue=env_reset_queue)
-        self.runtime.begin_attempt(generator, env_id, success_term)
-        return Attempt(generator, env_id, success_term, env_action_queue, eefs, initial_state, env_ids)
-
-    def lock(self, attempt: Attempt):
-        return self._optional_lock(attempt.generator.src_demo_datagen_info_pool.asyncio_lock)
-
-    def build(self, attempt: Attempt, eef: str, subtask_ind: int, boundaries: dict, selected: dict, previous) -> list:
-        generator = attempt.generator
-        traj = generator.generate_eef_subtask_trajectory(attempt.env_id, eef, subtask_ind, boundaries, {}, selected)
-        return generator.merge_eef_subtask_trajectory(attempt.env_id, eef, subtask_ind, previous, traj)
-
-    def subtask_steps(self, attempt: Attempt, eef: str) -> list[tuple[int, int]]:
-        return [(int(c.num_interpolation_steps), int(c.num_fixed_steps)) for c in attempt.generator.datastream.get_subtasks(eef)]
-
-    def num_subtasks(self, attempt: Attempt, eef: str) -> int:
-        return attempt.generator.datastream.num_subtasks(eef)
-
-    def waypoint_classes(self, attempt: Attempt) -> tuple:
-        return self.Waypoint, self.MultiWaypoint
-
-    def waypoint_gripper(self, waypoint, eef: str) -> np.ndarray:
-        return _np(waypoint.passthrough_action[eef])
-
-    def clone_hand(self, waypoint):
-        return copy.deepcopy(waypoint.passthrough_action)
-
-    def hand_command(self, base, eef: str, gripper: np.ndarray, device):
-        import torch
-
-        channels = dict(base.passthrough_action)
-        channels[eef] = torch.as_tensor(gripper, device=device, dtype=base.passthrough_action[eef].dtype)
-        return channels
-
-    async def execute(self, attempt: Attempt, multi_waypoint) -> bool:
-        return await multi_waypoint.execute(datastream=attempt.generator.datastream, success_term=attempt.success_term,
-                                            env_id=attempt.env_id, env_action_queue=attempt.env_action_queue)
-
-    def export(self, attempt: Attempt, success: bool, export_demo: bool) -> dict:
-        import torch
-
-        ds = attempt.generator.datastream
-        env = ds.get_env()
-        verdict = torch.tensor([[success]], dtype=torch.bool, device=ds.device)
-        env.recorder_manager.set_success_to_episodes(attempt.env_ids, verdict)
-        if export_demo:
-            env.recorder_manager.export_episodes(attempt.env_ids)
-        return {"success": success}
-
-    def result(self, attempt: Attempt, results: dict):
-        return self.GenerationResult(initial_state=attempt.initial_state, success=results["success"])
-
-
-def make_tracking_generate(runtime: AutoDataRuntime, follower_factory: Callable, private_seed: int):
-    """Build the replacement ``DataGenerator.generate`` (AutoData's signature) that drives paired trajectories with one
-    follower."""
-    loop = AutoDataTrackingLoop(runtime, follower_factory, private_seed)
-
-    async def generate(self, env_id, success_term, *, env_reset_queue, env_action_queue, pause_subtask=False, export_demo=True):
-        if pause_subtask:
-            raise NotImplementedError("tracking generate does not support pause_subtask")
-        attempt = await loop.begin(self, env_id, success_term, env_reset_queue, env_action_queue)
-        return await loop.run(attempt, export_demo)
-
-    return generate
-
-
-def _clone_passthrough(waypoint):
-    return copy.deepcopy(waypoint.passthrough_action)
-
-
-def _cut_interval(active: dict, eefs: list[str], start: int, Waypoint, previous_last: dict) -> Interval:
-    """``tracking_loop.cut_interval`` for AutoData waypoints (hand command: the ``passthrough_action`` dict)."""
-    return cut_interval(active, eefs, start, Waypoint, previous_last, _clone_passthrough)

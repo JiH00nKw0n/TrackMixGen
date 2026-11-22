@@ -1,4 +1,7 @@
-# The generator as released: no mixing, no path following, executed actions as labels.
+# The generator as released: no mixing, executed actions as labels.
+# `tracking: {enabled: false}` stays although path following was removed (2026-11-22): it is part of the method identity
+# of every finished `none` chunk (tmg.generation.base.ChunkSpec.identity), so dropping it would make every existing
+# baseline pool look changed and refuse to be resumed or extended.
 name: none
 mixing: {enabled: false}
 tracking: {enabled: false}

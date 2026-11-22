@@ -29,16 +29,12 @@ def test_plus_override_is_refused():
 
 def test_method_variants_compose(monkeypatch, tmp_path):
     monkeypatch.setenv("TMG_DATA_ROOT", str(tmp_path))
-    for name, mixing, tracking in [("trackmix", True, True), ("mixup_only", True, False), ("tracking_only", False, True)]:
-        plain = resolved(compose("generate", ["task=square", f"method={name}"]))
-        assert plain["method"]["name"] == name
-        assert plain["method"]["mixing"]["enabled"] is mixing
-        assert plain["method"]["tracking"]["enabled"] is tracking
-        assert plain["method"]["mixing"]["type"] == "logistic" and plain["method"]["mixing"]["coefficients"] == "mimicgen/square"
-    for k in (1, 3, 5):
-        plain = resolved(compose("generate", ["task=square", f"method=rank_top{k}"]))
-        assert plain["method"]["sources"] == {"type": "rank_based", "top_k": k, "ranking": "mimicgen/square"}
-        assert plain["method"]["mixing"]["enabled"] is False and plain["method"]["tracking"]["enabled"] is False
+    plain = resolved(compose("generate", ["task=square", "method=mixup_only"]))
+    assert plain["method"]["name"] == "mixup_only" and plain["method"]["mixing"]["enabled"] is True
+    assert plain["method"]["mixing"]["type"] == "logistic" and plain["method"]["mixing"]["coefficients"] == "mimicgen/square"
+    assert "tracking" not in plain["method"] and "sources" not in plain["method"]
+    plain = resolved(compose("generate", ["task=square", "method=none"]))
+    assert plain["method"] == {"name": "none", "mixing": {"enabled": False}, "tracking": {"enabled": False}}   # identity kept
 
 
 def test_check_scene_composes_for_every_mimicgen_task(tmp_path):
@@ -99,5 +95,5 @@ def test_selection_rule_is_independent_of_the_pool_config(monkeypatch, tmp_path)
         assert official["output"].endswith(f"/square/ours/official/none/{name}") and ours["output"].endswith(f"/square/ours/ours/none/{name}")
     ds = resolved(compose("dataset", ["generator=mimicgen", "task=square", "scene=ours", "selection=ours", "generation=pool_robosuite_lowdim", "observation=low_dim"]))
     assert "/square/ours/ours/none/pool_robosuite_lowdim" in ds["pool"] and "/square/ours/ours/none/pool_robosuite_lowdim/low_dim/" in ds["output"]
-    rank = resolved(compose("rank_sources", ["generator=mimicgen", "task=square", "scene=ours", "selection=ours"]))
-    assert rank["pool"].endswith("/square/ours/ours/none/rank_human_demos")
+    fit = resolved(compose("fit_coefficients", ["generator=mimicgen", "task=square", "scene=ours", "selection=ours"]))
+    assert fit["pool"].endswith("/square/ours/ours/none/rank_human_demos")

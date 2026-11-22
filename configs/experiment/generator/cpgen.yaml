@@ -29,13 +29,8 @@ action_rotation: rotation_6d
 noisy_state_replay: {enabled: true, num_retries: 6, action_noise_std: 0.03, num_processes: 12, render_processes: 12,
                      done_mode: 2, compress: true}
 # CP-Gen re-solves constraints instead of replaying source segments, so source mixing blends the solved end-effector
-# poses of the retained sources (tmg/generation/generators/cpgen/mixing.py, logistic mixer only, selection=ours).
-# Its saved actions are already noise-free, so labels are pre_noise for every method. trackmix keeps mixing off here.
+# poses of the retained sources (tmg/generation/generators/cpgen/mixing.py, selection=ours).
+# Its saved actions are already noise-free, so labels are pre_noise for every method.
 method_overrides:
   none: {labels: pre_noise}
-  tracking_only: {labels: pre_noise}
   mixup_only: {labels: pre_noise}
-  rank_top1: {labels: pre_noise}
-  rank_top3: {labels: pre_noise}
-  rank_top5: {labels: pre_noise}
-  trackmix: {mixing: {enabled: false}, labels: pre_noise}

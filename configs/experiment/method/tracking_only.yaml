@@ -1,5 +1,0 @@
-defaults:
-  - trackmix
-  - _self_
-name: tracking_only
-mixing: {enabled: false}

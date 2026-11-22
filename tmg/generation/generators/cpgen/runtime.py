@@ -22,13 +22,8 @@ Anchors in ``generate_demo`` (by the name the official statement assigns):
 
 ``get_action`` calls the official ``CPPolicy.get_action`` and, each time the policy has just planned a segment
 (``new_constraint``), records the segment (bridge = motion-plan steps, skill = constraint steps) and the source
-index. With tracking on, the planned actions become one ``EndEffectorPath`` (absolute poses from the action's
-position and axis-angle, gripper from its last element) and the error-adaptive follower returns the next
-target from the measured end-effector pose of the observation; the policy's queue is kept in step with the
-follower's base index so the official noise rule (``in_constraint_segment``) still reads the right segment,
-and when the path is finished the queue is emptied and ``check_constraint`` set, exactly the state the
-official pop leaves behind. ``method.labels`` is fixed to ``pre_noise`` because the official output already is; the
-executed (noisy) actions are kept in our records.
+index. ``method.labels`` is fixed to ``pre_noise`` because the official output already is; the executed (noisy) actions
+are kept in our records.
 
 Source mixing (the logistic mixer, ``mixing.type: logistic``, selection ours): CP-Gen re-solves constraints instead of
 replaying segments, so the blended quantity is the desired end-effector pose of every solved step, after every retained
@@ -39,9 +34,6 @@ source is solved for the current scene (``tmg.generation.generators.cpgen.mixing
 |-----------------------------------------------------------------|---------------------------------------------------|
 | after ``X_obj0_transf, X_obj1_transf, X_eef_transf = find_best_transform(...)`` | ``_tmg.prepare_mix(self, constraint, obs, X_obj0_transf, X_obj1_transf, X_eef_transf)`` |
 | ``X_W_eef_des = compute_X_W_eef_des(...)`` in the step loop     | becomes ``X_W_eef_des = _tmg.mixed_eef_des(t_idx, compute_X_W_eef_des(...))`` |
-
-A source rule (``method.sources``, ``RankBasedSampling``: top-K of the ranking file) replaces the per-attempt source draw
-(subtask 0's order, one source per attempt); the chunk's own draw is still taken so the streams stay aligned.
 
 Source selection (``selection.all_sources``, ``extra["all_sources"]`` of the chunk spec): CP-Gen picks the constraint
 sequence (source demonstration) only in its reset-near-constraint mode and otherwise always uses sequence 0, so with
@@ -67,7 +59,6 @@ from tmg.generation.generators._shared import record_error_guard
 from tmg.generation.generators.cpgen import mixing
 from tmg.generation.graft import Graft, Installed, install_grafts
 from tmg.generation.method.interfaces import Method
-from tmg.generation.method.tracking import EndEffectorPath
 from tmg.generation.seeds import source_pick_rng
 from tmg.generation.simulators.robosuite import SCENE_META_ATTR
 
@@ -83,13 +74,6 @@ def action_to_pose(action) -> np.ndarray:
     pose[:3, 3] = a[:3]
     pose[:3, :3] = Rotation.from_rotvec(a[3:6]).as_matrix()
     return pose
-
-
-def pose_to_action(pose, gripper) -> np.ndarray:
-    """Absolute CP-Gen action from a 4x4 pose and a gripper command."""
-    pose = np.asarray(pose, dtype=float)
-    return np.concatenate([pose[:3, 3], Rotation.from_matrix(pose[:3, :3]).as_rotvec(),
-                           np.asarray(gripper, dtype=float).reshape(-1)])
 
 
 def pose_from_obs(obs: dict) -> np.ndarray:
@@ -118,23 +102,16 @@ class SourcePicker:
     wrapped on the policy instance; CP-Gen's own code is not changed).
     """
 
-    def __init__(self, all_sources: bool, chunk_seed: int, rule=None, per_subtask: bool = False):
+    def __init__(self, all_sources: bool, chunk_seed: int, per_subtask: bool = False):
         self.all_sources = bool(all_sources)
         self.per_subtask = bool(per_subtask) and self.all_sources
         self._rng = source_pick_rng(chunk_seed)
-        self.rule = rule
-        if rule is not None and not self.all_sources:
-            raise ValueError("a source rule (method.sources) needs every source loaded: use selection=ours")
 
     def _draw(self, policy, subtask_ind: int) -> int:
-        """A source for constraint ``subtask_ind``: the method's rule when it has one, otherwise uniform over the
-        sequences that have that constraint (the private stream is drawn either way so the streams stay aligned)."""
+        """A source for constraint ``subtask_ind``: uniform over the sequences that have that constraint."""
         sequences = policy.constraint_sequences
         allowed = [j for j, seq in enumerate(sequences) if subtask_ind == 0 or len(seq) > subtask_ind]
-        index = allowed[int(self._rng.integers(len(allowed)))]
-        if self.rule is not None:
-            index = int(self.rule.pick(subtask_ind))
-        return index
+        return allowed[int(self._rng.integers(len(allowed)))]
 
     def _wrap_advance(self, policy) -> None:
         """Make ``policy.advance_constraint`` draw the next constraint's source (installed once per policy)."""
@@ -174,7 +151,7 @@ class CPGenRuntime:
         self._mix_plan = None                              # MultiMixPlan of the constraint being solved (mixing only)
         self._last_mix: dict | None = None                 # mix record of that constraint, written with its subtask
         self.official = None                               # demo_aug.generate (tests put a stand-in here)
-        self.picker = SourcePicker(all_sources, chunk_seed, rule=getattr(method, "sources", None), per_subtask=per_subtask)
+        self.picker = SourcePicker(all_sources, chunk_seed, per_subtask=per_subtask)
         self.rec = AttemptRecorder()
         self.rec.configure(records_dir)
         self.records_dir = records_dir
@@ -187,16 +164,12 @@ class CPGenRuntime:
         return self.picker.all_sources
 
     def _reset_attempt_state(self) -> None:
-        self.follower = None
-        self._path: list[np.ndarray] = []
         self._segments = SegmentTable()                   # record segments of the current planned path (bridge, skill)
-        self._pos = 0                                    # executed steps of the current path (identity mode)
+        self._pos = 0                                    # executed steps of the current path
         self._subtasks = 0
         self._sources: list[int] = []                      # source demonstration of every recorded subtask
-        self._gripper_states: dict = {}
         self._measured_before: np.ndarray | None = None
         self._target: np.ndarray | None = None
-        self._track: dict | None = None
         self._labels: list[np.ndarray] = []
         self._executed: list[np.ndarray] = []
         self._prev_ref: str | None = None                  # reference object of the previous constraint (in-hand feature)
@@ -234,20 +207,11 @@ class CPGenRuntime:
         """Replaces ``self.policy.get_action(obs)`` (see the module docstring)."""
         policy = generator.policy
         self._measured_before = pose_from_obs(obs)
-        self._track = None
-        if self.follower is not None:
-            if not self.follower.finished():
-                return self._follower_action(policy)
-            self.follower = None
-            policy.action_queue = []
-            policy.check_constraint = True
         result = policy.get_action(obs)
         if result.get("action") is None:
             return result
         if getattr(policy, "new_constraint", False):
             self._begin_segment(policy, first_action=np.asarray(result["action"], dtype=float), obs=obs)
-            if self.follower is not None:
-                return self._follower_action(policy)
         self._target = action_to_pose(result["action"])
         return result
 
@@ -279,7 +243,7 @@ class CPGenRuntime:
         return out
 
     def _begin_segment(self, policy, *, first_action: np.ndarray, obs: dict | None = None) -> None:
-        """A segment was just planned: record it and, with tracking, start the follower on its path."""
+        """A segment was just planned: record it and open its bridge and skill record segments."""
         path = [first_action] + [np.asarray(a, dtype=float) for a in policy.action_queue]
         n_bridge = int(policy.curr_motion_plan_steps)
         n_skill = int(policy.curr_constraint_steps)
@@ -301,27 +265,7 @@ class CPGenRuntime:
         self._segments = SegmentTable()
         self._segments.add(n_bridge, self.rec.begin_segment(SEG_BRIDGE), SEG_BRIDGE)   # bridge opened first, as before
         self._segments.add(n_skill, self.rec.begin_segment(SEG_SKILL), SEG_SKILL)
-        self._path, self._pos = path, 0
-        if self.method.follower_factory is None:
-            return
-        kinds = self._segments.kinds_per_waypoint()
-        eef = EndEffectorPath(EEF, np.stack([action_to_pose(a) for a in path]), np.stack([a[6:] for a in path]))
-        self.follower = self.method.follower_factory()
-        self.follower.start_path([eef], [None] * len(path), kinds, self._gripper_states or None)
-
-    def _follower_action(self, policy) -> dict:
-        """Next target of the follower as a CP-Gen action; keeps the policy's queue consistent with it."""
-        poses, grippers, _noise, record = self.follower.next_target({EEF: self._measured_before})
-        self._target, self._track = np.asarray(poses[EEF]), record
-        self._pos = int(record["k"])
-        policy.action_queue = [np.array(a) for a in self._path[self._pos + 1:]]
-        policy.new_constraint = False
-        policy.check_constraint = False
-        if self.follower.finished():
-            self._gripper_states.update(self.follower.final_gripper_states())
-            policy.action_queue = []
-            policy.check_constraint = True
-        return {"action": pose_to_action(self._target, grippers[EEF]), "failure_type": None}
+        self._pos = 0
 
     # source mixing (grafted into CPPolicy.solve_constraint) ----------------------------------------------------------
     def prepare_mix(self, policy, constraint, obs: dict, X_obj0_transf, X_obj1_transf, X_eef_transf) -> None:
@@ -380,16 +324,11 @@ class CPGenRuntime:
         self.rec.add_step(w_poses={EEF: self._target if self._target is not None else action_to_pose(action)},
                           e_poses={EEF: self._measured_before if self._measured_before is not None else np.eye(4)},
                           a_pre=action[:6], a_label=action, a_exec=executed,
-                          noise=float(np.max(np.abs(np.asarray(magnitude, dtype=float)))), seg_id=seg_id, term_signals=None,
-                          track=self._track)
+                          noise=float(np.max(np.abs(np.asarray(magnitude, dtype=float)))), seg_id=seg_id, term_signals=None)
         self.rec.add_success(bool(np.asarray(reward).item() == 1))
         self._labels.append(action)
         self._executed.append(executed)
-        if self.follower is None:
-            self._pos += 1
-            g = action[6:]
-            if g.size and g[0] != 0:
-                self._gripper_states[EEF] = bool(g[0] > 0)
+        self._pos += 1
 
 
 def apply(method: Method, *, chunk_seed: int, records_dir: Path | None, graft_hashes: dict, all_sources: bool = False,
@@ -406,7 +345,7 @@ def apply(method: Method, *, chunk_seed: int, records_dir: Path | None, graft_ha
         edits.append((CPPolicy, "solve_constraint", build_mix_graft(CPPolicy.solve_constraint, graft_hashes.get("solve_constraint"))))
     _INSTALLED = install_grafts(edits, {"_tmg": runtime})
     return {**_INSTALLED.info, "method": method.name, "labels": "pre_noise",
-            "tracking": method.follower_factory is not None, "records_dir": None if records_dir is None else str(records_dir),
+            "records_dir": None if records_dir is None else str(records_dir),
             "all_sources": runtime.all_sources, "per_subtask_sources": runtime.picker.per_subtask,
             "mixing": method.mixer is not None}
 

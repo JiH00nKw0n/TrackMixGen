@@ -15,6 +15,6 @@ source_repo: amandlek/mimicgen_datasets      # Hugging Face dataset repo of the 
 source_root: ${oc.env:TMG_MIMICGEN_SRC,/opt/src/mimicgen}
 templates: mimicgen/exps/templates/robosuite
 # Values of configs/experiment/method/<name>.yaml that this generator needs differently (none for MimicGen).
-# Example for a dexterous-hand generator: method_overrides: {trackmix: {mixing: {max_anchor_rotation_deg: 40.0},
-#   tracking: {gripper_events: {type: closure, columns: [...]}}}}
+# Example for a dexterous-hand generator: method_overrides: {mixup_only: {mixing: {gripper_events: {type: closure,
+#   columns: [...]}}}}
 method_overrides: {}

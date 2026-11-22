@@ -1,13 +1,10 @@
-"""Logistic source mixing: the success model and its coefficient file, the above-mean weights, the mixer, and
-rank-based sampling."""
+"""Logistic source mixing: the success model and its coefficient file, the above-mean weights and the mixer."""
 import numpy as np
 import pytest
 import yaml
 
 from tmg.generation.method.interfaces import MixContext, build_method
 from tmg.generation.method.logistic_mix import LogisticMixer, above_mean_weights
-from tmg.generation.method.rank_sampling import RankBasedSampling, rank_based_sampling
-from tmg.generation.method.ranking import RankedSources, SourceRanking
 from tmg.generation.method.success_model import (
     SubtaskModel, SuccessModel, design_rows, fit_logistic, fit_subtask, in_hand, inhand_features, scene_features, sigmoid,
     subtask_outcomes)
@@ -122,23 +119,7 @@ def test_logistic_mixer_identity_without_reference_object():
     assert rec["mixed"] is False and "identity_reason" in rec
 
 
-def _ranking():
-    return SourceRanking(name="g/t", generator="g", task="t", basis="", default=None,
-                         subtasks={0: RankedSources(order=(4, 2, 0, 1, 3)), 1: RankedSources(order=(1, 0, 2, 3, 4))}, path="")
-
-
-def test_rank_based_sampling_draws_from_the_top_k():
-    s = RankBasedSampling(ranking=_ranking(), top_k=3, chunk_seed=7)
-    picks0 = {s.pick(0) for _ in range(200)}
-    picks1 = {s.pick(1) for _ in range(200)}
-    assert picks0 == {4, 2, 0} and picks1 == {1, 0, 2}
-    assert RankBasedSampling(ranking=_ranking(), top_k=1, chunk_seed=0).pick(0) == 4
-    a = [RankBasedSampling(ranking=_ranking(), top_k=5, chunk_seed=3).pick(0) for _ in range(1)]
-    b = [RankBasedSampling(ranking=_ranking(), top_k=5, chunk_seed=3).pick(0) for _ in range(1)]
-    assert a == b
-
-
-def test_build_method_reads_coefficient_and_ranking_files(tmp_path, monkeypatch):
+def test_build_method_reads_the_coefficient_file(tmp_path):
     coef = tmp_path / "coef.yaml"
     coef.write_text(yaml.safe_dump({"generator": "g", "task": "t", "num_sources": 2, "subtasks": {
         0: {"alpha": {0: 0.1, 1: -0.2}, "slopes": {"dx": -1.0, "dy": -1.0, "rotation": -0.5}},
@@ -148,11 +129,6 @@ def test_build_method_reads_coefficient_and_ranking_files(tmp_path, monkeypatch)
     assert isinstance(m.mixer, LogisticMixer) and m.mixer.model.carried == {1: "a"}
     with pytest.raises(FileNotFoundError, match="make coefficients"):
         build_method({"mixing": {"enabled": True, "type": "logistic", "coefficients": str(tmp_path / "missing.yaml")}}, chunk_seed=0)
-    import tmg.generation.method.rank_sampling as rs
-    monkeypatch.setattr(rs, "load_ranking", lambda name: _ranking())
-    m = build_method({"name": "rank_top3", "sources": {"type": "rank_based", "top_k": 3, "ranking": "g/t"}}, chunk_seed=0)
-    assert isinstance(m.sources, RankBasedSampling) and not m.is_identity
-    assert isinstance(rank_based_sampling({"ranking": "g/t", "top_k": 1}, chunk_seed=0), RankBasedSampling)
 
 
 def test_committed_mimicgen_coefficient_files_load():
@@ -237,5 +213,5 @@ def test_mimicgen_task_symmetries_name_reference_objects():
             declared[(path.stem, obj)] = len(transforms)
     assert declared == {("hammer_cleanup", "hammer"): 1, ("square", "square_peg"): 3, ("stack_three", "cubeA"): 3,
                         ("stack_three", "cubeB"): 3, ("stack_three", "cubeC"): 3}
-    method = yaml.safe_load(Path("configs/experiment/method/trackmix.yaml").read_text())
+    method = yaml.safe_load(Path("configs/experiment/method/mixup_only.yaml").read_text())
     assert method["mixing"]["symmetries"] == "${oc.select:task.mixing_symmetries,null}"

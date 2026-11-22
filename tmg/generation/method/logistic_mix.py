@@ -38,7 +38,7 @@ from tmg.core.poses import invert, transform_all
 from scipy.spatial.transform import Rotation
 
 from tmg.generation.method.event_mix import _matching_events, events, mix_many
-from tmg.generation.method.guided_mix import GuidedMixConfig, GuidedMixer
+from tmg.generation.method.grippers import SignGripper, build_detector
 from tmg.generation.method.interfaces import MixContext, MixedSegment
 from tmg.generation.method.success_model import SuccessModel, inhand_features, load_coefficients, scene_features
 
@@ -122,13 +122,20 @@ def align_to_reference(poses, eef, key: int, reference, candidates) -> tuple[np.
     return transform_all(invert(so), poses) @ se, invert(so) @ np.asarray(eef, dtype=float) @ se, record
 
 
-class LogisticMixer(GuidedMixer):
-    """The ``SegmentMixer`` of the module docstring."""
+class LogisticMixer:
+    """The ``SegmentMixer`` of the module docstring.
+
+    ``gripper_events`` is the open/closed rule of the gripper commands (``{type: sign}`` for one scalar command per step,
+    the default; ``{type: closure, columns: [...]}`` for many-joint hands such as the GR1's). Events found by this rule
+    align the segments; with the closure rule the mixed hand commands are the time-warped blend of the sources' joint
+    commands (same phase at every step).
+    """
 
     def __init__(self, *, model: SuccessModel, chunk_seed: int = 0, gripper_events: Mapping | None = None,
                  symmetries: Mapping | None = None):
-        super().__init__(ranking=None, chunk_seed=chunk_seed,
-                         config=GuidedMixConfig(weight_a=0.5, max_anchor_rotation_deg=1e9, gripper_events=gripper_events))
+        self.detector = build_detector(gripper_events)
+        self.chunk_seed = int(chunk_seed)
+        self.calls = 0
         self.model = model
         self.symmetries = {str(k): [dict(p) for p in v] for k, v in (symmetries or {}).items()}   # object -> transforms
 
@@ -141,6 +148,20 @@ class LogisticMixer(GuidedMixer):
     def describe(self) -> dict:
         return {"type": "logistic", "rule": "above_mean", "coefficients": self.model.describe(), "gripper_events": self.detector.name,
                 "symmetries": self.symmetries}
+
+    # events ------------------------------------------------------------------------------------------
+    def _scalar_commands(self, commands: np.ndarray) -> bool:
+        """True when the commands are one scalar sign command per step, the official robosuite convention, so the raw
+        column itself is the event series and the blended scalar is the mixed command."""
+        return isinstance(self.detector, SignGripper) and commands.reshape(len(commands), -1).shape[1] == 1
+
+    def _event_series(self, commands) -> np.ndarray:
+        """The commands as the scalar series the event functions read: the raw first column for the sign rule (the
+        official robosuite convention, zeros carry the state), otherwise +1 closed / -1 open from the detector."""
+        g = np.asarray(commands, dtype=float).reshape(len(commands), -1)
+        if self._scalar_commands(g):
+            return g[:, 0]
+        return np.where(self.detector.states(g), 1.0, -1.0)
 
     def predict(self, context: MixContext) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
         """``(p, scene features (J,3), in-hand features (J,2) or None)`` of every source for the context's subtask."""

@@ -6,7 +6,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
-import pytest
 import yaml
 from scipy.spatial.transform import Rotation
 
@@ -32,14 +31,14 @@ def load_fixture():
 
 def test_cpgen_chunk_spec_and_method_overrides(tmp_path, monkeypatch):
     monkeypatch.setenv("TMG_DATA_ROOT", str(tmp_path))
-    cfg = resolved(compose("generate", ["generator=cpgen", "task=coffee", "scene=ours", "method=trackmix", "generation=test/pilot20"]))
+    cfg = resolved(compose("generate", ["generator=cpgen", "task=coffee", "scene=ours", "method=mixup_only", "generation=test/pilot20"]))
     gen = make_generator(cfg)
     spec = gen.prepare_chunk(plan_chunks(20, 20, 9000)[0], tmp_path / "chunk")
     c = spec.extra["cpgen_config"]
     assert c["n_demos"] == 20 and c["require_n_demos"] is False and c["seed"] == 9001 and c["env_name"] == "Coffee_OURS"
     assert c["load_demos_start_idx"] == 0 and c["load_demos_end_idx"] == 1 and c["use_wandb"] is False
     assert c["custom_constraints_path"].endswith("cpgen/coffee/constraints.json")
-    assert spec.method["mixing"]["enabled"] is False and spec.method["tracking"]["enabled"] is True and spec.method["labels"] == "pre_noise"
+    assert spec.method["mixing"]["enabled"] is True and "tracking" not in spec.method and spec.method["labels"] == "pre_noise"
     assert spec.scene["base_env_class"] == "{env_prefix}Wide" and spec.scene["override_bounds"] is True   # CP-Gen runs in its Wide environments
     assert gen.demo_layout()["demo_glob"] == "generated_obs.hdf5" and gen.demo_layout()["labels_from_records"] is False
     assert (tmp_path / "chunk" / "cpgen_config.json").exists()
@@ -67,8 +66,7 @@ def test_cpgen_ours_scene_equals_mimicgen_ours_for_its_tasks():
 def test_pose_conversions_round_trip():
     action = np.array([0.1, -0.2, 0.9, 0.3, -0.1, 1.2, -1.0])
     pose = rt.action_to_pose(action)
-    back = rt.pose_to_action(pose, action[6:])
-    assert np.allclose(back, action, atol=1e-9)
+    assert np.allclose(pose[:3, 3], action[:3]) and np.allclose(Rotation.from_matrix(pose[:3, :3]).as_rotvec(), action[3:6])
     obs = {"robot0_eef_pos": action[:3], "robot0_eef_quat": Rotation.from_rotvec(action[3:6]).as_quat()}
     assert np.allclose(rt.pose_from_obs(obs), pose, atol=1e-9)
 
@@ -172,13 +170,3 @@ def test_grafted_generate_demo_records_the_official_run(tmp_path):
     z = np.load(tmp_path / "records" / "attempt_000000.npz")
     assert z["seg_kind"].tolist() == [SEG_BRIDGE, SEG_SKILL, SEG_BRIDGE, SEG_SKILL] and z["seg_len"].tolist() == [2, 3, 2, 3]
     assert np.allclose(z["a_label"], episode["actions"]) and np.allclose(z["a_exec"], episode["actions"])   # zero system noise
-
-
-def test_grafted_generate_demo_with_tracking_drives_the_planned_path(tmp_path):
-    tracking = {"enabled": True, "ds_min": 0.25, "regions": {"default": {"alpha_p": 12.0, "alpha_r": 1.2}},
-                "approach_window": 2, "extra_steps_cap": "segment", "gripper_events": {"type": "sign"}}
-    episode, lines, runtime = run_fixture(tmp_path, {"name": "tracking_only", "mixing": {"enabled": False}, "tracking": tracking})
-    assert lines[0]["n_steps"] == len(episode["actions"]) >= 10 and runtime.follower is None
-    z = np.load(tmp_path / "records" / "attempt_000000.npz")
-    assert (z["track_k"] >= 0).all() and z["seg_kind"].tolist() == [SEG_BRIDGE, SEG_SKILL, SEG_BRIDGE, SEG_SKILL]
-    assert episode["success"] is True and lines[0]["src_demo_inds"] == [0, 0]

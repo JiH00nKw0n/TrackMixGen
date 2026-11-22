@@ -14,13 +14,13 @@ import yaml
 
 from tmg import CONFIGS_ROOT
 
-GENERATOR_DIR = "experiment/generator"      # configs/experiment/generator/<generator>/ holds task, scene and ranking data
+GENERATOR_DIR = "experiment/generator"      # configs/experiment/generator/<generator>/ holds task, scene and coefficient data
 SCENE_DIR = "scene"
 MAX_PARENT_DEPTH = 8
 
 
 def generator_config_dir(generator: str, root: Path | None = None) -> Path:
-    """``configs/experiment/generator/<generator>``: the folder of one generator's task, scene and ranking files."""
+    """``configs/experiment/generator/<generator>``: the folder of one generator's task, scene and coefficient files."""
     return Path(root or CONFIGS_ROOT) / GENERATOR_DIR / generator
 
 
