@@ -58,8 +58,8 @@ make resets GENERATOR=mimicgen TASK=<task> SCENE=ours CLUSTER=<머신>
 md5sum <데이터 폴더>/resets/mimicgen/<task>/ours/val25_test300_seed202600.hdf5
 ```
 
-결과가 아래 체크섬과 같아야 한다. 이 값은 우리 실험이 평가에 쓴 파일의 것이다. main 코드로 새로 만들어도 같게 나오는 것을
-6과제에서 확인했고, Three Piece Assembly는 확인하고 있다(2026-11-23, A100). 장면 상태만 저장하므로 렌더러와 상관없다.
+결과가 아래 체크섬과 같아야 한다. 이 값은 우리 실험이 평가에 쓴 파일의 것이다. main 코드로 새로 만들어도 7과제 모두
+같게 나오는 것을 확인했다(2026-11-23, A100). 장면 상태만 저장하므로 렌더러와 상관없다.
 
 | 과제 | md5 (앞 8자리) |
 |---|---|
