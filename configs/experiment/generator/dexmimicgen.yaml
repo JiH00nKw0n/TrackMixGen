@@ -40,4 +40,5 @@ method_overrides:
   skillmix: &closure_events        # the mixer aligns segments by the hands' closure events (a hand's 11 commands:
     mixing: {gripper_events: {type: closure, columns: [0, 1, 2, 3]}}   # proximal index, middle, pinky, ring first)
   skillmix_sparsemax: *closure_events
+  skillmix_sample: *closure_events
   skillmix_randmix: *closure_events   # the randmix pools of the SkillMix fit (method skillmix, rule randmix)

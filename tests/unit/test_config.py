@@ -38,6 +38,9 @@ def test_method_variants_compose(monkeypatch, tmp_path):
     assert sparse["method"]["name"] == "skillmix_sparsemax" and sparse["method"]["mixing"]["rule"] == "sparsemax"
     assert {k: v for k, v in sparse["method"]["mixing"].items() if k != "rule"} == \
         {k: v for k, v in plain["method"]["mixing"].items() if k != "rule"}          # everything else from skillmix
+    sample = resolved(compose("generate", ["task=square", "method=skillmix_sample"]))
+    assert sample["method"]["name"] == "skillmix_sample" and sample["method"]["mixing"]["single_source"] == "sample"
+    assert sample["method"]["mixing"]["rule"] == "softmax" and plain["method"]["mixing"]["single_source"] == "best"
     plain = resolved(compose("generate", ["task=square", "method=none"]))
     assert plain["method"] == {"name": "none", "mixing": {"enabled": False}, "tracking": {"enabled": False}}   # identity kept
 

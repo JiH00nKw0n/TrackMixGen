@@ -22,7 +22,16 @@ writes both from the same rows):
   ``w = sparsemax(s / (2 d))``, the Euclidean projection onto the simplex: the sources whose score falls below a threshold
   set by the scores themselves get exactly 0, so a few close sources share the weight and the rest are left out.
 
-With ``d <= 0`` (spreading does not help) both rules put all the weight on the compatible source with the largest ``s_j``.
+With ``d <= 0`` (spreading does not help) both rules give one source all the weight. Which one is ``mixing.single_source``:
+
+- ``best``: the compatible source with the largest ``s_j``. When the sources' own effects ``a_j`` differ by more than the
+  scene terms move them, every scene gets the same source (CP-Gen Threading 2026-11-23: all 1,254 successes from the
+  same two sources, one per subtask);
+- ``sample``: a source drawn with probability ``softmax(s)`` over the compatible sources, i.e. proportional to
+  ``exp(s_j)``, the factor by which source j multiplies the predicted odds of task success. Better sources are drawn
+  more often and every source keeps a share. One uniform number per subtask and attempt comes from a stream of its own,
+  seeded with ``(chunk seed, SOURCE_SEED)`` (``SourceDraws``), so a pool is reproducible and a re-solved constraint keeps
+  its source.
 For a single source both spreads are 0. Nothing is set by hand: the scores, the spread effect (and with it the
 temperature) come from the fit. Sources whose gripper open/close events do not match those of the
 selected source cannot be time-aligned with it and get weight 0 (the record lists them under ``incompatible``).
@@ -74,6 +83,8 @@ from tmg.generation.simulators.scenes import generator_config_dir
 COEFFICIENTS_DIR = "coefficients"
 MIN_WEIGHT = 1e-3                        # softmax and randmix weights below it are dropped and the rest renormalized
 RANDMIX_SEED = 727272                    # second seed word of the randmix draws (the chunk seed is the first)
+SOURCE_SEED = 737373                     # second seed word of the single-source draws of mixing.single_source=sample
+SINGLE_SOURCE = ("best", "sample")       # mixing.single_source: the one source of a fitted rule when d <= 0
 RANDMIX_LOG_C = (np.log(0.05), np.log(20.0))   # c ~ LogUniform(0.05, 20) of the Dirichlet(c, ..., c) weights
 
 
@@ -214,16 +225,29 @@ def _drop_below(w: np.ndarray, minimum: float) -> np.ndarray:
     return w / w.sum()
 
 
-def fitted_weights(rule: str, scores, d: float, compatible: list[int]) -> np.ndarray:
+def single_source(scores, compatible: list[int], u: float | None = None) -> int:
+    """The one source of a fitted rule with ``d <= 0`` (module docstring): the compatible source with the largest score
+    when ``u`` is None (``best``), else the one that a uniform number ``u`` in [0, 1) picks from ``softmax(s)`` over the
+    compatible sources (``sample``, inverse of the cumulative distribution)."""
+    s = np.asarray(scores, dtype=float)
+    if u is None:
+        return max(compatible, key=lambda j: s[j])
+    z = s[compatible]
+    p = np.exp(z - z.max())
+    cumulative = np.cumsum(p / p.sum())
+    return compatible[min(int(np.searchsorted(cumulative, float(u), side="right")), len(compatible) - 1)]
+
+
+def fitted_weights(rule: str, scores, d: float, compatible: list[int], u: float | None = None) -> np.ndarray:
     """The weights of a fitted rule (module docstring): ``softmax(s / d)`` or ``sparsemax(s / (2 d))`` over
-    ``compatible`` when ``d > 0``, else the compatible source with the largest score."""
+    ``compatible`` when ``d > 0``, else one source (``single_source``; ``u`` None: the best one, else drawn)."""
     fitted = FITTED[rule]
     s = np.asarray(scores, dtype=float)
     w = np.zeros(len(s))
     if not compatible:
         raise ValueError("no compatible source")
     if d <= 0:
-        w[max(compatible, key=lambda j: s[j])] = 1.0
+        w[single_source(s, compatible, u)] = 1.0
         return w
     w[compatible] = fitted.project(s[compatible] / (fitted.scale * float(d)))
     return _drop_below(w, fitted.min_weight)
@@ -246,6 +270,23 @@ class RandmixDraws:
             gamma = self._rng.gamma(c, size=int(num_sources))
             fallback = int(self._rng.integers(int(num_sources)))
             self._drawn[int(subtask)] = (c, gamma, fallback)
+        return self._drawn[int(subtask)]
+
+
+class SourceDraws:
+    """The uniform numbers of ``mixing.single_source: sample``: one per subtask of an attempt, kept until the next
+    ``begin_attempt`` (CP-Gen may solve a constraint more than once, and keeps the drawn source)."""
+
+    def __init__(self, chunk_seed: int):
+        self._rng = np.random.default_rng(np.random.SeedSequence([int(chunk_seed), SOURCE_SEED]))
+        self._drawn: dict[int, float] = {}
+
+    def begin_attempt(self) -> None:
+        self._drawn = {}
+
+    def draw(self, subtask: int) -> float:
+        if int(subtask) not in self._drawn:
+            self._drawn[int(subtask)] = float(self._rng.random())
         return self._drawn[int(subtask)]
 
 
@@ -353,14 +394,18 @@ class SkillMixer:
     """
 
     def __init__(self, *, rule: str = "softmax", coefficients: SkillMixRule | None = None, chunk_seed: int = 0,
-                 gripper_events: Mapping | None = None, symmetries: Mapping | None = None):
+                 gripper_events: Mapping | None = None, symmetries: Mapping | None = None, single_source: str = "best"):
         if rule not in RULES:
             raise ValueError(f"mixing.rule must be one of {RULES}, got {rule!r}")
         if rule in FITTED_RULES and (coefficients is None or coefficients.rule != rule):
             raise ValueError(f"mixing.rule={rule} needs the task's {rule} rule file (mixing.coefficients)")
+        if single_source not in SINGLE_SOURCE:
+            raise ValueError(f"mixing.single_source must be one of {SINGLE_SOURCE}, got {single_source!r}")
         self.rule = rule
         self.coefficients = coefficients                   # the fitted rule file; None for the randmix rule
+        self.single_source = single_source
         self.draws = RandmixDraws(chunk_seed)
+        self.sources = SourceDraws(chunk_seed)
         self.detector = build_detector(gripper_events)
         self.chunk_seed = int(chunk_seed)
         self.calls = 0
@@ -383,16 +428,17 @@ class SkillMixer:
                              + (f", and {method_name!r} is the name of the {reserved_for} rule" if reserved_for else ""))
         coefficients = None if rule == "randmix" else load_rule(str(cfg["coefficients"]), rule)
         return cls(rule=rule, coefficients=coefficients, chunk_seed=chunk_seed, gripper_events=cfg.get("gripper_events"),
-                   symmetries=cfg.get("symmetries"))
+                   symmetries=cfg.get("symmetries"), single_source=str(cfg.get("single_source", "best")))
 
     def describe(self) -> dict:
-        return {"type": "skillmix", "rule": self.rule,
+        return {"type": "skillmix", "rule": self.rule, "single_source": self.single_source,
                 "coefficients": None if self.coefficients is None else self.coefficients.describe(),
                 "gripper_events": self.detector.name, "symmetries": self.symmetries}
 
     def begin_attempt(self) -> None:
-        """Called by the runtime when an attempt starts (forgets the randmix draws of the previous attempt)."""
+        """Called by the runtime when an attempt starts (forgets the draws of the previous attempt)."""
         self.draws.begin_attempt()
+        self.sources.begin_attempt()
 
     def weights(self, subtask: int, scene, inhand, compatible: list[int]) -> tuple[np.ndarray, dict]:
         """The weights of one subtask under the configured rule, and what the record keeps about them."""
@@ -401,8 +447,12 @@ class SkillMixer:
             return randmix_weights(draw, compatible), {"dirichlet_c": round(draw[0], 5)}
         block = self.coefficients.for_subtask(subtask)
         s = block.scores(scene, inhand)
-        return fitted_weights(self.rule, s, block.d, compatible), {"scores": [round(float(v), 4) for v in s],
-                                                                   "d": round(block.d, 4)}
+        about = {"scores": [round(float(v), 4) for v in s], "d": round(block.d, 4)}
+        u = None
+        if block.d <= 0 and self.single_source == "sample":
+            u = self.sources.draw(subtask)
+            about["source_draw"] = round(u, 6)
+        return fitted_weights(self.rule, s, block.d, compatible, u), about
 
     def decide(self, subtask: int, primary: int, scene, inhand, series: list) -> tuple[np.ndarray, dict]:
         """The decision of one subtask, the same for every generator: ``(weights (J,), record)`` from the sources'

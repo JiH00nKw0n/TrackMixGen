@@ -45,4 +45,5 @@ method_overrides:
   none: {labels: pre_noise}
   skillmix: {labels: pre_noise}
   skillmix_sparsemax: {labels: pre_noise}
+  skillmix_sample: {labels: pre_noise}
   skillmix_randmix: {labels: pre_noise}   # the randmix pools of the SkillMix fit (method skillmix, rule randmix)

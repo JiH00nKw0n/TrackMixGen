@@ -33,7 +33,7 @@ spread differently and are fitted on the same rows, one file each:
 | `softmax` (`skillmix`) | entropy `H(w) = -sum w log w` | `softmax(s / d)`, weights below 1e-3 dropped |
 | `sparsemax` (`skillmix_sparsemax`) | Gini `1 - sum w^2` | `sparsemax(s / (2 d))`: sources below a threshold get exactly 0 |
 
-Over the sources compatible with the selected one (same gripper events); the best-scored source alone when `d <= 0`. The retained segments are aligned
+Over the sources compatible with the selected one (same gripper events). When `d <= 0` one source takes all the weight: the best-scored one (`mixing.single_source: best`, method `skillmix`) or one drawn with probability `softmax(s)` (`sample`, method `skillmix_sample`; with `best` every scene can get the same source). The retained segments are aligned
 by the object and gripper symmetries and blended in their reference-object frames (`skillmix.py` module docstring). CP-Gen
 blends its re-solved constraints itself (`tmg/generation/generators/cpgen/mixing.py`) and takes the weights and their record
 from the same call, `SkillMixer.decide`, so both generators apply one rule.
