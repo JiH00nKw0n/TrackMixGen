@@ -1,4 +1,4 @@
-"""``tmg fit_coefficients``: fit the SkillMix model of a task and write its rule file.
+"""``tmg fit_coefficients``: fit the SkillMix model of a task and write its rule files.
 
 Input: finished pools of (generator, task, scene, selection=ours) made with the same code and settings:
 
@@ -11,19 +11,21 @@ Input: finished pools of (generator, task, scene, selection=ours) made with the 
 and, for MimicGen, the task's source demonstrations (their ``datagen_info`` gives each source's in-hand pose). Rows of
 subtask k are the attempts that reached k, labelled with the attempt's task success
 (``tmg.generation.method.success_model``). Columns: the weights ``w`` (J), the weighted features ``sum_j w_j phi_j`` (five)
-and the spread ``H(w) = -sum_j w_j log w_j`` (0 for a unmix row). The model
+and the spread of the weights (0 for a unmix row), measured once per fitted rule (``tmg.generation.method.skillmix``):
+``H(w) = -sum_j w_j log w_j`` for the softmax rule, ``1 - sum_j w_j^2`` for the sparsemax rule. The model
 
-    P(task succeeds | reached k, w) = sigmoid( c0 + sum_j w_j a_j + g . sum_j w_j phi_j + d H(w) )
+    P(task succeeds | reached k, w) = sigmoid( c0 + sum_j w_j a_j + g . sum_j w_j phi_j + d spread(w) )
 
 is a logistic regression on standardized columns with an L2 penalty chosen per subtask by cross-validation over
 ``PENALTIES`` (``PENALTY_FOLDS`` folds), folds grouped by chunk (attempts of one chunk share their scenes; a randmix
 chunk and a unmix chunk are different groups even when they share a seed); the reported gain is the chunk-grouped
-cross-validated log-loss gain over the base rate (``GAIN_FOLDS`` folds), on all rows and on the randmix rows. The rule
-file keeps ``a``, ``g``, ``d`` and ``c0`` per subtask (``tmg.generation.method.skillmix`` turns them into the softmax
-weights).
+cross-validated log-loss gain over the base rate (``GAIN_FOLDS`` folds), on all rows and on the randmix rows. It is fitted
+once per rule of ``rules`` (default: every fitted rule) on the same rows; each rule file keeps ``a``, ``g``, ``d`` and ``c0`` per subtask
+(``tmg.generation.method.skillmix`` turns them into the weights of that rule).
 
-Output: ``<output>/coefficients.yaml`` and ``<output>/FIT_COEFFICIENTS.json`` (summary), and when ``write_config`` is true
-``configs/experiment/generator/<generator>/coefficients/<task>.yaml``, the file ``method.mixing.coefficients`` names.
+Output: ``<output>/<rule>.yaml`` for every rule of ``rules`` and ``<output>/FIT_COEFFICIENTS.json`` (summary), and when
+``write_config`` is true ``configs/experiment/generator/<generator>/coefficients/<rule>/<task>.yaml``, the files
+``method.mixing.coefficients`` names.
 """
 from __future__ import annotations
 
@@ -40,7 +42,7 @@ from tmg.core.chunks import CHUNKS_DIR, RESOLVED_CONFIG, chunk_is_done, write_js
 from tmg.core.layout import ATTEMPTS_JSONL
 from tmg.core.provenance import write_provenance
 from tmg.core.records import RECORDS_DIR, read_attempts
-from tmg.generation.method.skillmix import rule_path
+from tmg.generation.method.skillmix import FITTED, FITTED_RULES, rule_path
 from tmg.generation.method.success_model import (
     FEATURES,
     UNITS,
@@ -49,7 +51,6 @@ from tmg.generation.method.success_model import (
     subtask_outcomes,
 )
 
-COEFFICIENT_FILE = "coefficients.yaml"
 SUMMARY = "FIT_COEFFICIENTS.json"
 PENALTIES = (0.1, 1.0, 10.0, 100.0)          # candidate L2 penalties (standardized columns)
 PENALTY_FOLDS, PENALTY_FOLD_SEED = 4, 1      # cross-validation that chooses the penalty: folds, seed of the chunk shuffle
@@ -85,8 +86,8 @@ class Attempts:
 
 
 class Rows(NamedTuple):
-    """Rows of one subtask from one kind of pool: the columns ``[w (J), sum_j w_j phi_j (5), H(w)]``, the task-success
-    labels and the chunk index of every row."""
+    """Rows of one subtask from one kind of pool: the columns ``[w (J), sum_j w_j phi_j (5)]`` (the spread column is
+    added per rule by ``with_spread``), the task-success labels and the chunk index of every row."""
     x: list
     y: list
     chunks: list
@@ -131,13 +132,6 @@ def subtask_success(attempts: Attempts, signals: Sequence | None, num_subtasks: 
     return out
 
 
-def entropy(w) -> float:
-    """``H(w) = -sum_j w_j log w_j`` over the non-zero weights."""
-    w = np.asarray(w, dtype=float)
-    nz = w > 0
-    return float(-(w[nz] * np.log(w[nz])).sum())
-
-
 def mix_records(attempt: Mapping) -> dict[int, dict]:
     """The first mix record with weights of every subtask of an attempt (planned segments, then solves whose motion plan
     failed)."""
@@ -149,13 +143,13 @@ def mix_records(attempt: Mapping) -> dict[int, dict]:
 
 
 def unmix_rows(attempts: Attempts, success: Sequence, k: int, num_sources: int, infos) -> Rows:
-    """Rows of subtask k from a unmix pool: the one-hot source weight, its features, spread 0."""
+    """Rows of subtask k from a unmix pool: the one-hot source weight and its features."""
     X, y, kept = design_rows(attempts.records, success, k, num_sources, infos)
-    return Rows([np.append(x, 0.0) for x in X], list(y), [attempts.chunks[i] for i in kept])
+    return Rows([np.asarray(x, dtype=float) for x in X], list(y), [attempts.chunks[i] for i in kept])
 
 
 def randmix_rows(attempts: Attempts, success: Sequence | None, k: int, num_sources: int) -> Rows:
-    """Rows of subtask k from a randmix pool: the recorded weights, the weighted features, their spread. An attempt
+    """Rows of subtask k from a randmix pool: the recorded weights and the weighted features. An attempt
     counts when it has a mix record of subtask k and, with ``success`` (termination signals), every earlier subtask
     succeeded. ``success`` None is the generator that stops at the first failed subtask: there the mix record itself shows
     that the attempt reached k, also when the motion plan to k then failed and k has no subtask record."""
@@ -167,7 +161,7 @@ def randmix_rows(attempts: Attempts, success: Sequence | None, k: int, num_sourc
         w = np.asarray(m["weights"], dtype=float)
         inhand = np.asarray(m["inhand_features"], dtype=float) if m.get("inhand_features") else np.zeros((num_sources, 2))
         phi = np.hstack([np.asarray(m["scene_features"], dtype=float), inhand])
-        rows.x.append(np.concatenate([w, w @ phi, [entropy(w)]]))
+        rows.x.append(np.concatenate([w, w @ phi]))
         rows.y.append(float(bool(a["success"])))
         rows.chunks.append(attempts.chunks[index])
     return rows
@@ -251,13 +245,20 @@ def cv_gain(X: np.ndarray, y: np.ndarray, groups: np.ndarray, randmix: np.ndarra
             100 * (base_cal - model_cal) / base_cal if base_cal else float("nan"))
 
 
-def fit_subtask(randmix: Rows, unmix: Rows, num_sources: int, with_cv: bool = True) -> dict:
-    """One subtask's block of the rule file from its randmix and unmix rows (``Rows``, or ``(x, y, chunks)``)."""
+def with_spread(rows: Sequence, num_sources: int, rule: str) -> np.ndarray:
+    """The design matrix of ``rows`` with the spread of their weights (first ``num_sources`` columns) under ``rule`` as
+    the last column (0 for a one-hot weight under both rules)."""
+    spread = FITTED[rule].spread
+    return np.array([np.append(x, spread(np.asarray(x[:num_sources]))) for x in rows])
+
+
+def fit_subtask(randmix: Rows, unmix: Rows, num_sources: int, rule: str, with_cv: bool = True) -> dict:
+    """One subtask's block of the ``rule`` file from its randmix and unmix rows (``Rows``, or ``(x, y, chunks)``)."""
     randmix, unmix = Rows(*randmix), Rows(*unmix)
     rows = list(unmix.x) + list(randmix.x)
     if not rows:
         raise ValueError("no attempt reached this subtask")
-    X, y = np.array(rows), np.array(list(unmix.y) + list(randmix.y))
+    X, y = with_spread(rows, num_sources, rule), np.array(list(unmix.y) + list(randmix.y))
     is_randmix = np.array([False] * len(unmix.x) + [True] * len(randmix.x))
     # one cross-validation group per (kind of pool, chunk): the two kinds share their chunk seeds but not their attempts
     keys = [(UNMIX, c) for c in unmix.chunks] + [(RANDMIX, c) for c in randmix.chunks]
@@ -276,8 +277,9 @@ def fit_subtask(randmix: Rows, unmix: Rows, num_sources: int, with_cv: bool = Tr
 
 
 def fit_blocks(randmix: Attempts, unmix: Attempts, *, num_sources: int, signals: Sequence | None, source,
-               with_cv: bool = True) -> dict[int, dict]:
-    """The rule-file block of every subtask from the attempts of the randmix and unmix pools. ``signals`` are the
+               rules: Sequence = FITTED_RULES, with_cv: bool = True) -> dict[str, dict[int, dict]]:
+    """``{rule: {subtask: block}}``: the rule-file block of every subtask under every rule of ``rules``, from the attempts
+    of the randmix and unmix pools (the rows are read once and fitted once per rule). ``signals`` are the
     task's subtask termination signals (None for a generator that stops an attempt at its first failed subtask);
     ``source`` is the source-demonstration file whose ``datagen_info`` gives each source's in-hand pose, read when the
     records do not carry it (with ``signals``, from the second subtask on)."""
@@ -286,21 +288,23 @@ def fit_blocks(randmix: Attempts, unmix: Attempts, *, num_sources: int, signals:
     infos = read_source_infos(source) if signals and K > 1 else None
     reached_unmix = subtask_success(unmix, signals, K)
     reached_randmix = subtask_success(randmix, signals, K) if signals else None
-    return {k: fit_subtask(randmix_rows(randmix, reached_randmix, k, num_sources),
-                           unmix_rows(unmix, reached_unmix, k, num_sources, infos), num_sources, with_cv)
+    rows = {k: (randmix_rows(randmix, reached_randmix, k, num_sources), unmix_rows(unmix, reached_unmix, k, num_sources, infos))
             for k in range(K)}
+    return {rule: {k: fit_subtask(*rows[k], num_sources, rule, with_cv) for k in range(K)} for rule in rules}
 
 
 # rule file ------------------------------------------------------------------------------------------------------------
-def write_rule(path: Path, *, generator: str, task: str, basis: str, num_sources: int, blocks: Mapping) -> Path:
-    """Write a SkillMix softmax rule file (read by ``tmg.generation.method.skillmix.load_rule``)."""
+def write_rule(path: Path, *, rule: str, generator: str, task: str, basis: str, num_sources: int, blocks: Mapping) -> Path:
+    """Write a SkillMix rule file of ``rule`` (read by ``tmg.generation.method.skillmix.load_rule``)."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    head = (f"# SkillMix rule of {generator} {task} (tmg fit_coefficients). Per subtask k, with phi_j = (|dx|, |dy|, rotation,\n"
-            f"# inhand_position, inhand_rotation) of source j against the current scene (in-hand terms 0 for k = 0):\n"
-            f"#   P(task succeeds | reached k, weights w) = sigmoid(c0 + sum_j w_j s_j + d H(w)),  s_j = a[j] + g . phi_j\n"
-            f"#   weights: softmax(s / d) over the sources compatible with the selected one when d > 0, the best one when d <= 0\n"
+    fitted = FITTED[rule]
+    head = (f"# SkillMix {rule} rule of {generator} {task} (tmg fit_coefficients). Per subtask k, with phi_j = (|dx|, |dy|,\n"
+            f"# rotation, inhand_position, inhand_rotation) of source j against the current scene (in-hand terms 0 for k = 0):\n"
+            f"#   P(task succeeds | reached k, weights w) = sigmoid(c0 + sum_j w_j s_j + d spread(w)),\n"
+            f"#   s_j = a[j] + g . phi_j,  spread(w) = {fitted.spread_formula}\n"
+            f"#   weights: {fitted.weights_formula} over the sources compatible with the selected one when d > 0, the best one when d <= 0\n"
             f"# Units: {UNITS}.\n")
-    data = {"generator": generator, "task": task, "rule": "softmax", "basis": basis, "num_sources": int(num_sources),
+    data = {"generator": generator, "task": task, "rule": rule, "basis": basis, "num_sources": int(num_sources),
             "features": list(FEATURES), "units": UNITS, "subtasks": {int(k): dict(v) for k, v in sorted(blocks.items())}}
     path.write_text(head + yaml.safe_dump(data, sort_keys=False, width=120))
     return path
@@ -322,22 +326,30 @@ def fit_coefficients(cfg) -> dict:
             raise ValueError(f"{len(read)} attempts in the {kind} pools {pools[kind]}, fewer than "
                              f"min_attempts={plain['min_attempts']}")
     num_sources = int(task["num_sources"])
-    blocks = fit_blocks(attempts["randmix"], attempts["unmix"], num_sources=num_sources,
-                        signals=task.get("subtask_term_signals") or None, source=plain["source"])
-    for k, b in blocks.items():
-        print(f"[tmg] subtask {k}: rows randmix/unmix {b['rows']['randmix']}/{b['rows']['unmix']}, d {b['d']:+.3f} "
-              f"({'softmax' if b['d'] > 0 else 'best source alone'}), CV gain {b['cv_log_loss_gain_percent']}", flush=True)
+    rules = [str(rule) for rule in plain["rules"]]
+    if not rules or set(rules) - set(FITTED_RULES):
+        raise ValueError(f"rules must name fitted rules ({FITTED_RULES}), got {rules}")
+    fitted = fit_blocks(attempts["randmix"], attempts["unmix"], num_sources=num_sources,
+                        signals=task.get("subtask_term_signals") or None, source=plain["source"], rules=rules)
+    for rule, blocks in fitted.items():
+        for k, b in blocks.items():
+            print(f"[tmg] {rule} subtask {k}: rows randmix/unmix {b['rows']['randmix']}/{b['rows']['unmix']}, d {b['d']:+.3f} "
+                  f"({'mixed' if b['d'] > 0 else 'best source alone'}), CV gain {b['cv_log_loss_gain_percent']}", flush=True)
     basis = (f"Fit (tmg fit_coefficients) on the randmix pools {pools['randmix']} ({len(attempts['randmix'])} "
              f"attempts) and the unmix pools {pools['unmix']} ({len(attempts['unmix'])} attempts); rows of "
              f"subtask k: the attempts that reached it, label = the attempt's task success.")
-    kwargs = dict(generator=generator["name"], task=task["name"], basis=basis, num_sources=num_sources, blocks=blocks)
-    written = [str(write_rule(output / COEFFICIENT_FILE, **kwargs))]
-    if plain.get("write_config", True):
-        written.append(str(write_rule(rule_path(f"{generator['name']}/{task['name']}"), **kwargs)))
+    name = f"{generator['name']}/{task['name']}"
+    written = []
+    for rule, blocks in fitted.items():
+        kwargs = dict(rule=rule, generator=generator["name"], task=task["name"], basis=basis, num_sources=num_sources,
+                      blocks=blocks)
+        written.append(str(write_rule(output / f"{rule}.yaml", **kwargs)))
+        if plain.get("write_config", True):
+            written.append(str(write_rule(rule_path(name, rule), **kwargs)))
     summary = {"randmix_pools": pools["randmix"], "unmix_pools": pools["unmix"],
                "randmix_attempts": len(attempts["randmix"]), "unmix_attempts": len(attempts["unmix"]),
-               "subtasks": {k: {key: b[key] for key in ("d", "penalty", "rows", "successes", "cv_log_loss_gain_percent")}
-                            for k, b in blocks.items()},
+               "rules": {rule: {k: {key: b[key] for key in ("d", "penalty", "rows", "successes", "cv_log_loss_gain_percent")}
+                                for k, b in blocks.items()} for rule, blocks in fitted.items()},
                "written": written}
     write_json(output / SUMMARY, summary)
     print(f"[tmg] written: {', '.join(written)}")

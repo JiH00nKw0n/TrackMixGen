@@ -1,0 +1,9 @@
+# SkillMix, sparsemax rule: the method skillmix with mixing.rule sparsemax. The same model and fit, with the spread of the
+# weights measured as 1 - sum w^2, so the weights are sparsemax(s / (2 d)): sources below a threshold get exactly 0
+# (tmg/generation/method/skillmix.py). Rule file configs/experiment/generator/<gen>/coefficients/sparsemax/<task>.yaml.
+defaults:
+  - skillmix
+  - _self_
+name: skillmix_sparsemax
+mixing:
+  rule: sparsemax

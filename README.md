@@ -1,8 +1,9 @@
 # TrackMixGen
 
 TrackMixGen runs synthetic demonstration generators with and without SkillMix and measures the effect on trained
-policies. SkillMix blends the source demonstrations of every subtask with the softmax weights that maximize the task
-success predicted by a fitted mixed-effects logistic model of the mixing weights (`tmg/generation/method/README.md`). The
+policies. SkillMix blends the source demonstrations of every subtask with the weights that maximize the task
+success predicted by a fitted mixed-effects logistic model of the mixing weights (two rules, softmax and sparsemax;
+`tmg/generation/method/README.md`). The
 official generator code is never copied or edited: at run time the code reads the source of the official functions,
 checks their hashes and grafts one call per anchor into their syntax trees.
 
@@ -68,7 +69,7 @@ Everything that depends on the generator lives under it:
 configs/experiment/generator/mimicgen.yaml        the generator package: pinned commit, graft hashes, source repo, method_overrides
 configs/experiment/generator/mimicgen/task/        one file per task: environment class, subtasks, cameras, source file
 configs/experiment/generator/mimicgen/scene/       placement ranges per task for each scene condition (official_d1, ours)
-configs/experiment/generator/mimicgen/coefficients/ SkillMix rule file per task, written by `tmg fit_coefficients`
+configs/experiment/generator/mimicgen/coefficients/ SkillMix rule files, softmax/<task>.yaml and sparsemax/<task>.yaml, written by `tmg fit_coefficients`
 ```
 
 You select a file of a group on the command line with `group=name`. The generator's folder joins the search path,
@@ -85,7 +86,7 @@ tmg generate generator=mimicgen task=square scene=ours selection=ours method=ski
 | `generator` | `mimicgen` | The generator adapter, its pinned commit, and the source hashes of the grafted functions. |
 | `task` | MimicGen: `square`, `coffee`, `threading`, `stack_three`, `hammer_cleanup`, `mug_cleanup`, `three_piece_assembly`. SoftMimicGen: `rope`, `towel`, `jenga`. DexMimicGen: `pick_place`, `microwave`, `bottle_door`. CP-Gen: `coffee`, `threading`, `three_piece_assembly`, `hammer_cleanup`, `mug_cleanup` | The task of the chosen generator. |
 | `scene` | `official_d1`, `ours` | Object placement. `official_d1` runs the generator's own distribution unchanged and lists its ranges. `ours` keeps each D1 centre, doubles the x and y widths, clips to 0.35 m of the table centre, pulls back where the 2026-10-26 scene check found robot contacts, and redraws until every object is within 0.85 m of the robot base. |
-| `method` | `none`, `skillmix` | `none` runs the official generator unchanged. `skillmix` blends the source demonstrations of every subtask with the softmax weights of the task's fitted rule file (`tmg/generation/method/README.md`). A generator may override a few values through `method_overrides` in its own file. |
+| `method` | `none`, `skillmix`, `skillmix_sparsemax` | `none` runs the official generator unchanged. `skillmix` blends the source demonstrations of every subtask with the softmax weights of the task's fitted rule file, `skillmix_sparsemax` with the sparsemax weights of its own rule file (`tmg/generation/method/README.md`). A generator may override a few values through `method_overrides` in its own file. |
 | `generation` | `pool_robosuite_image`, `pool_robosuite_lowdim`, `pool_isaac`, `pool_unmix`, `imported_official`, and small configs under `test/` (`test/pilot20`, `test/pilot20_images`, `test/pilot50`, `test/pool_robosuite_lowdim_onesrc`) | The attempt count, the chunk size, the seed offset and the generator protocol (noise, interpolation steps, whether cameras are rendered). `pool_robosuite_image` stores images, `pool_robosuite_lowdim` is the same pool without them. `pool_isaac` is the Isaac Lab pool (1,000 successes in 4 chunks). The Isaac Lab generators keep the official source selection, action noise and interpolation steps. From the protocol block they read only `guarantee` (true here, so the count is a count of successes, which is not the official setting of Microwave and Bottle Door) and, for DexMimicGen, `camera_names`. The adapters also apply the scene ranges, add the low-dim observation terms, prepare and reset the Arena success term, and run Pick Place in our camera environment when cameras are stored (`docs/GENERATORS.md` section 2.1). `pool_unmix` is the 2,000-attempt pool of the SkillMix fit (control and, under the name `pool_randmix`, randmix), `imported_official` the name under which an official dataset is imported. The pool folder is named after the config's `name` (the `test/` folder is not part of the path). |
 | `observation` | `image`, `low_dim` | What the policy sees. `image`: the task's cameras (84x84) and the robot state, the paper setting. `low_dim`: the robot state and the task's object state (`task.object_state`, no images), for method exploration. It selects the dataset variant, the policy's `by_observation` values and the training batch size. |
 | `policy` | `bc_rnn`, `diffusion_policy`, `pi0` | Model values, with one override block per observation (`by_observation`). `pi0` has no low-dim form. |
@@ -203,7 +204,7 @@ CP-Gen files written before that have no `error` key).
 
 ### 3.8 Run a method variant
 
-The method is the `METHOD` axis: `none` (the baseline) or `skillmix`. A variant gets a name of its own and runs the
+The method is the `METHOD` axis: `none` (the baseline), `skillmix` or `skillmix_sparsemax`. A variant gets a name of its own and runs the
 same five commands with that name. The name is part of every output path, so nothing is overwritten.
 
 1. Make the variant. For SkillMix with another rule file, add a file to `configs/experiment/method/` that inherits
@@ -222,9 +223,11 @@ same five commands with that name. The name is part of every output path, so not
    name it in the method file with `mixing.type`. `tmg/generation/method/README.md` gives the interface and the
    record keys.
 
-2. Check the composed config, then run the pool. SkillMix reads the task's rule file
-   (`configs/experiment/generator/<generator>/coefficients/<task>.yaml`); `make generate` builds it first when it is
-   missing (`make coefficients`: an unmix and a randmix pool, then `tmg fit_coefficients`). Pools made on the servers before 2026-11-23 keep their folder names (`<method>/pool_calib`, `none/pool_ctrl`); to fit on them, name the folders: `make fit-coefficients GENERATOR=<g> TASK=<t> SCENE=ours SELECTION=ours GENERATION=pool_unmix OVERRIDES="randmix_pools=[/data/pools/<g>/<t>/ours/ours/mixup_only/pool_calib] unmix_pools=[/data/pools/<g>/<t>/ours/ours/none/pool_ctrl]"`.
+2. Check the composed config, then run the pool. SkillMix reads the task's rule file of its rule
+   (`configs/experiment/generator/<generator>/coefficients/<rule>/<task>.yaml`; `METHOD=skillmix` is the softmax rule,
+   `METHOD=skillmix_sparsemax` the sparsemax rule); `make generate` builds it first when it is
+   missing (`make coefficients`: an unmix and a randmix pool, then `tmg fit_coefficients` for the missing rule files; a rule
+   file named by its path, as in the variant above, is read as it is). Pools made on the servers before 2026-11-23 keep their folder names (`<method>/pool_calib`, `none/pool_ctrl`); to fit on them, name the folders: `make fit-coefficients GENERATOR=<g> TASK=<t> SCENE=ours SELECTION=ours GENERATION=pool_unmix OVERRIDES="randmix_pools=[/data/pools/<g>/<t>/ours/ours/mixup_only/pool_calib] unmix_pools=[/data/pools/<g>/<t>/ours/ours/none/pool_ctrl]"`.
    The commands:
 
    ```bash

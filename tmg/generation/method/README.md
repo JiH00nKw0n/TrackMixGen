@@ -1,12 +1,14 @@
 # `tmg/generation/method/`: SkillMix
 
 This folder holds the one hook that every generator adapter calls (the segment mixer), its implementation, SkillMix,
-and the pieces it shares. Nothing here imports a simulator, so every class is unit-tested with numpy arrays alone. Two
-methods exist (`configs/experiment/method/`): `none`, the generator as released, and `skillmix`.
+and the pieces it shares. Nothing here imports a simulator, so every class is unit-tested with numpy arrays alone. Three
+methods exist (`configs/experiment/method/`): `none`, the generator as released, and SkillMix with its two rules,
+`skillmix` (softmax) and `skillmix_sparsemax` (sparsemax).
 
 ```
 interfaces.py    MixContext, MixedSegment, SegmentMixer, Method, build_method and the mixer registry _MIXERS (MixerType)
-skillmix.py      SkillMixer (mixing.type: skillmix), the rule file (SkillMixRule, load_rule), softmax_weights,
+skillmix.py      SkillMixer (mixing.type: skillmix), the rule files (SkillMixRule, load_rule), the fitted rules (FITTED,
+                 fitted_weights),
                  RandmixDraws / randmix_weights (mixing.rule: randmix), symmetry alignment
 success_model.py the per-source features (scene, in-hand) and the rows of the fit (task-success label)
 event_mix.py     event-aligned blending of segments (mix_many; align_segments for CP-Gen)
@@ -17,15 +19,21 @@ grippers.py      gripper state and event rules: gripper_states / change_indices 
 ## SkillMix
 
 Per subtask k of an attempt, every source j gets five features against the current scene, `phi_j` = (|dx|, |dy|, rotation
-of the reference object; in-hand position and rotation distances from the second subtask on). The rule file
-(`configs/experiment/generator/<generator>/coefficients/<task>.yaml`, written by `tmg fit_coefficients`) holds, per subtask,
-the fitted mixed-effects logistic model of the task success given the mixing weights `w`:
+of the reference object; in-hand position and rotation distances from the second subtask on). A rule file
+(`configs/experiment/generator/<generator>/coefficients/<rule>/<task>.yaml`, written by `tmg fit_coefficients`) holds, per
+subtask, the fitted mixed-effects logistic model of the task success given the mixing weights `w`:
 
-    P(task succeeds | reached k, w) = sigmoid( c0 + sum_j w_j s_j + d H(w) ),   s_j = a_j + g . phi_j
+    P(task succeeds | reached k, w) = sigmoid( c0 + sum_j w_j s_j + d spread(w) ),   s_j = a_j + g . phi_j
 
-`a_j` is source j's own effect, `g` the feature slopes, `d` the effect of spreading the weight (`H` the entropy of `w`). The
-weights that maximize it over the sources compatible with the selected one (same gripper events) are `softmax(s / d)` when
-`d > 0`, and the best-scored source alone when `d <= 0`; weights below 1e-3 are dropped. The retained segments are aligned
+`a_j` is source j's own effect, `g` the feature slopes, `d` the effect of spreading the weight. The two rules measure the
+spread differently and are fitted on the same rows, one file each:
+
+| rule (`mixing.rule`, method) | spread | weights when `d > 0` |
+|---|---|---|
+| `softmax` (`skillmix`) | entropy `H(w) = -sum w log w` | `softmax(s / d)`, weights below 1e-3 dropped |
+| `sparsemax` (`skillmix_sparsemax`) | Gini `1 - sum w^2` | `sparsemax(s / (2 d))`: sources below a threshold get exactly 0 |
+
+Over the sources compatible with the selected one (same gripper events); the best-scored source alone when `d <= 0`. The retained segments are aligned
 by the object and gripper symmetries and blended in their reference-object frames (`skillmix.py` module docstring). CP-Gen
 blends its re-solved constraints itself (`tmg/generation/generators/cpgen/mixing.py`) and takes the weights and their record
 from the same call, `SkillMixer.decide`, so both generators apply one rule.
@@ -34,8 +42,9 @@ from the same call, `SkillMixer.decide`, so both generators apply one rule.
 2,000-attempt pools of the same settings and chunk seeds (selection `ours`, generation `pool_unmix`; chunks of 50, CP-Gen
 25 from its generator config, the sizes of the committed rules' pools): an unmix pool (method `none`, `none/pool_unmix`) and a randmix pool
 (`skillmix_randmix/pool_randmix`, method `skillmix` with `mixing.rule=randmix` and `method.name=skillmix_randmix`: random
-Dirichlet weights), then fits the model on both (`tmg fit_coefficients`). `make generate METHOD=skillmix` does this by
-itself when the rule file is missing. The committed files (MimicGen: seven tasks, CP-Gen: five) were fitted on 2026-11-20;
+Dirichlet weights), then fits the model on both (`tmg fit_coefficients`) for the rule files that are missing; a rule file
+that exists is never refitted (`make fit-coefficients` refits both, or the rules of `OVERRIDES="rules=[...]"`).
+`make generate METHOD=skillmix` (or `skillmix_sparsemax`) does this by itself when its rule file is missing. The committed files (MimicGen: seven tasks, CP-Gen: five) were fitted on 2026-11-20;
 each file's `basis` names its pools. Pools made on the servers before 2026-11-23 keep their folder names (`<method>/pool_calib`, `none/pool_ctrl`); to fit on them, name the folders: `make fit-coefficients GENERATOR=<g> TASK=<t> SCENE=ours SELECTION=ours GENERATION=pool_unmix OVERRIDES="randmix_pools=[/data/pools/<g>/<t>/ours/ours/mixup_only/pool_calib] unmix_pools=[/data/pools/<g>/<t>/ours/ours/none/pool_ctrl]"`.
 
 The rows of the fit are the attempts that reached subtask k, labelled with the attempt's task success (not subtask k's own
@@ -63,25 +72,28 @@ runtimes also call `mixer.begin_attempt()` when an attempt starts (the randmix r
 The mixer returns a `MixedSegment`: the segment the generator should transform and execute (`eef_start`, `targets`,
 `gripper`) and a `record` dict. Returning the inputs unchanged is the identity (the official behaviour). The record goes
 into the attempt's `subtasks[i]["mix"]` entry of `attempts.jsonl`; SkillMix writes `call`, `subtask`, `source_a`, `rule`,
-`mixed`, `weights`, `incompatible`, `scene_features` (and `inhand_features`), with the softmax rule `scores` and `d`, with
+`mixed`, `weights`, `incompatible`, `scene_features` (and `inhand_features`), with a fitted rule `scores` and `d`, with
 the randmix rule `dirichlet_c`, on a blend `symmetry` and `alignment`, and when it did nothing `identity_reason`. The fit
 reads `weights`, `scene_features` and `inhand_features` of the randmix pools.
 
 ## 2. Current values
 
-`configs/experiment/method/skillmix.yaml` holds every value:
+`configs/experiment/method/skillmix.yaml` holds every value (`skillmix_sparsemax.yaml` takes them all and sets the rule
+and the name):
 
 | Block | Key | Value | Meaning |
 |---|---|---|---|
 | `mixing` | `type` | `skillmix` | implementation (`SkillMixer`) |
-| | `rule` | `softmax` | `softmax`: the SkillMix weights; `randmix`: random Dirichlet weights for the randmix pools only |
+| | `rule` | `softmax` | `softmax` or `sparsemax` (`skillmix_sparsemax.yaml`): the SkillMix weights; `randmix`: random Dirichlet weights for the randmix pools only |
 | | `coefficients` | `<generator>/<task>` | which rule file to read |
 | | `symmetries` | `task.mixing_symmetries` | object symmetries the sources may be aligned with before blending |
 | | `gripper_events` | `{type: sign}` (default) | DexMimicGen: `{type: closure, columns: [0, 1, 2, 3]}` (`method_overrides` of its generator file) |
 | `labels` | | `executed` | the dataset stores what the simulator received (CP-Gen: `pre_noise`, its saved actions are noise-free) |
 
-A generator overrides values under `method_overrides: {<method name>: {...}}` in its own file; the randmix pools have
-the method name `skillmix_randmix`, so a generator that overrides `skillmix` lists that name too.
+A generator overrides values under `method_overrides: {<method name>: {...}}` in its own file; every rule has its own
+method name (`skillmix`, `skillmix_sparsemax`, `skillmix_randmix` for the randmix pools), so a generator that overrides
+`skillmix` lists all three. Those names run their own rule only; a variant of a fitted rule (another rule file) takes a
+name of its own, and the randmix rule runs under `skillmix_randmix` alone.
 
 ## 3. Adding a mixer variant
 

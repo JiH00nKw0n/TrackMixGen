@@ -1,0 +1,140 @@
+# SkillMix sparsemax rule of mimicgen stack_three (tmg fit_coefficients). Per subtask k, with phi_j = (|dx|, |dy|,
+# rotation, inhand_position, inhand_rotation) of source j against the current scene (in-hand terms 0 for k = 0):
+#   P(task succeeds | reached k, weights w) = sigmoid(c0 + sum_j w_j s_j + d spread(w)),
+#   s_j = a[j] + g . phi_j,  spread(w) = 1 - sum_j w_j^2
+#   weights: sparsemax(s / (2 d)) over the sources compatible with the selected one when d > 0, the best one when d <= 0
+# Units: {'dx': 'm', 'dy': 'm', 'rotation': 'rad', 'inhand_position': 'm', 'inhand_rotation': 'rad'}.
+generator: mimicgen
+task: stack_three
+rule: sparsemax
+basis: 'Fitted on 2026-11-23 on the A100 with tmg fit_coefficients on the pools of softmax/stack_three.yaml:
+  /data/pools/mimicgen/stack_three/ours/ours/mixup_only/pool_calib [the randmix pool; in this repository skillmix_randmix/pool_randmix]
+  (2,000 attempts) and /data/pools/mimicgen/stack_three/ours/ours/none/pool_ctrl [the unmix pool; in this repository none/pool_unmix]
+  (2,000 attempts); rows of subtask k: the attempts that reached it, label = the attempt''s task success. Equal to
+  within 2e-13 to the rule the MimicGen sparsemax pools of 2026-11-21 were generated with (ana/fit_all.py, gini form).'
+num_sources: 10
+features:
+- dx
+- dy
+- rotation
+- inhand_position
+- inhand_rotation
+units:
+  dx: m
+  dy: m
+  rotation: rad
+  inhand_position: m
+  inhand_rotation: rad
+subtasks:
+  0:
+    a:
+    - -0.22894814326283328
+    - -0.18942304841502922
+    - 0.11561537729200665
+    - -0.022040937883862254
+    - -0.21116309573051573
+    - 0.16473021230594803
+    - 0.22916820639905006
+    - -0.16010105217087897
+    - 0.23831652898843603
+    - 0.05619360392466729
+    g:
+      dx: -2.138866003812091
+      dy: -0.9051224087728186
+      rotation: -0.2678606398024906
+      inhand_position: 0.0
+      inhand_rotation: 0.0
+    d: 0.5176684325797011
+    c0: -1.1710746848742424
+    penalty: 100.0
+    rows:
+      randmix: 2000
+      unmix: 2000
+    successes: 537
+    cv_log_loss_gain_percent:
+      all_rows: 2.2
+      randmix_rows: 2.1
+  1:
+    a:
+    - -0.2480557016014442
+    - 0.6565432099357893
+    - -0.2828211206955255
+    - -0.09680870734687592
+    - -0.09649136734809967
+    - -0.14530626380905562
+    - -0.3536763150323566
+    - 0.08985592006312638
+    - 0.3893394557379209
+    - 0.13357023336309504
+    g:
+      dx: -1.0544089598126132
+      dy: -2.8450234485511374
+      rotation: -0.2916148187354557
+      inhand_position: -83.14040154544344
+      inhand_rotation: 0.013187870031211992
+    d: 0.48291956315949663
+    c0: -0.16293979291466565
+    penalty: 1.0
+    rows:
+      randmix: 1709
+      unmix: 1666
+    successes: 537
+    cv_log_loss_gain_percent:
+      all_rows: 5.0
+      randmix_rows: 5.7
+  2:
+    a:
+    - -0.04038571665865573
+    - 0.17919492423621217
+    - -0.208795430288077
+    - 0.22941206756724242
+    - -0.0015025150342747845
+    - 0.04822648717286806
+    - -0.3540022064979636
+    - 0.1183851910054268
+    - 0.015937504713929074
+    - -0.010772107988210882
+    g:
+      dx: -1.1922895196761565
+      dy: -1.1767030691289728
+      rotation: -0.17240697238921207
+      inhand_position: -4.775194053286276
+      inhand_rotation: 0.021090883473607245
+    d: 0.3279924718275297
+    c0: -0.3219239079683106
+    penalty: 100.0
+    rows:
+      randmix: 1128
+      unmix: 989
+    successes: 537
+    cv_log_loss_gain_percent:
+      all_rows: 1.2
+      randmix_rows: 0.9
+  3:
+    a:
+    - -0.05059571894181251
+    - 0.519627473450619
+    - 0.09490078431133722
+    - -0.6570725820237369
+    - 0.038399416694240726
+    - 0.25040448042175106
+    - 0.12238589241779721
+    - 0.28055765041539027
+    - -0.30489594587054736
+    - -0.2736614839040132
+    g:
+      dx: 0.9164417111743076
+      dy: -0.49308832586071527
+      rotation: -1.2782816607465803
+      inhand_position: -45.52260684336527
+      inhand_rotation: 0.07994285360006896
+    d: 0.4255993960702857
+    c0: 2.1396632850726833
+    penalty: 1.0
+    rows:
+      randmix: 663
+      unmix: 552
+    successes: 537
+    cv_log_loss_gain_percent:
+      all_rows: 13.7
+      randmix_rows: 13.8

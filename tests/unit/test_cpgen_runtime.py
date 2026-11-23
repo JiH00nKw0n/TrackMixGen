@@ -297,7 +297,7 @@ def _grasp_then_place(tmp_path, method="none", resolve=None, resolve_after_bridg
 
         block = {"a": [5.0, 0.0], "g": dict.fromkeys(("dx", "dy", "rotation", "inhand_position", "inhand_rotation"), 0.0),
                  "d": -1.0, "c0": 0.0}
-        path = write_rule(tmp_path / "rule.yaml", generator="cpgen", task="t", basis="test", num_sources=2, blocks={0: block, 1: block})
+        path = write_rule(tmp_path / "rule.yaml", rule="softmax", generator="cpgen", task="t", basis="test", num_sources=2, blocks={0: block, 1: block})
         cfg["mixing"] = {"enabled": True, "type": "skillmix", "rule": "softmax", "coefficients": str(path)}
     runtime = rt.CPGenRuntime(build_method(cfg, chunk_seed=3), chunk_seed=3, records_dir=tmp_path / "records", all_sources=True,
                               resolve_after_bridge=resolve_after_bridge)

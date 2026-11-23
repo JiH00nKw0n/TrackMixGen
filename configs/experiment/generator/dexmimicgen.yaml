@@ -37,7 +37,7 @@ measure_links: {left: left_hand_pitch_link, right: right_hand_pitch_link}
 # a hand whose noise scale is zero at that step draws nothing (the tracking loop's noise ledger tolerates fewer draws)
 noise_draw_shapes: [3, 4, 3, 4]
 method_overrides:
-  skillmix:                         # the mixer aligns segments by the hands' closure events (a hand's 11 commands:
+  skillmix: &closure_events        # the mixer aligns segments by the hands' closure events (a hand's 11 commands:
     mixing: {gripper_events: {type: closure, columns: [0, 1, 2, 3]}}   # proximal index, middle, pinky, ring first)
-  skillmix_randmix:             # the randmix pools of the SkillMix fit (method skillmix, rule randmix)
-    mixing: {gripper_events: {type: closure, columns: [0, 1, 2, 3]}}
+  skillmix_sparsemax: *closure_events
+  skillmix_randmix: *closure_events   # the randmix pools of the SkillMix fit (method skillmix, rule randmix)

@@ -200,17 +200,17 @@ sif:  ## build the singularity image SIF from a docker archive ARCHIVE (made wit
 sources:  ## download and prepare the source demonstrations of TASK
 	$(PREP) && $(CONTAINER_RUN) sources generator=$(GENERATOR) task=$(TASK)
 
-generate:  ## generate one pool (TASK, SCENE, SELECTION=official|ours, METHOD, GENERATION, OVERRIDES); builds the SkillMix rule file first when METHOD needs a missing one
+generate:  ## generate one pool (TASK, SCENE, SELECTION=official|ours, METHOD, GENERATION, OVERRIDES); builds the SkillMix rule file METHOD reads first when it is missing
 	@METHOD=$(strip $(METHOD)) OVERRIDES="$(OVERRIDES)" GENERATOR=$(GENERATOR) IMAGE=$(IMAGE) TASK=$(TASK) SCENE=$(strip $(SCENE)) CLUSTER=$(CLUSTER) scripts/ensure_coefficients.sh
 	$(PREP) && $(CONTAINER_RUN) generate $(GEN_ARGS)
 
 verify-baseline:  ## official generator vs adapter with method=none on one chunk; must be identical
 	$(PREP) && $(CONTAINER_RUN) verify_baseline generator=$(GENERATOR) task=$(TASK) scene=$(SCENE) selection=$(SELECTION) generation=$(GENERATION) cluster=$(CLUSTER) $(OVERRIDES)
 
-fit-coefficients:  ## fit TASK's SkillMix rule on its randmix pool (skillmix_randmix/pool_randmix) and unmix pool (none/GENERATION), SELECTION=ours GENERATION=pool_unmix; writes coefficients/<task>.yaml
+fit-coefficients:  ## fit TASK's SkillMix rules on its randmix pool (skillmix_randmix/pool_randmix) and unmix pool (none/GENERATION), SELECTION=ours GENERATION=pool_unmix; writes coefficients/<rule>/<task>.yaml for softmax and sparsemax (one rule: OVERRIDES="rules=[sparsemax]")
 	$(PREP) && $(CONTAINER_RUN) fit_coefficients generator=$(GENERATOR) task=$(TASK) scene=$(SCENE) selection=$(SELECTION) generation=$(GENERATION) cluster=$(CLUSTER) $(OVERRIDES)
 
-coefficients:  ## build TASK's SkillMix rule file from scratch when missing (the unmix and randmix pools of GENERATION=pool_unmix, then fit-coefficients)
+coefficients:  ## build TASK's missing SkillMix rule files (softmax, sparsemax) from scratch (the unmix and randmix pools of GENERATION=pool_unmix, then fit-coefficients)
 	GENERATOR=$(GENERATOR) IMAGE=$(IMAGE) TASK=$(TASK) SCENE=$(strip $(SCENE)) CLUSTER=$(CLUSTER) scripts/ensure_coefficients.sh
 
 dataset:  ## write a training dataset from the finished pool (TASK, SCENE, METHOD, GENERATION, OBSERVATION=image|low_dim; OVERRIDES: size=... seed=...)

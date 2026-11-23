@@ -34,6 +34,10 @@ def test_method_variants_compose(monkeypatch, tmp_path):
     assert plain["method"]["mixing"]["type"] == "skillmix" and plain["method"]["mixing"]["rule"] == "softmax"
     assert plain["method"]["mixing"]["coefficients"] == "mimicgen/square"
     assert "tracking" not in plain["method"] and "sources" not in plain["method"]
+    sparse = resolved(compose("generate", ["task=square", "method=skillmix_sparsemax"]))
+    assert sparse["method"]["name"] == "skillmix_sparsemax" and sparse["method"]["mixing"]["rule"] == "sparsemax"
+    assert {k: v for k, v in sparse["method"]["mixing"].items() if k != "rule"} == \
+        {k: v for k, v in plain["method"]["mixing"].items() if k != "rule"}          # everything else from skillmix
     plain = resolved(compose("generate", ["task=square", "method=none"]))
     assert plain["method"] == {"name": "none", "mixing": {"enabled": False}, "tracking": {"enabled": False}}   # identity kept
 
@@ -99,6 +103,7 @@ def test_selection_rule_is_independent_of_the_pool_config(monkeypatch, tmp_path)
     fit = resolved(compose("fit_coefficients", ["generator=mimicgen", "task=square", "scene=ours", "selection=ours"]))
     assert [p.split("/pools/")[1] for p in fit["randmix_pools"]] == ["mimicgen/square/ours/ours/skillmix_randmix/pool_randmix"]
     assert [p.split("/pools/")[1] for p in fit["unmix_pools"]] == ["mimicgen/square/ours/ours/none/pool_unmix"]
+    assert fit["rules"] == ["softmax", "sparsemax"]                # the fit writes every fitted rule unless told otherwise
 
 
 def test_fit_pools_take_their_chunk_size_from_the_generator(monkeypatch, tmp_path):

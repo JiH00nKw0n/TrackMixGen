@@ -19,7 +19,7 @@
 #   GENERATION (pool_isaac), SELECTION (source selection rule in the folder names, official; the Isaac Lab generators always use their
 #   official rule), TRAIN_OVERRIDES (extra `tmg train` overrides), EVAL_EXTRA (extra `tmg eval` overrides),
 #   METHOD (none: the official generator settings; skillmix for a method check, where mixing needs the task's SkillMix rule
-#   file configs/experiment/generator/<generator>/coefficients/<task>.yaml),
+#   file configs/experiment/generator/<generator>/coefficients/softmax/<task>.yaml),
 #   PORT_BASE (8800: first policy-server port; each task takes 120 ports, so two drivers at once need different bases),
 #   MINI (1: an end-to-end check at toy scale: 20-success pools, 10-demo datasets, 200 training updates, 6 evaluation
 #   scenes per split; same code path and files as the real run, finishes in about two hours per task).

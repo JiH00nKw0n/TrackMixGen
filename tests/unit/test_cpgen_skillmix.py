@@ -30,7 +30,7 @@ def constraint(x, n=6, kind="robot-object", obj="pod", carried=None, grip=None):
 
 def mixer(n, d=0.05, rule="softmax"):
     g = np.array([-20.0, 0.0, 0.0, -50.0, 0.0])
-    fitted = SkillMixRule(name="cpgen/t", num_sources=n, subtasks={k: SubtaskRule(a=np.zeros(n), g=g, d=d, c0=0.0) for k in (0, 1)})
+    fitted = SkillMixRule(name="cpgen/t", rule="softmax", num_sources=n, subtasks={k: SubtaskRule(a=np.zeros(n), g=g, d=d, c0=0.0) for k in (0, 1)})
     return SkillMixer(rule=rule, coefficients=None if rule == "randmix" else fitted, chunk_seed=3)
 
 

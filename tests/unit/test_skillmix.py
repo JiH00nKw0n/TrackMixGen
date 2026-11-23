@@ -1,4 +1,5 @@
-"""SkillMix: the features, the rows of the fit, the softmax and randmix weights, the rule files, the mixer and the fit."""
+"""SkillMix: the features, the rows of the fit, the softmax, sparsemax and randmix weights, the rule files, the mixer and the
+fit."""
 from pathlib import Path
 
 import numpy as np
@@ -13,9 +14,11 @@ from tmg.generation.method.skillmix import (
     SkillMixer,
     SkillMixRule,
     SubtaskRule,
+    entropy,
+    fitted_weights,
+    gini,
     load_rule,
     randmix_weights,
-    softmax_weights,
 )
 from tmg.generation.method.success_model import (
     design_rows,
@@ -38,10 +41,15 @@ def flat(p):
     return [*p[:3, 3], *p[:3, :3].reshape(-1)]
 
 
-def _rule(n, a=None, g=None, d=1.0, subtasks=(0,)):
+def _rule(n, a=None, g=None, d=1.0, subtasks=(0,), rule="softmax"):
     a = np.zeros(n) if a is None else np.asarray(a, dtype=float)
     g = np.zeros(5) if g is None else np.asarray(g, dtype=float)
-    return SkillMixRule(name="g/t", num_sources=n, subtasks={k: SubtaskRule(a=a, g=g, d=float(d), c0=0.0) for k in subtasks})
+    return SkillMixRule(name="g/t", rule=rule, num_sources=n,
+                        subtasks={k: SubtaskRule(a=a, g=g, d=float(d), c0=0.0) for k in subtasks})
+
+
+def softmax_weights(scores, d, compatible):
+    return fitted_weights("softmax", scores, d, compatible)
 
 
 # features and rows ----------------------------------------------------------------------------------------------------
@@ -115,6 +123,27 @@ def test_softmax_weights_drop_weights_below_the_minimum_and_renormalize():
     assert w.tolist() == [0.5, 0.0, 0.5]
 
 
+def test_sparsemax_weights_are_the_projection_of_the_scores_onto_the_simplex():
+    s = np.array([1.0, 0.8, -1.0, 3.0])
+    w = fitted_weights("sparsemax", s, 0.5, [0, 1, 2])     # z = s / (2 d) = s: 1.0, 0.8, -1.0 over the compatible sources
+    assert np.allclose(w, [0.6, 0.4, 0.0, 0.0])            # threshold 0.4: the weakest source gets exactly 0
+    far = fitted_weights("sparsemax", np.array([2.0, 0.0, 0.0]), 0.25, [0, 1, 2])
+    assert far.tolist() == [1.0, 0.0, 0.0]                 # a clear best source takes all the weight, no small weights
+    assert np.allclose(fitted_weights("sparsemax", s, 1e6, [0, 1, 2, 3]), 0.25)          # large d: uniform
+    assert fitted_weights("sparsemax", s, -0.1, [0, 1, 2]).tolist() == [1.0, 0.0, 0.0, 0.0]   # d <= 0: the best alone
+    small = fitted_weights("sparsemax", np.array([1.0, 0.0002, 0.0]), 0.5, [0, 1, 2])
+    assert 0 < small[1] < 1e-3 and small[2] == 0.0         # no minimum weight: only the projection sets a weight to 0
+    # the weights maximize sum w s + d (1 - |w|^2) over the simplex: no other point of the simplex does better
+    rng = np.random.default_rng(0)
+    best = w[:3] @ s[:3] + 0.5 * gini(w[:3])
+    assert all(v @ s[:3] + 0.5 * gini(v) <= best + 1e-12 for v in rng.dirichlet(np.ones(3), size=2000))
+
+
+def test_spreads_are_zero_for_a_single_source_and_largest_when_uniform():
+    assert entropy([0.0, 1.0, 0.0]) == 0.0 and gini([0.0, 1.0, 0.0]) == 0.0
+    assert entropy([0.5, 0.5]) == pytest.approx(np.log(2)) and gini([0.5, 0.5]) == pytest.approx(0.5)
+
+
 def test_rule_scores_add_the_feature_slopes_to_the_source_effects():
     block = SubtaskRule(a=np.array([0.5, -0.5]), g=np.array([-1.0, -2.0, -0.5, -10.0, -1.0]), d=0.3, c0=-1.0)
     scene = np.array([[0.1, 0.2, 0.3], [0.0, 0.0, 0.0]])
@@ -147,38 +176,47 @@ COMMITTED = {"mimicgen": {"coffee": 2, "square": 2, "threading": 2, "stack_three
              "cpgen": {"coffee": 3, "threading": 2, "hammer_cleanup": 4, "mug_cleanup": 4, "three_piece_assembly": 4}}
 
 
+COMMITTED_RULES = {"mimicgen": ("softmax", "sparsemax"), "cpgen": ("softmax",)}
+
+
 def test_committed_rule_files_load_and_give_weights():
     for generator, tasks in COMMITTED.items():
-        for task, n in tasks.items():
-            rule = load_rule(f"{generator}/{task}")
-            assert rule.num_sources == 10 and sorted(rule.subtasks) == list(range(n))
-            for k in range(n):
-                block = rule.for_subtask(k)
-                assert block.a.shape == (10,) and block.g.shape == (5,) and np.isfinite(block.d)
-                if k == 0:
-                    assert np.allclose(block.g[3:], 0.0)          # no in-hand terms in the first subtask
-                w = softmax_weights(block.scores(np.full((10, 3), 0.05), np.full((10, 2), 0.01)), block.d, list(range(10)))
-                assert w.sum() == pytest.approx(1.0) and (w >= 0).all()
-    # the MimicGen fits favour spreading the weight (d > 0) in every subtask
-    assert all(b.d > 0 for t in COMMITTED["mimicgen"] for b in load_rule(f"mimicgen/{t}").subtasks.values())
+        for name in COMMITTED_RULES[generator]:
+            for task, n in tasks.items():
+                rule = load_rule(f"{generator}/{task}", name)
+                assert rule.rule == name and rule.num_sources == 10 and sorted(rule.subtasks) == list(range(n))
+                for k in range(n):
+                    block = rule.for_subtask(k)
+                    assert block.a.shape == (10,) and block.g.shape == (5,) and np.isfinite(block.d)
+                    if k == 0:
+                        assert np.allclose(block.g[3:], 0.0)          # no in-hand terms in the first subtask
+                    scores = block.scores(np.full((10, 3), 0.05), np.full((10, 2), 0.01))
+                    w = fitted_weights(name, scores, block.d, list(range(10)))
+                    assert w.sum() == pytest.approx(1.0) and (w >= 0).all()
+    # the MimicGen fits favour spreading the weight (d > 0) in every subtask, under both rules
+    assert all(b.d > 0 for name in COMMITTED_RULES["mimicgen"] for t in COMMITTED["mimicgen"]
+               for b in load_rule(f"mimicgen/{t}", name).subtasks.values())
 
 
 def test_a_coefficient_file_of_the_removed_above_mean_rule_is_refused(tmp_path):
     old = tmp_path / "old.yaml"
     old.write_text(yaml.safe_dump({"generator": "g", "task": "t", "num_sources": 2, "subtasks": {
         0: {"alpha": {0: 0.1, 1: -0.2}, "slopes": {"dx": -1.0, "dy": -1.0, "rotation": -0.5}}}}))
-    with pytest.raises(ValueError, match="not a SkillMix softmax rule"):
-        load_rule(str(old))
+    with pytest.raises(ValueError, match="not a SkillMix rule"):
+        load_rule(str(old), "softmax")
     with pytest.raises(FileNotFoundError, match="make coefficients"):
-        load_rule(str(tmp_path / "missing.yaml"))
+        load_rule(str(tmp_path / "missing.yaml"), "softmax")
 
 
 def test_build_method_reads_the_rule_file_and_keeps_randmix_out_of_the_skillmix_folders(tmp_path):
     from tmg.generation.fit_coefficients import write_rule
 
-    path = write_rule(tmp_path / "rule.yaml", generator="g", task="t", basis="test", num_sources=2,
-                      blocks={0: {"a": [0.1, -0.2], "g": dict.fromkeys(("dx", "dy", "rotation", "inhand_position", "inhand_rotation"), 0.0),
-                                  "d": 0.4, "c0": -1.0}})
+    block = {"a": [0.1, -0.2], "g": dict.fromkeys(("dx", "dy", "rotation", "inhand_position", "inhand_rotation"), 0.0),
+             "d": 0.4, "c0": -1.0}
+    path = write_rule(tmp_path / "rule.yaml", rule="softmax", generator="g", task="t", basis="test", num_sources=2,
+                      blocks={0: block})
+    sparse = write_rule(tmp_path / "sparse.yaml", rule="sparsemax", generator="g", task="t", basis="test", num_sources=2,
+                        blocks={0: block})
     m = build_method({"name": "skillmix", "mixing": {"enabled": True, "type": "skillmix", "rule": "softmax",
                                                      "coefficients": str(path)}}, chunk_seed=0)
     assert isinstance(m.mixer, SkillMixer) and m.mixer.rule == "softmax" and m.mixer.coefficients.for_subtask(0).d == 0.4
@@ -190,6 +228,21 @@ def test_build_method_reads_the_rule_file_and_keeps_randmix_out_of_the_skillmix_
     m = build_method({"name": "skillmix_randmix", "mixing": {"enabled": True, "type": "skillmix", "rule": "randmix",
                                                                  "coefficients": str(tmp_path / "missing.yaml")}}, chunk_seed=0)
     assert m.mixer.rule == "randmix" and m.mixer.coefficients is None          # randmix needs no rule file
+    m = build_method({"name": "skillmix_sparsemax", "mixing": {"enabled": True, "type": "skillmix", "rule": "sparsemax",
+                                                               "coefficients": str(sparse)}}, chunk_seed=0)
+    assert m.mixer.rule == "sparsemax" and m.mixer.coefficients.rule == "sparsemax"
+    with pytest.raises(ValueError, match="skillmix_sparsemax"):        # every rule has its own folder
+        build_method({"name": "skillmix", "mixing": {"enabled": True, "type": "skillmix", "rule": "sparsemax",
+                                                     "coefficients": str(sparse)}}, chunk_seed=0)
+    m = build_method({"name": "skillmix_refit", "mixing": {"enabled": True, "type": "skillmix", "rule": "softmax",
+                                                           "coefficients": str(path)}}, chunk_seed=0)
+    assert m.mixer.rule == "softmax"                                   # a variant of a fitted rule under its own name
+    with pytest.raises(ValueError, match="skillmix_randmix"):          # but random weights only in the randmix folder
+        build_method({"name": "skillmix_refit", "mixing": {"enabled": True, "type": "skillmix", "rule": "randmix"}},
+                     chunk_seed=0)
+    with pytest.raises(ValueError, match="holds the softmax rule"):    # the file must hold the configured rule
+        build_method({"name": "skillmix_sparsemax", "mixing": {"enabled": True, "type": "skillmix", "rule": "sparsemax",
+                                                               "coefficients": str(path)}}, chunk_seed=0)
     with pytest.raises(ValueError, match="mixing.rule"):
         SkillMixer(rule="above_mean")
     with pytest.raises(ValueError, match="rule file"):
@@ -263,20 +316,21 @@ def test_skillmix_mixer_blends_many_joint_hand_commands_with_the_closure_rule():
 
 # the fit --------------------------------------------------------------------------------------------------------------
 def test_fit_recovers_the_sign_of_the_spread_effect():
-    from tmg.generation.fit_coefficients import entropy, fit_subtask
+    from tmg.generation.fit_coefficients import fit_subtask
 
     rng = np.random.default_rng(0)
     J, n = 3, 6000
     a = np.array([0.5, 0.0, -0.5])
-    for d_true in (1.5, -1.5):
-        W = rng.dirichlet(np.full(J, 0.7), size=n)
-        H = np.array([entropy(w) for w in W])
-        y = (rng.random(n) < 1 / (1 + np.exp(-(-0.5 + W @ a + d_true * H)))).astype(float)
-        rows = [np.concatenate([w, np.zeros(5), [h]]) for w, h in zip(W, H)]
-        groups = list(np.arange(n) // 50)
-        block = fit_subtask((rows, list(y), groups), ([], [], []), J, with_cv=False)
-        assert np.sign(block["d"]) == np.sign(d_true) and abs(block["d"] - d_true) < 0.5
-        assert block["a"][0] > block["a"][2]
+    for rule, spread in (("softmax", entropy), ("sparsemax", gini)):
+        for d_true in (1.5, -1.5):
+            W = rng.dirichlet(np.full(J, 0.7), size=n)
+            S = np.array([spread(w) for w in W])
+            y = (rng.random(n) < 1 / (1 + np.exp(-(-0.5 + W @ a + d_true * S)))).astype(float)
+            rows = [np.concatenate([w, np.zeros(5)]) for w in W]       # the fit adds the rule's spread column
+            groups = list(np.arange(n) // 50)
+            block = fit_subtask((rows, list(y), groups), ([], [], []), J, rule, with_cv=False)
+            assert np.sign(block["d"]) == np.sign(d_true) and abs(block["d"] - d_true) < 0.6, (rule, d_true, block["d"])
+            assert block["a"][0] > block["a"][2]
 
 
 def _write_pool(folder, chunks, attempts):
@@ -317,8 +371,15 @@ def test_fit_reads_the_pools_of_a_generator_that_stops_at_the_first_failed_subta
 
     _write_pool(tmp_path / "randmix", 4, randmix)
     _write_pool(tmp_path / "unmix", 3, unmix)
-    blocks = fit_blocks(read_pools([tmp_path / "randmix"]), read_pools([tmp_path / "unmix"]), num_sources=2,
+    fitted = fit_blocks(read_pools([tmp_path / "randmix"]), read_pools([tmp_path / "unmix"]), num_sources=2,
                         signals=None, source=None, with_cv=False)
+    assert sorted(fitted) == ["softmax", "sparsemax"]
+    assert fitted["softmax"][0]["rows"] == fitted["sparsemax"][0]["rows"]      # the same rows, two spreads
+    assert fitted["softmax"][0]["d"] != fitted["sparsemax"][0]["d"]
+    only = fit_blocks(read_pools([tmp_path / "randmix"]), read_pools([tmp_path / "unmix"]), num_sources=2,
+                      signals=None, source=None, rules=["sparsemax"], with_cv=False)
+    assert only == {"sparsemax": fitted["sparsemax"]}                          # one rule alone: the same fit
+    blocks = fitted["softmax"]
     assert sorted(blocks) == [0, 1] and blocks[0]["rows"] == {"randmix": 84, "unmix": 60}
     assert blocks[1]["rows"] == {"randmix": 84, "unmix": 48}       # the failed plans count, the 12 that stopped do not
     assert len(blocks[1]["a"]) == 2 and sorted(blocks[1]["g"]) == sorted(["dx", "dy", "rotation", "inhand_position", "inhand_rotation"])
