@@ -329,20 +329,26 @@ class CPGenRuntime:
             self._last_mix, self._mix_plan = pending, None
 
     # source mixing (grafted into CPPolicy.solve_constraint) ----------------------------------------------------------
-    def prepare_mix(self, policy, constraint, obs: dict, X_obj0_transf, X_obj1_transf, X_eef_transf) -> None:
-        """Grafted after CP-Gen chose the primary's symmetry transforms: weigh every source, solve the retained ones for the
-        current scene and prepare the blend (``mixing`` module docstring)."""
+    def prepare_mix(self, policy, constraint, obs: dict, X_obj0_transf, X_obj1_transf, X_eef_transf):
+        """Grafted after CP-Gen chose the drawn source's (primary's) symmetry transforms: weigh every source, align and
+        solve the retained ones for the current scene and prepare the blend (``mixing`` module docstring). Returns the
+        constraint CP-Gen's step loop runs on and its transforms: unchanged when the primary is the only retained source;
+        the retained source's own constraint (its own window and speed, aligned to the primary) when one other source is
+        retained; a copy of the anchor's constraint on the blended timeline when several are retained. In the last two
+        cases the policy's sequence index becomes the anchor (the retained source with the largest weight), so the record
+        and a second solve name it."""
+        unchanged = (constraint, X_obj0_transf, X_obj1_transf, X_eef_transf)
         if self._last_mix is not None:                        # an earlier solve of this attempt never reached a segment
             self._unplanned_mixes.append(self._last_mix)
         self._mix_plan, self._last_mix = None, None
         if self.method.mixer is None:
-            return
+            return unchanged
         idx, primary = int(policy.current_constraint_idx), int(policy.current_constraint_sequence_idx)
         sequences = policy.constraint_sequences
         if constraint is not sequences[primary][idx]:
             self._last_mix = {"subtask": idx, "source_a": primary, "mixed": False,
                               "identity_reason": "solve_constraint called for a constraint other than the current one"}
-            return
+            return unchanged
         if self.official is None:
             import demo_aug.generate
 
@@ -352,19 +358,30 @@ class CPGenRuntime:
             record, w = mixing.decide(self.method.mixer, sequences, idx, primary, obs, carried)
         except KeyError as err:                              # a pose the model needs is missing from the observation
             self._last_mix = {"subtask": idx, "source_a": primary, "mixed": False, "identity_reason": f"missing {err}"}
-            return
+            return unchanged
         self._last_mix = record
-        others = [j for j in range(len(w)) if w[j] > 0 and j != primary]
-        if not others:
-            record.update(mixed=False, identity_reason="only the primary is retained")
-            return
+        keep = [j for j in range(len(w)) if w[j] > 0]
+        anchor = max(keep, key=lambda j: w[j])
+        record["anchor"] = int(anchor)
+        if keep == [primary]:
+            record.update(mixed=False, identity_reason="only the drawn source is retained")
+            return unchanged
         transforms = dict(X_obj0_transf=X_obj0_transf, X_obj1_transf=X_obj1_transf, X_eef_transf=X_eef_transf)
+        others = [j for j in keep if j != primary]
         chosen, symmetry = mixing.align_sources(self.official, policy, sequences, idx, primary, others, obs, transforms)
+        chosen[primary] = transforms
         record["symmetry"] = symmetry                       # kept even if solving or planning fails below
-        solved = mixing.solve_sources(self.official, policy, sequences, idx, others, obs, chosen)
-        weights = {"primary": float(w[primary]), **{j: float(w[j]) for j in others}}
-        self._mix_plan = mixing.MultiMixPlan(mixing.gripper_series(constraint), solved, weights)
+        policy.current_constraint_sequence_idx = anchor
+        if len(keep) == 1:                                  # one source other than the drawn one: its own window and speed
+            record.update(mixed=True)
+            t = chosen[anchor]
+            return sequences[anchor][idx], t["X_obj0_transf"], t["X_obj1_transf"], t["X_eef_transf"]
+        solved = mixing.solve_sources(self.official, policy, sequences, idx, keep, obs, chosen)
+        self._mix_plan = mixing.MixedWindow(solved, {j: float(w[j]) for j in keep}, anchor)
         record.update(mixed=True, alignment=self._mix_plan.meta)
+        t = chosen[anchor]
+        window = mixing.window_on(sequences[anchor][idx], self._mix_plan.anchor_index)
+        return window, t["X_obj0_transf"], t["X_obj1_transf"], t["X_eef_transf"]
 
     def _carried_into(self, idx: int) -> str | None:
         """The object in the hand when constraint ``idx`` starts: the reference object of the latest recorded constraint
@@ -373,12 +390,12 @@ class CPGenRuntime:
         earlier = [k for k in self._references if k < idx]
         return self._references[max(earlier)] if earlier else None
 
-    def mixed_eef_des(self, t_idx: int, primary_pose):
-        """Grafted around the step loop's ``compute_X_W_eef_des``: the official pose of step ``t_idx``, blended with the
-        retained sources' when this constraint is mixed."""
+    def mixed_eef_des(self, t_idx: int, official_pose):
+        """Grafted around the step loop's ``compute_X_W_eef_des``: the official pose of step ``t_idx``, or the blended pose
+        of that step of the blended window when this constraint is mixed."""
         if self._mix_plan is None:
-            return primary_pose
-        return self._mix_plan.pose(int(t_idx), primary_pose)
+            return official_pose
+        return self._mix_plan.pose(int(t_idx))
 
     def _seg_id_at(self, pos: int) -> int:
         return self._segments.seg_id_of(pos)
@@ -434,8 +451,8 @@ def build_graft(generate_demo, expected_hash: str | None) -> Graft:
 def build_mix_graft(solve_constraint, expected_hash: str | None) -> Graft:
     """The two edits of ``CPPolicy.solve_constraint`` for source mixing (module docstring)."""
     g = Graft(solve_constraint, expected_hash=expected_hash, label="CPPolicy.solve_constraint")
-    g.insert_after_assign("X_obj0_transf", "_tmg.prepare_mix(self, constraint, obs, X_obj0_transf, X_obj1_transf, X_eef_transf)",
-                          occurrence=1)
+    g.insert_after_assign("X_obj0_transf", "constraint, X_obj0_transf, X_obj1_transf, X_eef_transf = "
+                          "_tmg.prepare_mix(self, constraint, obs, X_obj0_transf, X_obj1_transf, X_eef_transf)", occurrence=1)
     g.wrap_assign_value("X_W_eef_des", "_tmg.mixed_eef_des", extra_args=("t_idx",))
     return g
 
