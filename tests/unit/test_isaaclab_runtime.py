@@ -293,6 +293,22 @@ def rope_info(num_steps, offset, yaw_step=0.1):
     return info
 
 
+def node_pose(cloud, shift=0.0):
+    """A pose at the first node of a cloud (an end effector holding the rope there), moved by ``shift`` along x."""
+    p = np.eye(4)
+    p[:3, 3] = np.asarray(cloud)[0] + [shift, 0.0, 0.0]
+    return p
+
+
+def hand_on_rope(infos, shift=0.0):
+    """Sources whose end effector is at the rope's first node at every step (they hold the rope)."""
+    for info in infos:
+        nodes = info.object_nodal_positions["rope"].a
+        info.eef_pose = {"robot0": T(np.stack([node_pose(n, shift) for n in nodes]))}
+        info.target_eef_pose = {"robot0": T(info.eef_pose["robot0"].a.copy())}
+    return infos
+
+
 # pre-noise labels --------------------------------------------------------------------------------------
 class FakeEnv:
     """Only ``target_eef_pose_to_action`` (draws noise when a noise dict is given) and the observed eef pose."""
@@ -434,11 +450,12 @@ def test_rope_records_the_nodal_frames_and_in_hand_poses_the_fit_needs(torch, tm
     from tmg.generation.method.success_model import in_hand
     from tmg.generation.method.success_model import pose12 as P
 
-    infos = [rope_info(6, 0), rope_info(6, 10), rope_info(6, 20)]
-    gen = rope_generator(infos)
+    infos = hand_on_rope([rope_info(6, 0), rope_info(6, 10), rope_info(6, 20)])
+    infos[1].eef_pose["robot0"].a[:, 0, 3] += 1.0                      # source 1 has let go of the rope
+    now0, now1 = rope_cloud(0.5, 0.7), rope_cloud(0.6, 0.9)
+    gen = rope_generator(infos, eef_pose=node_pose(now1, 0.03))        # the hand holds the rope 3 cm from a node
     rt = make_runtime(Method0(None), records_dir=tmp_path)
     rt.begin_attempt(gen, 0)
-    now0, now1 = rope_cloud(0.5, 0.7), rope_cloud(0.6, 0.9)
     out = rope_subtask(rt, gen, infos, 0, 2, now0)
     assert out[0] is not None and rt._last_mix is None                 # no mixer: the builder's segment untouched
     rope_subtask(rt, gen, infos, 1, 2, now1)
@@ -451,9 +468,10 @@ def test_rope_records_the_nodal_frames_and_in_hand_poses_the_fit_needs(torch, tm
     np.testing.assert_allclose(P(s0["cur_obj_pose"]), nodal_frame(now0, ref), atol=1e-6)
     np.testing.assert_allclose(P(s0["src_obj_pose"]), nodal_frame(infos[2].object_nodal_positions["rope"].a[0], ref), atol=1e-6)
     np.testing.assert_allclose(P(s1["src_obj_pose"]), nodal_frame(infos[2].object_nodal_positions["rope"].a[4], ref), atol=1e-6)
-    np.testing.assert_allclose(P(s0["eef_pose"]), pose(0.3))
-    np.testing.assert_allclose(P(s0["src_eef_pose"]), pose(20.0))
-    assert s0["carried_object"] is None and s1["carried_object"] == "rope"
+    np.testing.assert_allclose(P(s0["eef_pose"]), node_pose(now1, 0.03), atol=1e-6)
+    np.testing.assert_allclose(P(s0["src_eef_pose"]), node_pose(infos[2].object_nodal_positions["rope"].a[0]), atol=1e-6)
+    assert s0["carried_object"] is None and s1["carried_object"] == "rope" and s1["carried_candidate"] == "rope"
+    assert s1["held_distance"]["now"] <= 0.03 and s1["held_distance"]["source"] < 1e-3
     np.testing.assert_allclose(P(s1["objects"]["rope"]), nodal_frame(now1, ref), atol=1e-6)
     np.testing.assert_allclose(P(s1["src_objects"]["rope"]), P(s1["src_obj_pose"]))
     # the in-hand features the fit computes from these fields are non-zero for this scene
@@ -462,16 +480,19 @@ def test_rope_records_the_nodal_frames_and_in_hand_poses_the_fit_needs(torch, tm
 
 def test_rope_mixer_gets_nodal_scene_and_in_hand_inputs_from_the_second_subtask(torch, monkeypatch):
     install_fake_registration(monkeypatch, lambda **kw: kw["src_eef_poses"])
-    infos = [rope_info(6, 0), rope_info(6, 10), rope_info(6, 20)]
-    gen = rope_generator(infos)
+    infos = hand_on_rope([rope_info(6, 0), rope_info(6, 10), rope_info(6, 20)])
+    infos[1].eef_pose["robot0"].a[:, 0, 3] += 1.0                      # source 1 has let go of the rope
+    now1 = rope_cloud(0.6, 0.9)
+    gen = rope_generator(infos, eef_pose=node_pose(now1))
     mixer = RecordingMixer(mixed=False)
     rt = make_runtime(Method0(mixer))
     rt.begin_attempt(gen, 0)
     rope_subtask(rt, gen, infos, 0, 1, rope_cloud(0.5, 0.7))
-    rope_subtask(rt, gen, infos, 1, 1, rope_cloud(0.6, 0.9))
+    rope_subtask(rt, gen, infos, 1, 1, now1)
     first, second = (c.extra for c in mixer.contexts)
     assert "current_in_hand" not in first and first["current_object_pose"] is not None and len(first["feature_object_poses"]) == 3
     assert second["carried_object"] == "rope" and second["current_in_hand"].shape == (4, 4) and len(second["source_in_hand"]) == 3
+    assert second["source_in_hand"][1] is None and second["source_in_hand"][0] is not None   # only where the rope is held
     rots = [p[:2, :2] for p in second["feature_object_poses"]]
     assert not np.allclose(rots[0], rots[1])                           # the sources' frames differ: non-zero scene features
 
@@ -504,6 +525,7 @@ def test_rigid_objects_use_the_builder_pose_and_the_environment_for_another_carr
     infos = [datagen_info(6, 0, obj="bottle"), datagen_info(6, 10, obj="bottle")]
     for info, offset in zip(infos, (0, 10)):
         info.object_poses["fridge"] = T(np.stack([pose(200 + offset + i) for i in range(6)]))
+        info.object_poses["bottle"] = T(np.stack([pose(offset + i + 0.05) for i in range(6)]))   # in the hand
     env = SceneEnv(eef={"robot0": pose(1.0)}, objects={"bottle": pose(0.9), "fridge": pose(300.0)})
     gen = soft_generator(infos, env)
     gen.env_cfg = types.SimpleNamespace(subtask_configs={"robot0": [types.SimpleNamespace(
@@ -519,12 +541,34 @@ def test_rigid_objects_use_the_builder_pose_and_the_environment_for_another_carr
         rt.record_subtask(local_vars)
     s0, s1 = rt.rec.subtasks
     np.testing.assert_allclose(P(s0["cur_obj_pose"]), pose(150.0))
-    np.testing.assert_allclose(P(s0["src_obj_pose"]), pose(110.0))
-    assert s1["carried_object"] == "bottle" and sorted(s1["objects"]) == ["bottle", "fridge"]
+    np.testing.assert_allclose(P(s0["src_obj_pose"]), pose(10.05))
+    assert s1["carried_object"] == "bottle" and sorted(s1["objects"]) == ["bottle"]    # the carried object only
     np.testing.assert_allclose(P(s1["objects"]["bottle"]), pose(0.9))
-    np.testing.assert_allclose(P(s1["src_objects"]["bottle"]), pose(114.0))
+    np.testing.assert_allclose(P(s1["src_objects"]["bottle"]), pose(14.05))
     np.testing.assert_allclose(P(s1["cur_obj_pose"]), pose(151.0))
     np.testing.assert_allclose(P(s1["src_obj_pose"]), pose(214.0))
+
+
+def test_an_object_the_hand_does_not_hold_gives_no_in_hand_pose(torch):
+    """GR1 Bottle Placement: the left hand's subtask 0 references the bottle (it supports the placement) and its subtask 1
+    the fridge; the bottle is 0.6 m from the left hand, so subtask 1 has no carried object (pilot 2026-11-27)."""
+    infos = [datagen_info(6, 0, obj="bottle"), datagen_info(6, 10, obj="bottle")]
+    for info, offset in zip(infos, (0, 10)):
+        info.object_poses["fridge"] = T(np.stack([pose(200 + offset + i) for i in range(6)]))
+    env = SceneEnv(eef={"robot0": pose(1.0)}, objects={"bottle": pose(1.6), "fridge": pose(300.0)})
+    gen = soft_generator(infos, env)
+    gen.env_cfg = types.SimpleNamespace(subtask_configs={"robot0": [types.SimpleNamespace(
+        num_interpolation_steps=0, num_fixed_steps=0, action_noise=0.0, subtask_term_signal="support")] * 2})
+    rt = make_runtime(Method0(None))
+    rt.begin_attempt(gen, 0)
+    for k, obj in enumerate(("bottle", "fridge")):
+        local_vars = soft_locals(infos, primary=1, subtask=k)
+        local_vars.update({"self": gen, "subtask_object_name": obj, "subtask_object_pose": T(pose(150.0 + k)),
+                           "selected_src_subtask_boundary": T([0, 4] if k == 0 else [4, 6])})
+        rt.record_subtask(local_vars)
+    s1 = rt.rec.subtasks[1]
+    assert s1["carried_object"] is None and s1["carried_candidate"] == "bottle" and s1["objects"] == {} and s1["src_objects"] == {}
+    assert s1["held_distance"]["now"] == pytest.approx(0.6)
 
 
 # grafts and the entrypoint dispatch -------------------------------------------------------------------
@@ -668,12 +712,14 @@ def test_mixer_features_at_generation_equal_the_fits_design_rows(torch, tmp_path
 
     torch.Tensor = T                       # scipy's array-API check looks the fake module's Tensor up
     install_fake_registration(monkeypatch, lambda **kw: kw["src_eef_poses"])
-    infos = [rope_info(6, 0), rope_info(6, 10), rope_info(6, 20)]
-    for info, offset in zip(infos, (0, 10, 20)):
-        info.object_poses["rope"] = T(np.stack([pose(0.01 * (offset + i)) for i in range(6)]))
+    infos = hand_on_rope([rope_info(6, 0), rope_info(6, 10), rope_info(6, 20)])
+    for info in infos:
+        eef = info.eef_pose["robot0"].a
+        info.object_poses["rope"] = T(eef @ pose(0.05))                    # the rigid stand-in is held 5 cm from the hand
         info.gripper_action = {"robot0": T(np.full((6, 1), -1.0))}       # open throughout: every source compatible
-    env = SceneEnv(eef={"robot0": pose(0.05)}, objects={})
-    gen = rope_generator(infos, eef_pose=pose(0.05))
+    hand = node_pose(rope_cloud(0.04, 0.6))
+    env = SceneEnv(eef={"robot0": hand}, objects={})
+    gen = rope_generator(infos, eef_pose=hand)
     gen.env = env
     mixer = SkillMixer(rule="randmix", chunk_seed=4)
     rt = make_runtime(Method0(mixer), records_dir=tmp_path)
@@ -682,7 +728,7 @@ def test_mixer_features_at_generation_equal_the_fits_design_rows(torch, tmp_path
     for k, nodes in enumerate((rope_cloud(0.03, 0.4), rope_cloud(0.04, 0.6))):
         local_vars = soft_locals(infos, primary=primary, subtask=k, soft=soft)
         local_vars.update({"self": gen, "selected_src_subtask_boundary": T([0, 4] if k == 0 else [4, 6]),
-                           "subtask_object_pose": T(pose(0.02 + 0.01 * k)), "subtask_nodal_positions": T(nodes)})
+                           "subtask_object_pose": T(hand @ pose(0.02 + 0.01 * k)), "subtask_nodal_positions": T(nodes)})
         if soft:
             local_vars.pop("subtask_object_pose")
         rt.mix_segment(gen, local_vars)

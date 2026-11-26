@@ -26,7 +26,7 @@ runs SoftMimicGen (DexMimicGen runs on AutoData, ``..autodata.runtime``).
 
 Scene of a subtask (``subtask_scene``, once per builder call): the reference object's pose now and in every source at the
 start of its segment, the end-effector pose now and in every source, and the in-hand pose (the previous subtask's reference
-object of the same end effector in its frame) now and in every source. ``mix_segment`` hands them to the mixer
+object of the same end effector in its frame, only where that object is held: ``held_distance``) now and in every source. ``mix_segment`` hands them to the mixer
 (``MixContext.extra``: ``current_object_pose``, ``current_in_hand``, ``source_in_hand``, ``carried_object``) and
 ``record_subtask`` writes the selected source's into the attempt record (``cur_obj_pose``, ``src_obj_pose``, ``eef_pose``,
 ``src_eef_pose``, ``objects``, ``src_objects``, ``carried_object``, ``term_signal``, and ``start_step``, the number of steps
@@ -100,6 +100,19 @@ class IsaacLabLayout:
         return layout
 
 
+HOLD_RIGID_M = 0.20       # a rigid object counts as held when its origin is this close to the end effector
+HOLD_NODES_M = 0.10       # a deformable object counts as held when one of its nodes is this close to the end effector
+
+
+def held_distance(eef_pose, object_pose, nodes=None) -> float:
+    """How far the end effector is from an object (m): from its nearest node for a deformable object (``nodes`` (N, 3)),
+    else from its origin. Compared with ``HOLD_NODES_M`` / ``HOLD_RIGID_M`` to decide whether the object is in the hand."""
+    position = np.asarray(eef_pose, dtype=float)[:3, 3]
+    if nodes is not None:
+        return float(np.linalg.norm(np.asarray(nodes, dtype=float) - position, axis=1).min())
+    return float(np.linalg.norm(np.asarray(object_pose, dtype=float)[:3, 3] - position))
+
+
 @dataclass
 class SubtaskScene:
     """What SkillMix needs of one subtask of one end effector (module docstring), per source j at the start of its
@@ -113,10 +126,12 @@ class SubtaskScene:
     source_object_poses: list                       # per source: reference object at its segment start
     eef_pose: np.ndarray                            # end effector now
     source_eef_poses: list                          # per source: end effector at its segment start
-    carried: str | None = None                      # the previous subtask's reference object of this end effector
+    carried: str | None = None                      # the previous subtask's reference object, when it is held now
     current_carried_pose: np.ndarray | None = None
-    source_carried_poses: list | None = None
+    source_carried_poses: list | None = None        # per source: that object's pose, None where the source does not hold it
     object_frame: dict | None = None                # deformable object: frame definition and reference hash
+    candidate: str | None = None                    # the previous subtask's reference object, held or not
+    held: dict | None = None                        # distances of the hold test: {"now": m, "sources": [m, ...]}
 
     def current_in_hand(self) -> np.ndarray | None:
         if self.current_carried_pose is None:
@@ -132,6 +147,8 @@ class SubtaskScene:
         their nodal frames, ``feature_object_poses``)."""
         extra = {"eef": self.eef, "soft": self.soft, "reference_object": self.reference_object,
                  "current_object_pose": self.current_object_pose, "carried_object": self.carried}
+        if self.held is not None:
+            extra["held_distance"] = self.held
         if self.soft:
             extra["feature_object_poses"] = self.source_object_poses
             extra["object_frame"] = self.object_frame
@@ -142,18 +159,19 @@ class SubtaskScene:
         return extra
 
     def record(self, selected: int) -> dict:
-        """The subtask record's fields for the selected source (what the fit's rows are made of)."""
+        """The subtask record's fields for the selected source (what the fit's rows are made of). ``objects`` and
+        ``src_objects`` hold the carried object only, and only where it is held (now; in the selected source), so the fit's
+        in-hand features are 0 exactly where the mixer's are."""
         objects, src_objects = {}, {}
-        if self.reference_object is not None and self.current_object_pose is not None:
-            objects[self.reference_object] = self.current_object_pose
-            src_objects[self.reference_object] = self.source_object_poses[selected]
         if self.carried is not None and self.current_carried_pose is not None:
             objects[self.carried] = self.current_carried_pose
             if self.source_carried_poses and self.source_carried_poses[selected] is not None:
                 src_objects[self.carried] = self.source_carried_poses[selected]
         out = {"cur_obj_pose": self.current_object_pose, "src_obj_pose": self.source_object_poses[selected],
                "eef_pose": self.eef_pose, "src_eef_pose": self.source_eef_poses[selected], "objects": objects,
-               "src_objects": src_objects, "carried_object": self.carried}
+               "src_objects": src_objects, "carried_object": self.carried, "carried_candidate": self.candidate}
+        if self.held is not None:
+            out["held_distance"] = {"now": self.held["now"], "source": self.held["sources"][selected]}
         if self.object_frame is not None:
             out["object_frame"] = self.object_frame
         return out
@@ -304,15 +322,41 @@ class IsaacLabRuntime:
                              object_frame=frame)
         carried, carried_soft = self._carried.get(eef, (None, False))
         if carried is not None:
-            scene.carried = carried
+            scene.candidate = carried
+            nodes_now = nodes_src = None
             if carried == scene.reference_object:              # the same object (Rope, Towel, Microwave): its poses above
-                scene.current_carried_pose, scene.source_carried_poses = current, sources
+                now_pose, src_poses = current, sources
+                if soft:
+                    nodes_now, nodes_src = self.held_nodes(local_vars, infos, str(carried), starts)
             elif not carried_soft:                             # a rigid object carried to another one (Bottle to the fridge)
-                scene.current_carried_pose = self.current_object_poses(generator, env_id)[carried]
-                scene.source_carried_poses = [_np(info.object_poses[carried][t]) for info, t in zip(infos, starts)]
-            # a deformable object carried to another reference object: in-hand pose unknown (features 0)
+                now_pose = self.current_object_poses(generator, env_id)[carried]
+                src_poses = [_np(info.object_poses[carried][t]) for info, t in zip(infos, starts)]
+            else:                                              # a deformable object carried to another one: not handled
+                now_pose = src_poses = None
+            if now_pose is not None:
+                self._hold(scene, now_pose, src_poses, nodes_now, nodes_src, soft and carried == scene.reference_object)
         self._scene = scene
         return scene
+
+    def held_nodes(self, local_vars: dict, infos, object_name: str, starts: list) -> tuple:
+        """``(nodes now, per-source nodes)`` of a deformable object for the hold test (SoftMimicGen only)."""
+        raise NotImplementedError(f"{type(self).__name__}: no deformable objects")
+
+    @staticmethod
+    def _hold(scene: SubtaskScene, now_pose, src_poses, nodes_now, nodes_src, deformable: bool) -> None:
+        """Keep the carried object only where it is held (``held_distance`` within ``HOLD_NODES_M`` for a deformable
+        object, ``HOLD_RIGID_M`` for a rigid one): not held now, no in-hand features at all; not held in source j, in-hand
+        features 0 for j. A grasp leaves the object at the hand; the previous subtask's reference object of a hand that
+        only reached, pushed or supported it is 0.4 to 1.3 m away (GR1 Bottle Placement pilot, 2026-11-27)."""
+        limit = HOLD_NODES_M if deformable else HOLD_RIGID_M
+        now = held_distance(scene.eef_pose, now_pose, nodes_now)
+        dist = [held_distance(e, p, None if nodes_src is None else nodes_src[j])
+                for j, (e, p) in enumerate(zip(scene.source_eef_poses, src_poses))]
+        scene.held = {"now": round(now, 4), "sources": [round(d, 4) for d in dist]}
+        if now > limit:
+            return
+        scene.carried, scene.current_carried_pose = scene.candidate, now_pose
+        scene.source_carried_poses = [p if d <= limit else None for p, d in zip(src_poses, dist)]
 
     def _label_wrapper(self, original, env_id: int):
         """The replacement ``target_eef_pose_to_action`` (the official parameter names, so keyword calls bind)."""
@@ -512,6 +556,10 @@ class SoftMimicGenRuntime(IsaacLabRuntime):
         current = nodal_frame(_np(local_vars[self.current_nodes_var]), reference)
         sources = [nodal_frame(_np(info.object_nodal_positions[object_name][t]), reference) for info, t in zip(infos, starts)]
         return current, sources, {"version": FRAME_VERSION, "reference_sha256": reference_hash(reference)}
+
+    def held_nodes(self, local_vars: dict, infos, object_name: str, starts: list) -> tuple:
+        return (_np(local_vars[self.current_nodes_var]),
+                [_np(info.object_nodal_positions[object_name][t]) for info, t in zip(infos, starts)])
 
     def source_segment(self, local_vars: dict, info, index: int, eef_name: str, object_name, start: int, end: int,
                        soft: bool) -> tuple:

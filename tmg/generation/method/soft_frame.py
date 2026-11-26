@@ -27,6 +27,13 @@ in half 0.63 (the unfolded half fixes the yaw); a rope bent so far that its sagi
 The frames are taken at subtask starts, before the rope is shaped or the towel folded. All nodes on one vertical line
 (no spread in the table plane) also raise.
 
+In-hand pose of a held rope or towel: the frame in the end-effector frame, so its position is the offset from the hand to
+the node centroid, about 0.3 m for the rope held at one end (Rope pilot, 2026-11-27), not the distance to the grasped
+node. That is the intended definition and the one of the 2026-11-07 code (``soft_pose.py``: ``_hand_in_object`` of the
+same centroid frame): the in-hand features compare this offset between the current scene and a source, and both see the
+same centroid. Whether the object is held at all is decided separately, from the nearest node
+(``isaaclab.runtime.held_distance``).
+
 The frame is a feature, not a registration: the segments themselves are still moved with SoftMimicGen's own nodal
 registration, and the frame changes nothing in a generation without SkillMix (method none). The same definition was used
 by the Rope calibration code of 2026-11-07 on the Isaac server (``nodal_yaw_v1``, ``docs/isaaclab_mixing_provenance.md``).

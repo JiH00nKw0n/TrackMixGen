@@ -143,6 +143,7 @@ def test_two_arms_record_and_mix_their_own_subtasks_without_colliding(torch, tmp
     infos = [datagen_info(6, 0, obj="bottle"), datagen_info(6, 10, obj="bottle")]
     for info, offset in zip(infos, (0, 10)):
         info.object_poses["fridge"] = T(np.stack([pose(200 + offset + i) for i in range(6)]))
+        info.object_poses["bottle"] = T(info.eef_pose["right"].a @ pose(0.05))      # held by the right hand
     ds = FakeDatastream(torch)
     ds.last_target = {"right": pose(1.0), "left": pose(-1.0)}
     ds.objects = {"bottle": pose(0.95), "fridge": pose(300.0)}
