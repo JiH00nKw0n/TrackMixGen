@@ -15,9 +15,11 @@ from tmg.generation.method.skillmix import (
     SourceDraws,
     SubtaskRule,
     load_rule,
+    parse_subtask_key,
     randmix_weights,
     single_source,
     softmax_weights,
+    subtask_key,
 )
 from tmg.generation.method.success_model import (
     design_rows,
@@ -163,6 +165,83 @@ def test_committed_rule_files_load_and_give_weights():
                 assert w.sum() == pytest.approx(1.0) and (w >= 0).all()
     # the MimicGen fits favour spreading the weight (d > 0) in every subtask
     assert all(b.d > 0 for t in COMMITTED["mimicgen"] for b in load_rule(f"mimicgen/{t}").subtasks.values())
+
+
+def test_every_committed_rule_file_loads_unchanged_with_single_arm_keys():
+    """Every file under configs/experiment/generator/*/coefficients/ is read with the per-arm keys as before: integer keys,
+    and a lookup with an end effector falls back to the plain subtask of a single-arm file."""
+    root = Path(__file__).resolve().parents[2] / "configs" / "experiment" / "generator"
+    files = sorted(root.glob("*/coefficients/*.yaml"))
+    assert len(files) >= sum(len(t) for t in COMMITTED.values())
+    for path in files:
+        data = yaml.safe_load(path.read_text())
+        rule = load_rule(str(path))
+        assert sorted(rule.subtasks) == sorted(int(k) for k in data["subtasks"])
+        for k, block in data["subtasks"].items():
+            b = rule.for_subtask(int(k))
+            assert b is rule.for_subtask(int(k), "robot0")              # single-arm file, any end effector
+            assert b.a.tolist() == [float(block["a"][j]) for j in range(rule.num_sources)] and b.d == float(block["d"])
+        assert rule.describe()["subtasks"] == sorted(rule.subtasks)
+
+
+def test_two_arm_rule_files_key_their_blocks_by_end_effector_and_subtask(tmp_path):
+    g = dict.fromkeys(("dx", "dy", "rotation", "inhand_position", "inhand_rotation"), 0.0)
+    path = tmp_path / "dex.yaml"
+    path.write_text(yaml.safe_dump({"rule": "softmax", "num_sources": 2, "subtasks": {
+        "right/0": {"a": [1.0, 0.0], "g": g, "d": 0.5, "c0": 0.0}, "right/1": {"a": [0.0, 0.0], "g": g, "d": 0.5, "c0": 0.0},
+        "left/0": {"a": [0.0, 1.0], "g": g, "d": 0.5, "c0": 0.0}}}))
+    rule = load_rule(str(path))
+    assert sorted(rule.subtasks) == ["left/0", "right/0", "right/1"]
+    assert rule.describe()["subtasks"] == ["left/0", "right/0", "right/1"]
+    assert rule.for_subtask(0, "right").a.tolist() == [1.0, 0.0] and rule.for_subtask(0, "left").a.tolist() == [0.0, 1.0]
+    with pytest.raises(KeyError, match="left/1"):
+        rule.for_subtask(1, "left")
+    with pytest.raises(KeyError):
+        rule.for_subtask(0)                                          # a two-arm file needs the end effector
+    assert subtask_key(2) == 2 and subtask_key(2, "right") == "right/2"
+    assert parse_subtask_key(3) == (None, 3) and parse_subtask_key("3") == (None, 3) and parse_subtask_key("left/1") == ("left", 1)
+    # the mixer picks the arm's block: right prefers source 0, left source 1 (no collision on k = 0)
+    mixer = SkillMixer(coefficients=rule)
+    w_right, rec_right = mixer.decide(0, 0, np.zeros((2, 3)), None, [np.full(4, -1.0)] * 2, eef="right")
+    w_left, rec_left = mixer.decide(0, 0, np.zeros((2, 3)), None, [np.full(4, -1.0)] * 2, eef="left")
+    assert w_right[0] > w_left[0] and rec_right["eef"] == "right" and rec_left["eef"] == "left"
+
+
+def test_randmix_and_source_draws_of_two_arms_do_not_collide_and_one_arm_streams_are_unchanged():
+    one, keyed = RandmixDraws(3), RandmixDraws(3)
+    assert one.draw(0, 4)[0] == keyed.draw(0, 4, None)[0]        # single arm: same key, same stream as before
+    two = RandmixDraws(3)
+    right, left = two.draw(0, 4, "right"), two.draw(0, 4, "left")
+    assert right[0] != left[0] and two.draw(0, 4, "right") is right      # kept within the attempt per arm
+    src = SourceDraws(5)
+    assert src.draw(0, "right") != src.draw(0, "left") and src.draw(0, "right") == src.draw(0, "right")
+
+
+def test_skillmix_mixer_scores_with_feature_poses_and_zero_inhand_for_unknown_sources():
+    """SoftMimicGen blends a deformable object's segments in the world frame (identity blending frames) but scores the
+    sources with their nodal frames (extra feature_object_poses); a source without an in-hand pose gets in-hand 0."""
+    segs = [_segment(0.0), _segment(0.0), _segment(0.0)]
+    world = [np.eye(4)] * 3
+    nodal = [pose(0.0), pose(0.05), pose(0.3)]
+    rule = _rule(3, g=[-10.0, 0.0, 0.0, -10.0, 0.0], d=0.5, subtasks=(0, 1))
+    out = SkillMixer(coefficients=rule).mix(_context(segs, world, 0, pose(0.0), extra={"feature_object_poses": nodal, "eef": "robot0"}))
+    rec = out.record
+    assert rec["scores"] == [0.0, -0.5, -3.0] and rec["eef"] == "robot0" and rec["mixed"] is True
+    assert len(set(rec["weights"])) == 3                              # non-identity weights from the nodal frames
+    extra = {"current_in_hand": pose(0.0), "source_in_hand": [pose(0.1), None, pose(0.0)]}
+    rec = SkillMixer(coefficients=rule).mix(_context(segs, nodal, 0, pose(0.0), subtask=1, extra=extra)).record
+    assert rec["inhand_features"] == [[0.1, 0.0], [0.0, 0.0], [0.0, 0.0]]
+
+
+def test_skillmix_mixer_with_a_current_object_pose_gives_non_identity_weights():
+    """The Isaac Lab runtimes pass extra current_object_pose: the mixer then scores and blends (no identity record)."""
+    segs = [_segment(0.0), _segment(0.0), _segment(0.0)]
+    objs = [pose(0.0), pose(0.02), pose(0.04)]
+    rule = _rule(3, g=[-5.0, 0.0, 0.0, 0.0, 0.0], d=1.0)
+    rec = SkillMixer(coefficients=rule).mix(_context(segs, objs, 1, pose(0.01), extra={"eef": "right"})).record
+    assert "identity_reason" not in rec and rec["mixed"] is True and max(rec["weights"]) < 1.0
+    rec = SkillMixer(coefficients=rule).mix(_context(segs, objs, 1, None)).record
+    assert rec["mixed"] is False and rec["identity_reason"] == "no current object pose"
 
 
 def test_a_coefficient_file_of_the_removed_above_mean_rule_is_refused(tmp_path):

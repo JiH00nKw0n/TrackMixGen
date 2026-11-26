@@ -55,6 +55,11 @@ The blend itself (both rules), for subtask k of one attempt:
    mean event steps, weighted mean positions, weighted rotation mean) and the result is expressed in the frame of the
    source the generator selected, so the generator's own transform moves it to the current scene unchanged.
 
+Two-armed generators (DexMimicGen's GR1) number the subtasks of every end effector from 0, so a rule file of such a task
+keys its blocks by end effector and subtask, ``<eef>/<k>`` (``subtask_key``); the mixer looks a block up by the end
+effector of the call (``MixContext.extra["eef"]``) and falls back to the plain ``k`` of a single-arm file. The rule files
+of MimicGen and CP-Gen (one arm, keys ``0, 1, ...``) are read as before.
+
 The record of every call keeps the rule, the scores, the spread effect, the features and the weights
 (``SkillMixer.decide``). CP-Gen re-solves constraints instead of replaying segments: it blends solved poses in its own
 module (``tmg.generation.generators.cpgen.mixing``) but takes the weights, the record and the symmetry score from here,
@@ -88,6 +93,23 @@ RANDMIX_LOG_C = (np.log(0.05), np.log(20.0))   # c ~ LogUniform(0.05, 20) of the
 
 
 # rule file ------------------------------------------------------------------------------------------------------------
+def subtask_key(k: int, eef: str | None = None):
+    """The key of subtask k of end effector ``eef`` in a rule file and in the draws: ``k`` itself for a single-arm task
+    (``eef`` None), ``"<eef>/<k>"`` when the subtasks are numbered per end effector."""
+    return int(k) if eef is None else f"{eef}/{int(k)}"
+
+
+def parse_subtask_key(key) -> tuple[str | None, int]:
+    """``(eef or None, k)`` of a rule-file key: ``0`` or ``"0"`` (single arm) or ``"right/2"``."""
+    text = str(key)
+    eef, sep, k = text.rpartition("/")
+    if not sep:
+        return None, int(text)
+    if not eef:
+        raise ValueError(f"rule-file subtask key {key!r}: expected <k> or <eef>/<k>")
+    return eef, int(k)
+
+
 @dataclass(frozen=True)
 class SubtaskRule:
     """The fitted block of one subtask: source effects ``a`` (J,), feature slopes ``g`` (5,), spread effect ``d``, intercept
@@ -109,13 +131,15 @@ class SkillMixRule:
     """A task's rule file."""
     name: str                    # "<generator>/<task>"
     num_sources: int
-    subtasks: dict               # subtask index -> SubtaskRule
+    subtasks: dict               # subtask_key (k, or "<eef>/<k>") -> SubtaskRule
     path: str = ""
 
-    def for_subtask(self, k: int) -> SubtaskRule:
-        if int(k) not in self.subtasks:
-            raise KeyError(f"SkillMix rule {self.name}: no subtask {k}")
-        return self.subtasks[int(k)]
+    def for_subtask(self, k: int, eef: str | None = None) -> SubtaskRule:
+        """The block of subtask k of end effector ``eef``: the ``<eef>/<k>`` block, else (a single-arm file) the ``k`` one."""
+        for key in ((subtask_key(k, eef), int(k)) if eef is not None else (int(k),)):
+            if key in self.subtasks:
+                return self.subtasks[key]
+        raise KeyError(f"SkillMix rule {self.name}: no subtask {subtask_key(k, eef)!r}")
 
     @classmethod
     def from_mapping(cls, data: Mapping, *, name: str = "", path: str = "") -> SkillMixRule:
@@ -124,17 +148,19 @@ class SkillMixRule:
                              f"`make fit-coefficients`")
         n = int(data["num_sources"])
         subtasks = {}
-        for k, block in (data.get("subtasks") or {}).items():
+        for key, block in (data.get("subtasks") or {}).items():
             a = np.array([float(block["a"][j]) for j in range(n)])
             g = np.array([float(block["g"][f]) for f in FEATURES])
-            subtasks[int(k)] = SubtaskRule(a=a, g=g, d=float(block["d"]), c0=float(block["c0"]))
+            eef, k = parse_subtask_key(key)
+            subtasks[subtask_key(k, eef)] = SubtaskRule(a=a, g=g, d=float(block["d"]), c0=float(block["c0"]))
         if not subtasks:
             raise KeyError(f"{path or name}: rule file has no subtasks")
         return cls(name=name or f"{data.get('generator', '')}/{data.get('task', '')}", num_sources=n, subtasks=subtasks,
                    path=path)
 
     def describe(self) -> dict:
-        return {"name": self.name, "path": self.path, "num_sources": self.num_sources, "subtasks": sorted(self.subtasks)}
+        order = sorted(self.subtasks, key=lambda key: (parse_subtask_key(key)[0] or "", parse_subtask_key(key)[1]))
+        return {"name": self.name, "path": self.path, "num_sources": self.num_sources, "subtasks": order}
 
 
 def rule_path(name: str, root: Path | None = None) -> Path:
@@ -193,39 +219,43 @@ def softmax_weights(scores, d: float, compatible: list[int], u: float | None = N
 
 class RandmixDraws:
     """The random weights of ``mixing.rule: randmix``: one draw ``(c, gamma variates (J,), fallback index)`` per
-    subtask of an attempt, kept until the next ``begin_attempt`` (CP-Gen may solve a constraint more than once)."""
+    subtask (and end effector, ``subtask_key``) of an attempt, kept until the next ``begin_attempt`` (CP-Gen may solve a
+    constraint more than once)."""
 
     def __init__(self, chunk_seed: int):
         self._rng = np.random.default_rng(np.random.SeedSequence([int(chunk_seed), RANDMIX_SEED]))
-        self._drawn: dict[int, tuple[float, np.ndarray, int]] = {}
+        self._drawn: dict = {}
 
     def begin_attempt(self) -> None:
         self._drawn = {}
 
-    def draw(self, subtask: int, num_sources: int) -> tuple[float, np.ndarray, int]:
-        if int(subtask) not in self._drawn:
+    def draw(self, subtask: int, num_sources: int, eef: str | None = None) -> tuple[float, np.ndarray, int]:
+        key = subtask_key(subtask, eef)
+        if key not in self._drawn:
             c = float(np.exp(self._rng.uniform(*RANDMIX_LOG_C)))
             gamma = self._rng.gamma(c, size=int(num_sources))
             fallback = int(self._rng.integers(int(num_sources)))
-            self._drawn[int(subtask)] = (c, gamma, fallback)
-        return self._drawn[int(subtask)]
+            self._drawn[key] = (c, gamma, fallback)
+        return self._drawn[key]
 
 
 class SourceDraws:
     """The uniform numbers of ``mixing.single_source: sample``: one per subtask of an attempt, kept until the next
-    ``begin_attempt`` (CP-Gen may solve a constraint more than once, and keeps the drawn source)."""
+    ``begin_attempt`` (CP-Gen may solve a constraint more than once, and keeps the drawn source). Keyed like
+    ``RandmixDraws``."""
 
     def __init__(self, chunk_seed: int):
         self._rng = np.random.default_rng(np.random.SeedSequence([int(chunk_seed), SOURCE_SEED]))
-        self._drawn: dict[int, float] = {}
+        self._drawn: dict = {}
 
     def begin_attempt(self) -> None:
         self._drawn = {}
 
-    def draw(self, subtask: int) -> float:
-        if int(subtask) not in self._drawn:
-            self._drawn[int(subtask)] = float(self._rng.random())
-        return self._drawn[int(subtask)]
+    def draw(self, subtask: int, eef: str | None = None) -> float:
+        key = subtask_key(subtask, eef)
+        if key not in self._drawn:
+            self._drawn[key] = float(self._rng.random())
+        return self._drawn[key]
 
 
 def randmix_weights(draw: tuple[float, np.ndarray, int], compatible: list[int]) -> np.ndarray:
@@ -373,27 +403,29 @@ class SkillMixer:
         self.draws.begin_attempt()
         self.sources.begin_attempt()
 
-    def weights(self, subtask: int, scene, inhand, compatible: list[int]) -> tuple[np.ndarray, dict]:
-        """The weights of one subtask under the configured rule, and what the record keeps about them."""
+    def weights(self, subtask: int, scene, inhand, compatible: list[int], eef: str | None = None) -> tuple[np.ndarray, dict]:
+        """The weights of one subtask (of end effector ``eef`` when the generator numbers subtasks per arm) under the
+        configured rule, and what the record keeps about them."""
         if self.rule == "randmix":
-            draw = self.draws.draw(subtask, len(scene))
+            draw = self.draws.draw(subtask, len(scene), eef)
             return randmix_weights(draw, compatible), {"dirichlet_c": round(draw[0], 5)}
-        block = self.coefficients.for_subtask(subtask)
+        block = self.coefficients.for_subtask(subtask, eef)
         s = block.scores(scene, inhand)
         about = {"scores": [round(float(v), 4) for v in s], "d": round(block.d, 4)}
         u = None
         if block.d <= 0 and self.single_source == "sample":
-            u = self.sources.draw(subtask)
+            u = self.sources.draw(subtask, eef)
             about["source_draw"] = round(u, 6)
         return softmax_weights(s, block.d, compatible, u), about
 
-    def decide(self, subtask: int, primary: int, scene, inhand, series: list) -> tuple[np.ndarray, dict]:
+    def decide(self, subtask: int, primary: int, scene, inhand, series: list, eef: str | None = None) -> tuple[np.ndarray, dict]:
         """The decision of one subtask, the same for every generator: ``(weights (J,), record)`` from the sources'
         features (``scene`` (J,3), ``inhand`` (J,2) or None) and gripper event series (``series``, one per source; only
-        sources whose events match the selected source ``primary`` can be blended with it)."""
+        sources whose events match the selected source ``primary`` can be blended with it). ``eef``: the end effector
+        of a generator that numbers subtasks per arm (the Isaac Lab generators), else None."""
         compatible = compatible_sources(series, primary)
-        w, about = self.weights(subtask, scene, inhand, compatible)
-        record = {"rule": self.rule, **about, "weights": [round(float(v), 4) for v in w],
+        w, about = self.weights(subtask, scene, inhand, compatible, eef)
+        record = {"rule": self.rule, **({"eef": eef} if eef is not None else {}), **about, "weights": [round(float(v), 4) for v in w],
                   "incompatible": [j for j in range(len(series)) if j not in compatible],
                   "scene_features": np.round(scene, 4).tolist()}
         if inhand is not None:
@@ -415,19 +447,29 @@ class SkillMixer:
         return np.where(self.detector.states(g), 1.0, -1.0)
 
     def features(self, context: MixContext) -> tuple[np.ndarray, np.ndarray | None]:
-        """``(scene features (J,3), in-hand features (J,2) or None)`` of every source for the context's subtask."""
+        """``(scene features (J,3), in-hand features (J,2) or None)`` of every source for the context's subtask.
+
+        The scene features compare the current reference-object pose with every source's at its segment start: the
+        blending frames ``src_object_poses``, unless the runtime gives other poses for the features
+        (``extra["feature_object_poses"]``: SoftMimicGen blends a deformable object's segments in the world frame after
+        the official nodal registration, and scores the sources with the nodal frame of ``soft_frame``). A source whose
+        in-hand pose is not known (``source_in_hand[j]`` None) gets in-hand features 0, as in the fit."""
         k = int(context.subtask_ind)
         current = context.extra["current_object_pose"]
-        scene = np.array([scene_features(current, context.src_object_poses[j]) for j in range(context.num_sources)])
+        poses = context.extra.get("feature_object_poses") or context.src_object_poses
+        scene = np.array([scene_features(current, poses[j]) for j in range(context.num_sources)])
         inhand = None
-        if k >= 1 and "current_in_hand" in context.extra:
+        if k >= 1 and context.extra.get("current_in_hand") is not None:
             now = context.extra["current_in_hand"]
-            inhand = np.array([inhand_features(now, src) for src in context.extra["source_in_hand"]])
+            inhand = np.array([np.zeros(2) if src is None else inhand_features(now, src)
+                               for src in context.extra["source_in_hand"]])
         return scene, inhand
 
     def mix(self, context: MixContext) -> MixedSegment:
         primary = int(context.primary)
-        record = {"call": self.calls, "subtask": int(context.subtask_ind), "source_a": primary, "mixed": False, "rule": self.rule}
+        eef = context.extra.get("eef")
+        record = {"call": self.calls, "subtask": int(context.subtask_ind), **({"eef": eef} if eef is not None else {}),
+                  "source_a": primary, "mixed": False, "rule": self.rule}
         self.calls += 1
         identity = MixedSegment(context.primary_eef_start, context.primary_targets, context.primary_gripper, record)
         if not context.has_reference_object or context.extra.get("current_object_pose") is None:
@@ -436,7 +478,7 @@ class SkillMixer:
         n = context.num_sources
         scene, inhand = self.features(context)
         series = [self._event_series(np.asarray(context.src_segments[j][2], dtype=float)) for j in range(n)]
-        w, decided = self.decide(int(context.subtask_ind), primary, scene, inhand, series)
+        w, decided = self.decide(int(context.subtask_ind), primary, scene, inhand, series, eef)
         record.update(decided)
         keep = [j for j in range(n) if w[j] > 0]
         obj = [np.asarray(context.src_object_poses[j], dtype=float) for j in keep]
