@@ -17,6 +17,11 @@ can still decide whether a later subtask succeeds through the in-hand pose it le
 In CP-Gen Threading the rule fitted on the grasp's own success kept the two grasp sources whose task success was 1 % and
 7 %. For the last subtask both labels are the same.
 
+The Isaac Lab generators (SoftMimicGen, DexMimicGen) number the subtasks of every end effector from 0, so their rows are made
+per (end effector, subtask) (``design_rows(..., eef=...)``); their records carry the selected source's poses themselves
+(``src_obj_pose``, ``src_eef_pose``, ``src_objects``), so no source file is read. Which of their subtasks an attempt reached
+is in ``tmg.generation.fit_coefficients.isaaclab_outcomes``.
+
 Which subtasks an attempt reached comes from the records. MimicGen: for every subtask but the last, the subtask's
 termination signal (``task.subtask_term_signals``, MimicGen's ``subtask_term_signal`` of the task template, recorded per
 step as ``term__<signal>``) turned on at some step up to the end of that subtask's execution; the last subtask succeeds
@@ -122,15 +127,17 @@ def reached_outcomes(attempt: Mapping, num_subtasks: int) -> list[bool]:
 
 
 def design_rows(attempts: Sequence[Mapping], outcomes: Sequence[Sequence[bool]], k: int, num_sources: int,
-                source_infos: Sequence[Mapping] | None) -> tuple[np.ndarray, np.ndarray, list[int]]:
+                source_infos: Sequence[Mapping] | None, eef: str | None = None) -> tuple[np.ndarray, np.ndarray, list[int]]:
     """The rows of subtask k from single-source attempts: one row per attempt that reached it, labelled with the attempt's
     task success (module docstring). Returns ``(X, y, kept)``: the columns of ``X`` are the J source indicators and the
-    five ``FEATURES`` (the in-hand features are 0 for k = 0), ``kept`` the index in ``attempts`` of every row."""
+    five ``FEATURES`` (the in-hand features are 0 for k = 0), ``kept`` the index in ``attempts`` of every row. ``eef``: the
+    end effector whose subtasks are numbered k (the Isaac Lab generators number them per arm), None for every subtask
+    record of the attempt."""
     rows, ys, kept = [], [], []
     for index, (a, out) in enumerate(zip(attempts, outcomes)):
         if not all(out[:k]):
             continue
-        subs = sorted(a["subtasks"], key=lambda s: int(s["subtask_ind"]))
+        subs = sorted((s for s in a["subtasks"] if eef is None or s.get("eef") == eef), key=lambda s: int(s["subtask_ind"]))
         if len(subs) <= k:
             continue
         s = subs[k]

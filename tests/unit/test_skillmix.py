@@ -448,6 +448,139 @@ def test_fit_reads_the_pools_of_a_generator_that_stops_at_the_first_failed_subta
     assert len(blocks[1]["a"]) == 2 and sorted(blocks[1]["g"]) == sorted(["dx", "dy", "rotation", "inhand_position", "inhand_rotation"])
 
 
+def _isaaclab_attempt(rng, *, success, grasped, mix=None, eefs=("right", "left")):
+    """One DexMimicGen-like attempt record: right subtasks 0 (grasp the bottle, term signal grasp_bottle) and 1 (place it in
+    the fridge, carried: the bottle), left subtask 0 (hold the fridge); the scene fields the Isaac Lab runtime records."""
+    def sub(eef, k, obj, carried=None, signal=None):
+        j = int(rng.integers(2))
+        eef_now = pose(rng.normal(0, 0.02), 0.1)
+        s = {"eef": eef, "subtask_ind": k, "object_name": obj, "src_demo_ind": j, "src_subtask_start": 4 * k,
+             "cur_obj_pose": flat(pose(rng.normal(0, 0.05), yaw=rng.normal(0, 0.2))), "src_obj_pose": flat(pose(0.01 * j)),
+             "eef_pose": flat(eef_now), "src_eef_pose": flat(pose(0.0, 0.1)), "objects": {}, "src_objects": {},
+             "carried_object": carried, "term_signal": signal}
+        if carried is not None:
+            s["objects"][carried] = flat(eef_now @ pose(0.0, 0.0, rng.normal(0.05, 0.01)))
+            s["src_objects"][carried] = flat(pose(0.0, 0.1, 0.05))
+        if mix is not None:
+            w = rng.dirichlet([0.5, 0.5]).round(4)
+            s["mix"] = {"subtask": k, "eef": eef, "weights": [float(w[0]), float(1 - w[0])],
+                        "scene_features": rng.random((2, 3)).tolist(), **({"inhand_features": rng.random((2, 2)).tolist()} if k else {})}
+        return s
+
+    subs = []
+    if "right" in eefs:
+        subs += [sub("right", 0, "bottle", signal="grasp_bottle"), sub("right", 1, "fridge", carried="bottle")]
+    if "left" in eefs:
+        subs.insert(1, sub("left", 0, "fridge"))
+    return {"success": bool(success), "subtasks": subs, "term_first": {"grasp_bottle": 3 if grasped else -1}}
+
+
+def test_fit_reads_isaaclab_records_per_end_effector_and_subtask(tmp_path, capsys):
+    """Two arms, subtasks numbered per arm: blocks right/0, right/1, left/0 (no collision on k = 0); right/1's rows are the
+    attempts whose grasp signal fired; the in-hand features come from the records (no source file)."""
+    from tmg.generation.fit_coefficients import fit_isaaclab_blocks, read_pools, write_rule
+
+    rng = np.random.default_rng(3)
+
+    def randmix(chunk):
+        return [_isaaclab_attempt(rng, success=rng.random() < 0.5, grasped=rng.random() < 0.8, mix=True) for _ in range(20)]
+
+    def unmix(chunk):
+        return [_isaaclab_attempt(rng, success=rng.random() < 0.4, grasped=n % 5 != 0) for n in range(20)]
+
+    _write_pool(tmp_path / "randmix", 3, randmix)
+    _write_pool(tmp_path / "unmix", 3, unmix)
+    blocks, reached = fit_isaaclab_blocks(read_pools([tmp_path / "randmix"]), read_pools([tmp_path / "unmix"]), num_sources=2,
+                                          with_cv=False)
+    assert sorted(blocks) == ["left/0", "right/0", "right/1"]
+    assert blocks["right/0"]["rows"]["unmix"] == 60 and blocks["left/0"]["rows"]["unmix"] == 60
+    assert blocks["right/1"]["rows"]["unmix"] == 48                      # the 12 attempts whose grasp never fired did not reach it
+    assert "term signal" in reached["right/1"] and "first subtask" in reached["right/0"]
+    path = write_rule(tmp_path / "rule.yaml", generator="dexmimicgen", task="bottle_door", basis="test", num_sources=2, blocks=blocks)
+    assert "<eef>/<k>" in path.read_text()
+    rule = load_rule(str(path))
+    assert rule.for_subtask(0, "left").a.tolist() == pytest.approx(blocks["left/0"]["a"])
+    assert rule.for_subtask(1, "right").d == pytest.approx(blocks["right/1"]["d"])
+    # the unmix rows of right/1 have non-zero in-hand features, from the recorded poses
+    from tmg.generation.fit_coefficients import isaaclab_outcomes, unmix_rows
+    unmix_attempts = read_pools([tmp_path / "unmix"])
+    outcomes, used = isaaclab_outcomes(unmix_attempts, "right", 2)
+    rows = unmix_rows(unmix_attempts, outcomes, 1, 2, None, "right")
+    assert np.abs(np.array(rows.x)[:, 2 + 3]).max() > 0 and used == {0: {"term_signal": 60, "fallback": 0}}
+
+
+def test_fit_of_a_single_arm_isaaclab_task_without_term_signals_falls_back_and_says_so(tmp_path):
+    """SoftMimicGen-like records of one arm (keys k) whose attempts recorded no signal: every recorded subtask counts as
+    reached (fallback), the label is the task success, and the fit says which was used."""
+    from tmg.generation.fit_coefficients import fit_isaaclab_blocks, read_pools
+
+    rng = np.random.default_rng(4)
+
+    def pool(mix):
+        def make(chunk):
+            out = []
+            for _ in range(20):
+                a = _isaaclab_attempt(rng, success=rng.random() < 0.5, grasped=True, mix=mix, eefs=("right",))
+                a["term_first"] = {}
+                out.append(a)
+            return out
+        return make
+
+    _write_pool(tmp_path / "randmix", 2, pool(True))
+    _write_pool(tmp_path / "unmix", 2, pool(None))
+    blocks, reached = fit_isaaclab_blocks(read_pools([tmp_path / "randmix"]), read_pools([tmp_path / "unmix"]), num_sources=2,
+                                          with_cv=False)
+    assert sorted(blocks) == [0, 1] and blocks[1]["rows"] == {"randmix": 40, "unmix": 40}
+    assert "FALLBACK" in reached[1]
+
+
+def test_fit_refuses_isaaclab_records_without_their_subtask_scene(tmp_path):
+    from tmg.generation.fit_coefficients import check_isaaclab_records
+
+    rng = np.random.default_rng(5)
+    good = _isaaclab_attempt(rng, success=True, grasped=True)
+    check_isaaclab_records([good])
+    old = _isaaclab_attempt(rng, success=True, grasped=True)
+    del old["subtasks"][0]["src_obj_pose"]
+    with pytest.raises(ValueError, match="regenerate"):
+        check_isaaclab_records([good, old])
+    broken = _isaaclab_attempt(rng, success=True, grasped=True)
+    broken["subtasks"][0]["scene_error"] = "KeyError: 'env_id'"
+    with pytest.raises(ValueError, match="scene_error"):
+        check_isaaclab_records([broken])
+    a, b = (_isaaclab_attempt(rng, success=True, grasped=True) for _ in range(2))
+    a["subtasks"][0]["object_frame"] = {"version": "nodal_yaw_v1", "reference_sha256": "x"}
+    b["subtasks"][0]["object_frame"] = {"version": "nodal_yaw_v1", "reference_sha256": "y"}
+    with pytest.raises(ValueError, match="frames"):
+        check_isaaclab_records([a, b])
+
+
+def test_fit_coefficients_dispatches_isaaclab_generators_to_the_per_arm_fit(tmp_path, monkeypatch):
+    from omegaconf import OmegaConf
+
+    import tmg.generation.fit_coefficients as fc
+
+    seen = {}
+
+    def fake_isaaclab(randmix, unmix, *, num_sources, with_cv=True):
+        seen["isaaclab"] = num_sources
+        block = {"a": [0.0, 0.0], "g": dict.fromkeys(("dx", "dy", "rotation", "inhand_position", "inhand_rotation"), 0.0),
+                 "d": 0.3, "c0": 0.0, "penalty": 1.0, "rows": {"randmix": 1, "unmix": 1}, "successes": 1,
+                 "cv_log_loss_gain_percent": {"all_rows": 0.0, "randmix_rows": 0.0}}
+        return {"right/0": block}, {"right/0": "first subtask: every attempt reaches it"}
+
+    monkeypatch.setattr(fc, "fit_isaaclab_blocks", fake_isaaclab)
+    monkeypatch.setattr(fc, "fit_blocks", lambda *a, **k: (_ for _ in ()).throw(AssertionError("MimicGen path used")))
+    monkeypatch.setattr(fc, "write_provenance", lambda *a, **k: None)
+    monkeypatch.setattr(fc, "read_pools", lambda paths: fc.Attempts([{"success": True, "subtasks": []}], [tmp_path], [0]))
+    cfg = OmegaConf.create({"randmix_pools": ["r"], "unmix_pools": ["u"], "output": str(tmp_path / "out"), "min_attempts": 1,
+                            "task": {"name": "bottle_door", "num_sources": 2}, "source": None, "write_config": False,
+                            "generator": {"name": "dexmimicgen", "simulator": "isaaclab"}})
+    summary = fc.fit_coefficients(cfg)
+    assert seen == {"isaaclab": 2} and summary["reached_from"] == {"right/0": "first subtask: every attempt reaches it"}
+    assert load_rule(str(tmp_path / "out" / "coefficients.yaml")).for_subtask(0, "right").d == 0.3
+
+
 # symmetry alignment ----------------------------------------------------------------------------------------------------
 HAMMER_SYM = {"hammer": [{"rot_axis": "z", "rot_param": np.pi, "translation": [0, 0, 0]}]}
 

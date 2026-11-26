@@ -22,6 +22,17 @@ cross-validated log-loss gain over the base rate (``GAIN_FOLDS`` folds), on all 
 file keeps ``a``, ``g``, ``d`` and ``c0`` per subtask (``tmg.generation.method.skillmix`` turns them into the softmax
 weights).
 
+Isaac Lab generators (``generator.simulator: isaaclab``, ``fit_isaaclab_blocks``): their records number the subtasks of every
+end effector from 0 (the GR1's right arm 0-3 and left arm 0-1 in Bottle Placement), so a block is fitted per (end effector,
+subtask) and written under the key ``<eef>/<k>`` when the task has more than one end effector (``skillmix.subtask_key``),
+under ``k`` for a single arm (SoftMimicGen). Their subtask records carry the selected source's poses (``src_obj_pose``,
+``src_eef_pose``, ``src_objects``; ``isaaclab.runtime.SubtaskScene``), so no source file is read. A subtask without a
+reference object gets no block (the mixer leaves it unmixed). Which subtasks an attempt reached (``isaaclab_outcomes``):
+subtask k of an end effector, other than its last, succeeded when its termination signal (the record's ``term_signal``)
+fired at some step of the attempt (``term_first``); where the record has no signal or the attempt recorded none (AutoData
+records no per-step signals), every recorded subtask counts as reached and the row's label, the task success, is the only
+outcome used. The fit prints, per block, how many attempts used which.
+
 Output: ``<output>/coefficients.yaml`` and ``<output>/FIT_COEFFICIENTS.json`` (summary), and when ``write_config`` is true
 ``configs/experiment/generator/<generator>/coefficients/<task>.yaml``, the file ``method.mixing.coefficients`` names.
 """
@@ -40,7 +51,7 @@ from tmg.core.chunks import CHUNKS_DIR, RESOLVED_CONFIG, chunk_is_done, write_js
 from tmg.core.layout import ATTEMPTS_JSONL
 from tmg.core.provenance import write_provenance
 from tmg.core.records import RECORDS_DIR, read_attempts
-from tmg.generation.method.skillmix import rule_path
+from tmg.generation.method.skillmix import rule_path, subtask_key
 from tmg.generation.method.success_model import (
     FEATURES,
     UNITS,
@@ -138,30 +149,31 @@ def entropy(w) -> float:
     return float(-(w[nz] * np.log(w[nz])).sum())
 
 
-def mix_records(attempt: Mapping) -> dict[int, dict]:
+def mix_records(attempt: Mapping, eef: str | None = None) -> dict[int, dict]:
     """The first mix record with weights of every subtask of an attempt (planned segments, then solves whose motion plan
-    failed)."""
+    failed); with ``eef``, of that end effector's subtasks only."""
     out = {}
     for m in [s.get("mix") for s in attempt["subtasks"]] + list(attempt.get("unplanned_mixes") or []):
-        if m and "weights" in m and int(m["subtask"]) not in out:
+        if m and "weights" in m and (eef is None or m.get("eef") == eef) and int(m["subtask"]) not in out:
             out[int(m["subtask"])] = m
     return out
 
 
-def unmix_rows(attempts: Attempts, success: Sequence, k: int, num_sources: int, infos) -> Rows:
-    """Rows of subtask k from a unmix pool: the one-hot source weight, its features, spread 0."""
-    X, y, kept = design_rows(attempts.records, success, k, num_sources, infos)
+def unmix_rows(attempts: Attempts, success: Sequence, k: int, num_sources: int, infos, eef: str | None = None) -> Rows:
+    """Rows of subtask k (of end effector ``eef``) from a unmix pool: the one-hot source weight, its features, spread 0."""
+    X, y, kept = design_rows(attempts.records, success, k, num_sources, infos, eef=eef)
     return Rows([np.append(x, 0.0) for x in X], list(y), [attempts.chunks[i] for i in kept])
 
 
-def randmix_rows(attempts: Attempts, success: Sequence | None, k: int, num_sources: int) -> Rows:
-    """Rows of subtask k from a randmix pool: the recorded weights, the weighted features, their spread. An attempt
-    counts when it has a mix record of subtask k and, with ``success`` (termination signals), every earlier subtask
-    succeeded. ``success`` None is the generator that stops at the first failed subtask: there the mix record itself shows
-    that the attempt reached k, also when the motion plan to k then failed and k has no subtask record."""
+def randmix_rows(attempts: Attempts, success: Sequence | None, k: int, num_sources: int, eef: str | None = None) -> Rows:
+    """Rows of subtask k (of end effector ``eef``) from a randmix pool: the recorded weights, the weighted features, their
+    spread. An attempt counts when it has a mix record of subtask k and, with ``success`` (termination signals), every
+    earlier subtask succeeded. ``success`` None is the generator that stops at the first failed subtask: there the mix
+    record itself shows that the attempt reached k, also when the motion plan to k then failed and k has no subtask
+    record."""
     rows = Rows([], [], [])
     for index, a in enumerate(attempts.records):
-        m = mix_records(a).get(k)
+        m = mix_records(a, eef).get(k)
         if m is None or (success is not None and not all(success[index][:k])):
             continue
         w = np.asarray(m["weights"], dtype=float)
@@ -291,6 +303,102 @@ def fit_blocks(randmix: Attempts, unmix: Attempts, *, num_sources: int, signals:
             for k in range(K)}
 
 
+# Isaac Lab generators ---------------------------------------------------------------------------------------------
+def eef_subtasks(attempt: Mapping, eef: str) -> list[dict]:
+    """The subtask records of one end effector of an attempt, by subtask index."""
+    return sorted((s for s in attempt["subtasks"] if s.get("eef") == eef), key=lambda s: int(s["subtask_ind"]))
+
+
+def isaaclab_subtasks(attempts: Sequence[Mapping]) -> dict[str, int]:
+    """End effector -> number of subtasks, from the records (the largest subtask index recorded, plus one)."""
+    out: dict[str, int] = {}
+    for a in attempts:
+        for s in a["subtasks"]:
+            out[str(s["eef"])] = max(out.get(str(s["eef"]), 0), int(s["subtask_ind"]) + 1)
+    return dict(sorted(out.items()))
+
+
+def check_isaaclab_records(attempts: Sequence[Mapping]) -> None:
+    """Refuse records without the scene of their subtasks (made before the Isaac Lab runtimes recorded it, or whose scene
+    could not be read: ``scene_error``) and deformable-object frames of different definitions or reference clouds."""
+    missing, errors, frames = 0, [], set()
+    for a in attempts:
+        for s in a["subtasks"]:
+            if s.get("scene_error"):
+                errors.append(f"attempt {a.get('attempt')} {s.get('eef')}/{s.get('subtask_ind')}: {s['scene_error']}")
+            elif s.get("object_name") is not None and "src_obj_pose" not in s:
+                missing += 1
+            if s.get("object_frame"):
+                frames.add((s["object_frame"]["version"], s["object_frame"]["reference_sha256"]))
+    if errors:
+        raise ValueError(f"{len(errors)} Isaac Lab subtask records have no scene (scene_error), e.g. {errors[0]}")
+    if missing:
+        raise ValueError(f"{missing} Isaac Lab subtask records lack src_obj_pose: the pools were made before the runtime "
+                         f"recorded the subtask scene; regenerate them")
+    if len(frames) > 1:
+        raise ValueError(f"the records use different deformable-object frames {sorted(frames)}")
+
+
+def isaaclab_outcomes(attempts: Attempts, eef: str, num_subtasks: int) -> tuple[list[list[bool]], dict]:
+    """Success of every subtask of one end effector in every attempt (module docstring), and how many attempts each
+    subtask's outcome came from: ``{k: {"term_signal": n, "fallback": n}}`` (the last subtask: the task success)."""
+    out, used = [], {k: {"term_signal": 0, "fallback": 0} for k in range(num_subtasks - 1)}
+    for a in attempts.records:
+        subs = {int(s["subtask_ind"]): s for s in eef_subtasks(a, eef)}
+        fired = a.get("term_first") or {}
+        row = []
+        for k in range(num_subtasks):
+            if k == num_subtasks - 1:
+                row.append(bool(a["success"]))
+                continue
+            signal = (subs.get(k) or {}).get("term_signal")
+            if signal is not None and str(signal) in fired:
+                used[k]["term_signal"] += 1
+                row.append(int(fired[str(signal)]) >= 0)
+            else:
+                used[k]["fallback"] += 1
+                row.append(k in subs)
+        out.append(row)
+    return out, used
+
+
+def describe_outcomes(used: Mapping) -> str:
+    """One line: where the outcome of each earlier subtask (which decides whether an attempt reached this one) came from."""
+    parts = []
+    for k, n in sorted(used.items()):
+        kind = ("term signal" if n["fallback"] == 0 else
+                "FALLBACK: a recorded subtask counts as reached, the label is the task success" if n["term_signal"] == 0 else
+                "term signal where recorded, else the fallback")
+        parts.append(f"earlier subtask {k}: {kind} ({n['term_signal']} attempts by signal, {n['fallback']} by fallback)")
+    return "; ".join(parts) or "first subtask: every attempt reaches it"
+
+
+def fit_isaaclab_blocks(randmix: Attempts, unmix: Attempts, *, num_sources: int, with_cv: bool = True) -> tuple[dict, dict]:
+    """The rule-file blocks of an Isaac Lab generator's task (module docstring), keyed by ``skillmix.subtask_key``, and per
+    block where its reached signal came from."""
+    check_isaaclab_records(randmix.records + unmix.records)
+    counts = isaaclab_subtasks([a for a in randmix.records + unmix.records if a["success"]]
+                               or randmix.records + unmix.records)
+    two_arms = len(counts) > 1
+    blocks, sources = {}, {}
+    for eef, K in counts.items():
+        reached_unmix, used_unmix = isaaclab_outcomes(unmix, eef, K)
+        reached_randmix, used_randmix = isaaclab_outcomes(randmix, eef, K)
+        for k in range(K):
+            if not any(s.get("object_name") is not None for a in unmix.records for s in eef_subtasks(a, eef)
+                       if int(s["subtask_ind"]) == k):
+                continue                                    # no reference object: the mixer leaves the subtask alone
+            key = subtask_key(k, eef if two_arms else None)
+            blocks[key] = fit_subtask(randmix_rows(randmix, reached_randmix, k, num_sources, eef),
+                                      unmix_rows(unmix, reached_unmix, k, num_sources, None, eef), num_sources, with_cv)
+            before = {j: {kind: used_unmix[j][kind] + used_randmix[j][kind] for kind in ("term_signal", "fallback")}
+                      for j in range(k)}
+            sources[key] = describe_outcomes(before)
+    if not blocks:
+        raise ValueError("no subtask with a reference object in the Isaac Lab records")
+    return blocks, sources
+
+
 # rule file ------------------------------------------------------------------------------------------------------------
 def write_rule(path: Path, *, generator: str, task: str, basis: str, num_sources: int, blocks: Mapping) -> Path:
     """Write a SkillMix softmax rule file (read by ``tmg.generation.method.skillmix.load_rule``)."""
@@ -300,8 +408,12 @@ def write_rule(path: Path, *, generator: str, task: str, basis: str, num_sources
             f"#   P(task succeeds | reached k, weights w) = sigmoid(c0 + sum_j w_j s_j + d H(w)),  s_j = a[j] + g . phi_j\n"
             f"#   weights: softmax(s / d) over the sources compatible with the selected one when d > 0, the best one when d <= 0\n"
             f"# Units: {UNITS}.\n")
+    keyed = any(isinstance(k, str) for k in blocks)
+    if keyed:
+        head += "# Subtask keys <eef>/<k>: subtask k of that end effector (the subtasks of every arm are numbered from 0).\n"
     data = {"generator": generator, "task": task, "rule": "softmax", "basis": basis, "num_sources": int(num_sources),
-            "features": list(FEATURES), "units": UNITS, "subtasks": {int(k): dict(v) for k, v in sorted(blocks.items())}}
+            "features": list(FEATURES), "units": UNITS,
+            "subtasks": {(str(k) if keyed else int(k)): dict(blocks[k]) for k in sorted(blocks, key=str if keyed else int)}}
     path.write_text(head + yaml.safe_dump(data, sort_keys=False, width=120))
     return path
 
@@ -322,11 +434,17 @@ def fit_coefficients(cfg) -> dict:
             raise ValueError(f"{len(read)} attempts in the {kind} pools {pools[kind]}, fewer than "
                              f"min_attempts={plain['min_attempts']}")
     num_sources = int(task["num_sources"])
-    blocks = fit_blocks(attempts["randmix"], attempts["unmix"], num_sources=num_sources,
-                        signals=task.get("subtask_term_signals") or None, source=plain["source"])
+    reached = {}
+    if generator.get("simulator") == "isaaclab":
+        blocks, reached = fit_isaaclab_blocks(attempts["randmix"], attempts["unmix"], num_sources=num_sources)
+    else:
+        blocks = fit_blocks(attempts["randmix"], attempts["unmix"], num_sources=num_sources,
+                            signals=task.get("subtask_term_signals") or None, source=plain["source"])
     for k, b in blocks.items():
         print(f"[tmg] subtask {k}: rows randmix/unmix {b['rows']['randmix']}/{b['rows']['unmix']}, d {b['d']:+.3f} "
               f"({'softmax' if b['d'] > 0 else 'best source alone'}), CV gain {b['cv_log_loss_gain_percent']}", flush=True)
+        if k in reached:
+            print(f"[tmg] subtask {k}: reached from {reached[k]}", flush=True)
     basis = (f"Fit (tmg fit_coefficients) on the randmix pools {pools['randmix']} ({len(attempts['randmix'])} "
              f"attempts) and the unmix pools {pools['unmix']} ({len(attempts['unmix'])} attempts); rows of "
              f"subtask k: the attempts that reached it, label = the attempt's task success.")
@@ -338,6 +456,7 @@ def fit_coefficients(cfg) -> dict:
                "randmix_attempts": len(attempts["randmix"]), "unmix_attempts": len(attempts["unmix"]),
                "subtasks": {k: {key: b[key] for key in ("d", "penalty", "rows", "successes", "cv_log_loss_gain_percent")}
                             for k, b in blocks.items()},
+               **({"reached_from": reached} if reached else {}),
                "written": written}
     write_json(output / SUMMARY, summary)
     print(f"[tmg] written: {', '.join(written)}")
