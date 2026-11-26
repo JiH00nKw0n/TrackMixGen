@@ -1,19 +1,15 @@
-# SkillMix rule of cpgen hammer_cleanup (tmg fit_coefficients). Per subtask k, with phi_j = (|dx|, |dy|, rotation,
-# inhand_position, inhand_rotation) of source j against the current scene (in-hand terms 0 for k = 0):
-#   P(task succeeds | reached k, weights w) = sigmoid(c0 + sum_j w_j s_j + d H(w)),  s_j = a[j] + g . phi_j
+# SkillMix softmax rule of cpgen hammer_cleanup (tmg fit_coefficients). Per subtask k, with phi_j = (|dx|, |dy|,
+# rotation, inhand_position, inhand_rotation) of source j against the current scene (in-hand terms 0 for k = 0):
+#   P(task succeeds | reached k, weights w) = sigmoid(c0 + sum_j w_j s_j + d spread(w)),
+#   s_j = a[j] + g . phi_j,  spread(w) = -sum_j w_j log w_j
 #   weights: softmax(s / d) over the sources compatible with the selected one when d > 0, the best one when d <= 0
 # Units: {'dx': 'm', 'dy': 'm', 'rotation': 'rad', 'inhand_position': 'm', 'inhand_rotation': 'rad'}.
 generator: cpgen
 task: hammer_cleanup
 rule: softmax
-basis: 'Fitted on 2026-11-20 on the A100 (scratch_calib/ana/fit_all.py, softmax form, without the older rank_human_demos pool;
-  the model and fit of tmg fit_coefficients, which reproduced the CP-Gen Threading rule to 1e-13 from the same records) from
-  /data/pools/cpgen/hammer_cleanup/ours/ours/mixup_only/pool_calib [the randmix pool; in this repository skillmix_randmix/pool_randmix] (method mixup_only with TMG_MIX_BETA_RANDOM=1 TMG_MIX_DIRICHLET=1:
-  Dirichlet(c) weights, c ~ LogUniform(0.05, 20); selection ours, chunks of 25; for coffee, hammer_cleanup, mug_cleanup and
-  three_piece_assembly also the chunks of the same pool made on the Isaac server, scratch_calib/ana/cp_isaac; the A100 runs
-  also set TMG_CPGEN_RESOLVE_AFTER_BRIDGE=1, the re-solve after the bridge, cpgen.yaml resolve_after_bridge: true) and /data/pools/cpgen/hammer_cleanup/ours/ours/none/pool_ctrl [the unmix pool; in this repository none/pool_unmix]
-  (method none, the same code and settings); rows of subtask k: the attempts that reached it, label = the attempt''s task
-  success.'
+basis: 'Fit (tmg fit_coefficients) on the randmix pools [''/data/pools/cpgen/hammer_cleanup/ours/ours/skillmix_randmix/pool_randmix_wt'']
+  (2000 attempts) and the unmix pools [''/data/scratch_calib/ctrl_records/hammer_cleanup''] (2000 attempts); rows of subtask
+  k: the attempts that reached it, label = the attempt''s task success.'
 num_sources: 10
 features:
 - dx
@@ -30,105 +26,113 @@ units:
 subtasks:
   0:
     a:
-    - 0.24734472201939542
-    - 0.6203793079732185
-    - -2.614628866320691
-    - 0.07156408444448593
-    - 0.15941900082918317
-    - 0.4640917906833768
-    - 0.40444899065222073
-    - 0.01274448154297626
-    - 0.3425634807765135
-    - 0.264637479848723
+    - 0.3062702747733239
+    - 0.4401960074736172
+    - -3.0473438055777025
+    - 0.5036747156298816
+    - 0.41737880547891193
+    - 0.46066294958981197
+    - 0.30162644338526545
+    - 0.10752942370805497
+    - 0.1665504134712372
+    - 0.4261845265061802
     g:
-      dx: -1.4722079730535578
-      dy: -3.5081586729916676
-      rotation: -0.782320989319304
+      dx: -2.069677434184591
+      dy: -4.14293975352762
+      rotation: -0.5537781208012376
       inhand_position: 0.0
       inhand_rotation: 0.0
-    d: 0.06346971286919979
-    c0: -0.14881205614414117
+    d: 0.09918114479849954
+    c0: -0.027394640222395905
+    penalty: 10.0
     rows:
       randmix: 2000
-      unmix: 966
+      unmix: 1956
+    successes: 1601
     cv_log_loss_gain_percent:
-      all_rows: 3.2
-      randmix_rows: 1.3
+      all_rows: 5.0
+      randmix_rows: 1.6
   1:
     a:
-    - 0.015002795017995812
-    - 0.3923934184320227
-    - 0.09803913937427272
-    - -0.6568965748784603
-    - 0.5411276315400151
-    - 0.1494045822343905
-    - 0.3555666062652144
-    - -1.0950673409861809
-    - 0.6198199408519993
-    - 0.49177946015548574
+    - 0.08004029275556168
+    - 0.542787747675876
+    - -0.10569358147958677
+    - -0.9451588432058686
+    - 0.25675056168076704
+    - 0.3905003861751342
+    - 0.3154562708552091
+    - -1.1582174837313717
+    - 0.4116878484291176
+    - 0.48882680769564646
     g:
-      dx: -0.3743339028360157
-      dy: 0.9628565805906799
-      rotation: -0.054060855824183456
+      dx: -0.8688295589129011
+      dy: -0.08155910354695493
+      rotation: -0.04704143393305353
       inhand_position: 0.0
       inhand_rotation: 0.0
-    d: -0.026915094920098238
-    c0: -0.3940553794433136
+    d: -0.017148946948086344
+    c0: -0.048188165249213155
+    penalty: 100.0
     rows:
-      randmix: 1969
-      unmix: 800
+      randmix: 1955
+      unmix: 1617
+    successes: 1601
     cv_log_loss_gain_percent:
-      all_rows: 2.6
-      randmix_rows: 2.9
+      all_rows: 3.3
+      randmix_rows: 4.3
   2:
     a:
-    - -0.21521736825523782
-    - 1.330402522418859
-    - 0.10104628707534613
-    - 0.5240592998764124
-    - -0.3192945437965765
-    - -0.3136187068119146
-    - -0.183622191567566
-    - -0.3340841005597753
-    - 0.3822845453862765
-    - -0.47547379546269286
+    - -0.07562893182771742
+    - 1.1124941031342914
+    - -0.051715164197814134
+    - 0.4933216973192108
+    - -0.28128480049831317
+    - -0.4307356655560104
+    - -0.11924651087423001
+    - -0.21362924671434827
+    - 0.4142824868803677
+    - -0.2201050444470927
     g:
-      dx: -2.059621885303705
-      dy: -1.157505775934619
-      rotation: -1.1282210895521898
-      inhand_position: -84.4015265935779
-      inhand_rotation: 0.15008479240182776
-    d: -0.2253765841059621
-    c0: 1.7180673118738432
+      dx: -2.62452789728185
+      dy: -1.5599517355744965
+      rotation: -0.878725919989038
+      inhand_position: -72.6660106080654
+      inhand_rotation: -0.007960642702300076
+    d: -0.16281773499406965
+    c0: 2.121900061326954
+    penalty: 0.1
     rows:
-      randmix: 1446
-      unmix: 542
+      randmix: 1442
+      unmix: 1153
+    successes: 1601
     cv_log_loss_gain_percent:
-      all_rows: 5.4
-      randmix_rows: 5.7
+      all_rows: 7.3
+      randmix_rows: 11.0
   3:
     a:
-    - 0.40957704402367623
-    - 0.37431148050062946
-    - -0.25059271547804063
-    - -0.6124003193491255
-    - -0.37669558107195844
-    - -0.8701750893099655
-    - 0.5425756619437856
-    - -0.5198376427222996
-    - 0.7481496961781624
-    - 0.371346037146367
+    - 0.5978471004523392
+    - 0.4181332834260882
+    - -0.15162387715311748
+    - -0.8023448585640587
+    - -0.43540925225711535
+    - -0.9932388286281549
+    - 0.5757893095478811
+    - -0.7750105969006115
+    - 0.753957135423481
+    - 0.6387378644137547
     g:
-      dx: -2.546590588582637
-      dy: -0.046659204026537573
-      rotation: -1.4072470124234384
-      inhand_position: -9.65158775025496
-      inhand_rotation: 0.8326566949287992
-    d: -0.06849169202202386
-    c0: 2.858077526275939
+      dx: -3.734579831184837
+      dy: 0.7004422893753386
+      rotation: -1.345831529072814
+      inhand_position: -11.195518553761032
+      inhand_rotation: 0.858696404177626
+    d: 0.06406091909334881
+    c0: 3.4678859271022953
+    penalty: 1.0
     rows:
-      randmix: 1104
-      unmix: 481
+      randmix: 1105
+      unmix: 1030
+    successes: 1601
     cv_log_loss_gain_percent:
-      all_rows: 6.5
-      randmix_rows: 5.8
+      all_rows: 12.4
+      randmix_rows: 13.4
