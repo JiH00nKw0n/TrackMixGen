@@ -21,7 +21,7 @@ Every group file is strict: a key that the group file does not define causes an 
 | Group | Files | Content |
 |---|---|---|
 | `paths/` | `local.yaml` | The data layout. The root is `TMG_DATA_ROOT`, or `~/tmg_data` when the variable is not set; inside the containers it is `/data`. Under the root: `sources` (human source demonstrations), `pools` (generation pools), `datasets` (training files), `resets` (fixed evaluation scenes), `runs` (training runs), `reports` (scene checks, coefficient fits). One file is enough because every machine uses the same relative layout. |
-| `cluster/` | `local.yaml`, `isaac.yaml`, `a100.yaml`, `ada.yaml` | The execution environment of one machine (`ada`: the single-GPU hand-off machine of the Isaac Lab baseline, with `device`, the GPU Isaac Sim uses): container runtime (`docker` or `singularity`), image name, Singularity image path, data root on that machine, the upper limit of parallel workers (`max_workers`: Isaac 16, A100 48), threads per worker, and the minimum free disk space. `make CLUSTER=<name>` reads the runtime and the data root from this file. |
+| `cluster/` | `local.yaml`, `isaac.yaml`, `a100.yaml`, `ada.yaml` | The execution environment of one machine (`ada`: the single-GPU hand-off machine of the Isaac Lab baseline, with `device`, the GPU Isaac Sim uses): container runtime (`docker` or `singularity`), image name, Singularity image path, data root on that machine, the upper limit of parallel workers (`max_workers`: Isaac 16, A100 48; `isaaclab_max_workers`, default 3: the cap on concurrent Isaac Sim chunk processes), threads per worker, and the minimum free disk space. `make CLUSTER=<name>` reads the runtime and the data root from this file. |
 
 ## 2. `experiment/`: the axes of an experiment
 

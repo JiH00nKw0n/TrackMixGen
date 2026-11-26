@@ -9,6 +9,7 @@ interfaces.py    MixContext, MixedSegment, SegmentMixer, Method, build_method an
 skillmix.py      SkillMixer (mixing.type: skillmix), the rule file (SkillMixRule, load_rule), softmax_weights,
                  RandmixDraws / randmix_weights (mixing.rule: randmix), symmetry alignment
 success_model.py the per-source features (scene, in-hand) and the rows of the fit (task-success label)
+soft_frame.py    the object frame of a deformable object from its nodes (SoftMimicGen rope, towel), for the features
 event_mix.py     event-aligned blending of segments (mix_many; align_segments for CP-Gen)
 grippers.py      gripper state and event rules: gripper_states / change_indices (scalar sign commands),
                  SignGripper and ClosureGripper detectors (scalar +/- commands, many-joint hands), build_detector
@@ -23,6 +24,8 @@ the fitted mixed-effects logistic model of the task success given the mixing wei
 
     P(task succeeds | reached k, w) = sigmoid( c0 + sum_j w_j s_j + d H(w) ),   s_j = a_j + g . phi_j
 
+Two-armed generators (DexMimicGen's GR1) number the subtasks of every arm from 0, so their rule files key the blocks
+`<eef>/<k>` (`skillmix.subtask_key`); single-arm files (MimicGen, CP-Gen, SoftMimicGen) keep the keys `0, 1, ...`.
 `a_j` is source j's own effect, `g` the feature slopes, `d` the effect of spreading the weight (`H` the entropy of `w`). The
 weights that maximize it over the sources compatible with the selected one (same gripper events) are `softmax(s / d)` when
 `d > 0`; weights below 1e-3 are dropped. When `d <= 0` one source takes all the weight: the best-scored one (`mixing.single_source: best`, method `skillmix`) or one drawn with probability `softmax(s)` (`sample`, method `skillmix_sample`; with `best` every scene can get the same source). The retained segments are aligned
