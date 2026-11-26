@@ -654,3 +654,49 @@ def test_entrypoint_dispatches_to_the_runtime_module_of_the_spec(monkeypatch, ca
     assert calls == [("fake_runtime_a", 5, ns), ("fake_runtime_b", 6, ns)]
     out = capsys.readouterr().out
     assert "grafts installed (fake_runtime_a)" in out and "grafts installed (fake_runtime_b)" in out and "DISABLED" in out
+
+
+# the features at generation equal the fit's ----------------------------------------------------------------------------
+@pytest.mark.parametrize("soft", [False, True])
+def test_mixer_features_at_generation_equal_the_fits_design_rows(torch, tmp_path, monkeypatch, soft):
+    """One attempt of two subtasks with the real SkillMixer (randmix): the scene and in-hand features the mixer scored
+    for the selected source equal the columns tmg fit_coefficients builds from the same attempt's record."""
+    import json
+
+    from tmg.generation.method.skillmix import SkillMixer
+    from tmg.generation.method.success_model import FEATURES, design_rows
+
+    torch.Tensor = T                       # scipy's array-API check looks the fake module's Tensor up
+    install_fake_registration(monkeypatch, lambda **kw: kw["src_eef_poses"])
+    infos = [rope_info(6, 0), rope_info(6, 10), rope_info(6, 20)]
+    for info, offset in zip(infos, (0, 10, 20)):
+        info.object_poses["rope"] = T(np.stack([pose(0.01 * (offset + i)) for i in range(6)]))
+        info.gripper_action = {"robot0": T(np.full((6, 1), -1.0))}       # open throughout: every source compatible
+    env = SceneEnv(eef={"robot0": pose(0.05)}, objects={})
+    gen = rope_generator(infos, eef_pose=pose(0.05))
+    gen.env = env
+    mixer = SkillMixer(rule="randmix", chunk_seed=4)
+    rt = make_runtime(Method0(mixer), records_dir=tmp_path)
+    rt.begin_attempt(gen, 0)
+    primary = 2
+    for k, nodes in enumerate((rope_cloud(0.03, 0.4), rope_cloud(0.04, 0.6))):
+        local_vars = soft_locals(infos, primary=primary, subtask=k, soft=soft)
+        local_vars.update({"self": gen, "selected_src_subtask_boundary": T([0, 4] if k == 0 else [4, 6]),
+                           "subtask_object_pose": T(pose(0.02 + 0.01 * k)), "subtask_nodal_positions": T(nodes)})
+        if soft:
+            local_vars.pop("subtask_object_pose")
+        rt.mix_segment(gen, local_vars)
+        rt.record_subtask(local_vars)
+    rt.end_attempt(gen, 0, {"success": True})
+    line = json.loads((tmp_path / "attempts.jsonl").read_text().splitlines()[0])
+    for k in (0, 1):
+        mix = line["subtasks"][k]["mix"]
+        assert "weights" in mix and "identity_reason" not in mix
+        X, _, kept = design_rows([line], [[True, True]], k, 3, None, eef="robot0")
+        assert kept == [0]
+        fit_features = X[0, 3:]
+        scene = np.asarray(mix["scene_features"])[primary]
+        inhand = np.asarray(mix["inhand_features"])[primary] if k else np.zeros(2)
+        np.testing.assert_allclose(fit_features, np.concatenate([scene, inhand]), atol=2e-4, err_msg=str(FEATURES))
+        if k == 1:
+            assert np.abs(inhand).sum() > 0 and np.abs(scene).sum() > 0        # non-zero features, not a trivial match

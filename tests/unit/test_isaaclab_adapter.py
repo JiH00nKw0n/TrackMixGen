@@ -124,7 +124,7 @@ def _chunk_with_records(folder: Path, subtasks):
 
 
 def test_scene_errors_fail_a_calibration_chunk_and_stop_its_pool_but_only_warn_elsewhere(tmp_path, monkeypatch, capsys):
-    import tmg.generation.generators.isaaclab.adapter as adapter
+    from tmg.generation.generators.isaaclab import adapter
 
     monkeypatch.setenv("TMG_DATA_ROOT", str(tmp_path))
     monkeypatch.setattr(adapter, "validate_records", lambda folder, attempts: None)
