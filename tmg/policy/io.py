@@ -98,7 +98,7 @@ class PipelineIO:
 
     @classmethod
     def build(cls, config, stats: dict, device: str) -> PipelineIO:
-        from lerobot.processor.factory import make_pre_post_processors
+        from lerobot.policies.factory import make_pre_post_processors  # lerobot 0.6.1 location (requirements/train.txt)
 
         tensor_stats = {k: {s: torch.as_tensor(np.asarray(v), dtype=torch.float32) for s, v in d.items()} for k, d in stats.items()}
         pre, post = make_pre_post_processors(config, dataset_stats=tensor_stats,
@@ -119,7 +119,7 @@ class PipelineIO:
 
     @classmethod
     def load(cls, folder: Path, config, device: str) -> PipelineIO:
-        from lerobot.processor.factory import make_pre_post_processors
+        from lerobot.policies.factory import make_pre_post_processors  # lerobot 0.6.1 location (requirements/train.txt)
 
         pre, post = make_pre_post_processors(config, pretrained_path=str(Path(folder) / PIPELINE_DIR),
                                              preprocessor_overrides={"device_processor": {"device": device}})
