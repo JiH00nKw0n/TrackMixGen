@@ -108,3 +108,33 @@ def test_chunk_seed_goes_into_datagen_config_not_the_command_line(tmp_path, monk
     assert env_cfg.observations.policy.rope_state.params["counts"] == [16]                       # the task's low-dim term is added
     calls.append(env_cfg.datagen_config.seed)
     assert calls == [9001] and term == "success_term"
+
+
+def _chunk_with_records(folder: Path, subtasks):
+    from tmg.generation.base import ChunkSpec
+
+    records = folder / "records"
+    records.mkdir(parents=True)
+    lines = [{"attempt": i, "success": False, "subtasks": subtasks, "npz": f"attempt_{i:06d}.npz"} for i in range(2)]
+    (records / "attempts.jsonl").write_text("".join(json.dumps(a) + "\n" for a in lines))
+    for i in range(2):
+        (records / f"attempt_{i:06d}.npz").write_bytes(b"")
+    return ChunkSpec(chunk={"index": 0, "seed": 1, "attempts": 2}, generator="softmimicgen", task={}, scene={}, method={},
+                     protocol={}, generator_config="", folder=str(folder), records_dir=str(records), expected_outputs=[], extra={})
+
+
+def test_scene_errors_fail_a_calibration_chunk_and_stop_its_pool_but_only_warn_elsewhere(tmp_path, monkeypatch, capsys):
+    import tmg.generation.generators.isaaclab.adapter as adapter
+
+    monkeypatch.setenv("TMG_DATA_ROOT", str(tmp_path))
+    monkeypatch.setattr(adapter, "validate_records", lambda folder, attempts: None)
+    broken = [{"eef": "robot0", "subtask_ind": 0, "scene_error": "KeyError: 'subtask_nodal_positions'"}]
+    for generation, fails in (("test/pilot20", False), ("pool_unmix", True)):
+        cfg = resolved(compose("generate", ["generator=softmimicgen", "task=rope", "scene=official", "method=none",
+                                            f"generation={generation}"]))
+        gen = make_generator(cfg)
+        result = gen.chunk_result(_chunk_with_records(tmp_path / generation.replace("/", "_"), broken))
+        assert result["scene_errors"] == 2 and ("error" in result) == fails and bool(result.get("stop_pool")) == fails
+        assert "WARNING" in capsys.readouterr().out
+    clean = gen.chunk_result(_chunk_with_records(tmp_path / "clean", [{"eef": "robot0", "subtask_ind": 0}]))
+    assert "scene_errors" not in clean and "error" not in clean

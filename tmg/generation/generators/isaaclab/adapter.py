@@ -38,6 +38,13 @@ from tmg.generation.simulators.scenes import load_scene_file
 
 ENTRYPOINT = "tmg.generation.generators.isaaclab.entrypoint"
 GENERATED = "generated.hdf5"
+CALIBRATION_POOLS = ("pool_unmix", "pool_randmix")   # generation.name of the pools tmg fit_coefficients reads
+
+
+def scene_errors(records) -> list[str]:
+    """``attempt eef/k: error`` of every subtask record whose scene could not be read (``isaaclab.runtime``)."""
+    return [f"attempt {r.get('attempt')} {s.get('eef')}/{s.get('subtask_ind')}: {s['scene_error']}"
+            for r in records for s in r.get("subtasks") or [] if s.get("scene_error")]
 
 
 class IsaacLabGenerator(SyntheticDataGenerator):
@@ -150,8 +157,19 @@ class IsaacLabGenerator(SyntheticDataGenerator):
             with h5py.File(generated, "r") as f:
                 exported = len(f["data"].keys()) if "data" in f else 0
         successes = sum(1 for r in records if r.get("success"))
-        return {"attempts": len(records), "successes": successes, "exported_episodes": exported,
-                "generated_hdf5": str(generated) if generated.exists() else None}
+        result = {"attempts": len(records), "successes": successes, "exported_episodes": exported,
+                  "generated_hdf5": str(generated) if generated.exists() else None}
+        errors = scene_errors(records)
+        if errors:
+            # the SkillMix fit refuses such records: a calibration pool fails the chunk and stops the pool at once, any
+            # other pool (the baseline) keeps its chunk and says so loudly
+            result["scene_errors"] = len(errors)
+            print(f"[tmg] WARNING chunk {folder.name}: {len(errors)} subtask records without their scene, e.g. {errors[0]}",
+                  flush=True)
+            if str(self.generation.get("name")) in CALIBRATION_POOLS:
+                result.update(error=f"{len(errors)} subtask records without their scene (scene_error), e.g. {errors[0]}; "
+                                    f"the SkillMix fit cannot use this calibration pool", stop_pool=True)
+        return result
 
     def demo_layout(self) -> dict:
         """How ``tmg dataset`` reads this generator's chunk outputs (see ``tmg.data.dataset.DemoLayout``)."""

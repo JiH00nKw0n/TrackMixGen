@@ -476,11 +476,13 @@ def test_rope_mixer_gets_nodal_scene_and_in_hand_inputs_from_the_second_subtask(
     assert not np.allclose(rots[0], rots[1])                           # the sources' frames differ: non-zero scene features
 
 
-def test_a_scene_that_cannot_be_read_is_noted_without_a_mixer_and_raises_with_one(torch):
+def test_a_scene_that_cannot_be_read_is_noted_without_a_mixer_and_raises_with_one(torch, tmp_path, capsys):
+    import json
+
     infos = [rope_info(6, 0), rope_info(6, 10)]
     gen = rope_generator(infos)
     for method, raises in ((Method0(None), False), (Method0(RecordingMixer()), True)):
-        rt = make_runtime(method)
+        rt = make_runtime(method, records_dir=tmp_path / str(raises))
         rt.begin_attempt(gen, 0)
         local_vars = soft_locals(infos, soft=True)
         local_vars.update({"self": gen, "selected_src_subtask_boundary": T([0, 4])})
@@ -491,7 +493,11 @@ def test_a_scene_that_cannot_be_read_is_noted_without_a_mixer_and_raises_with_on
             continue
         rt.mix_segment(gen, local_vars)
         rt.record_subtask(local_vars)
-        assert "subtask_nodal_positions" in rt.rec.subtasks[0]["scene_error"]
+        assert "subtask_nodal_positions" in rt.rec.subtasks[0]["scene_error"] and "WARNING" in capsys.readouterr().out
+        rt.end_attempt(gen, 0, {"success": False})
+        line = json.loads((tmp_path / "False" / "attempts.jsonl").read_text().splitlines()[0])
+        assert line["scene_errors"] == 1                                 # counted in the attempt line
+
 
 
 def test_rigid_objects_use_the_builder_pose_and_the_environment_for_another_carried_object(torch):

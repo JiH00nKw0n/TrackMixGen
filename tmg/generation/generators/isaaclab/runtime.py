@@ -207,6 +207,8 @@ class IsaacLabRuntime:
         self._selected: dict[str, int] = {}           # eef -> source demonstration chosen in this attempt
         self._carried: dict[str, tuple] = {}          # eef -> (reference object, soft) of its previous subtask in this attempt
         self._scene: SubtaskScene | None = None       # the scene of the subtask being built (mix_segment, then record_subtask)
+        self._scene_errors = 0                        # subtask records of this attempt without their scene
+        self._warned_scene = False
         self._seg_id = -1
         self._action_owner = None                     # object whose target_eef_pose_to_action is wrapped
         self._original_action_fn = None
@@ -327,7 +329,7 @@ class IsaacLabRuntime:
         self._attempt_t0 = time.time()
         self._labels, self._executed, self._pending = [], [], None
         self._selected = {}
-        self._carried, self._scene = {}, None
+        self._carried, self._scene, self._scene_errors = {}, None, 0
         self.rec.begin_attempt()
         self._seg_id = -1
         if self.method.mixer is not None:
@@ -341,7 +343,8 @@ class IsaacLabRuntime:
         self._restore_label_wrapper()
         try:
             self.rec.add_extra(elapsed_s=round(time.time() - self._attempt_t0, 3), labels=self.method.labels,
-                               num_label_steps=len(self._labels), executed_steps=len(self._executed))
+                               num_label_steps=len(self._labels), executed_steps=len(self._executed),
+                               scene_errors=self._scene_errors)
             src = {eef: int(v) for eef, v in self._selected.items()}
             self.rec.flush(success=bool(results.get("success", False)), src_demo_inds=[src[e] for e in self.layout.eefs if e in src])
             if self.records_dir is not None and self._labels:
@@ -435,6 +438,11 @@ class IsaacLabRuntime:
             if self.method.mixer is not None:
                 raise
             fields["scene_error"] = f"{type(error).__name__}: {error}"
+            self._scene_errors += 1
+            if not self._warned_scene:
+                self._warned_scene = True
+                print(f"[tmg] WARNING subtask {eef_name}/{subtask_ind}: scene not recorded ({fields['scene_error']}); "
+                      f"tmg fit_coefficients will refuse these records", flush=True)
         self._scene = None
         self._carried[eef_name] = (object_name, bool(local_vars.get("subtask_object_soft", False)))
         self.rec.add_subtask(subtask_ind=subtask_ind, eef=eef_name, object_name=object_name,
