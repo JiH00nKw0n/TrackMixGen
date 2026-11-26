@@ -56,8 +56,20 @@ def test_undefined_or_mismatched_clouds_raise():
         nodal_frame(ref[:-1], ref)
     vertical = np.zeros((5, 3))
     vertical[:, 2] = np.linspace(0, 1, 5)
-    with pytest.raises(ValueError, match="undefined"):
+    with pytest.raises(ValueError, match="no spread"):
         nodal_frame(vertical, ref[:5])
+    # two halves turned by +-70 degrees (r = cos 70 = 0.34 < 0.5): refused; by +-50 degrees (r = 0.64): a yaw of 0
+    # (alternate nodes, so both groups have the same spread and the centroid stays put)
+    centred = ref - ref.mean(axis=0)
+    for angle, refused in ((np.radians(70), True), (np.radians(50), False)):
+        split = centred.copy()
+        split[0::2] = centred[0::2] @ yaw_matrix(angle).T
+        split[1::2] = centred[1::2] @ yaw_matrix(-angle).T
+        if refused:
+            with pytest.raises(ValueError, match="rotation-fit correlation"):
+                nodal_frame(split, centred)
+        else:
+            assert np.allclose(nodal_frame(split, centred)[:3, :3], np.eye(3), atol=1e-3)   # alternate groups nearly balance
     bad = ref.copy()
     bad[0, 0] = np.nan
     with pytest.raises(ValueError, match="finite"):
@@ -67,3 +79,16 @@ def test_undefined_or_mismatched_clouds_raise():
 def test_the_reference_is_source_zero_at_its_first_step():
     infos = [SimpleNamespace(object_nodal_positions={"rope": np.stack([rope(seed=s), rope(seed=s + 1)])}) for s in (0, 5)]
     assert np.array_equal(reference_nodes(infos, "rope"), rope(seed=0))
+
+
+def test_a_folded_towel_keeps_a_yaw_and_a_straight_rope_bent_into_a_u_too():
+    g = np.linspace(-0.15, 0.15, 12)
+    x, y = np.meshgrid(g, g)
+    flat = np.stack([x.ravel(), y.ravel(), np.zeros(x.size)], axis=1)
+    folded = flat.copy()
+    folded[folded[:, 0] > 0, 0] *= -1                                  # folded in half onto the other side
+    assert np.allclose(nodal_frame(folded @ yaw_matrix(0.5).T, flat)[:3, :3], yaw_matrix(0.5), atol=1e-6)
+    t = np.linspace(-np.pi / 2, np.pi / 2, 60)
+    straight = np.stack([np.linspace(-0.2, 0.2, 60), np.zeros(60), np.zeros(60)], axis=1)
+    u = np.stack([0.4 / np.pi * np.cos(t), 0.4 / np.pi * np.sin(t), np.zeros(60)], axis=1)
+    nodal_frame(u, straight)                                           # r = 0.91: accepted
