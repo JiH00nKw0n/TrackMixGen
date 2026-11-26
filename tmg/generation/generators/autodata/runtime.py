@@ -184,6 +184,10 @@ class AutoDataRuntime(IsaacLabRuntime):
         if obs is None:
             terms = subtask_terms(env, env_id)
             obs = {"subtask_terms": terms} if terms else None
+            if not terms and not getattr(self, "_said_no_terms", False):
+                self._said_no_terms = True
+                print("[tmg] the environment publishes no subtask_terms observation group: the records carry no per-step "
+                      "subtask signals (generator.per_step_subtask_signals)", flush=True)
         super().record_step(multi_waypoint, env, env_id, obs, success)
 
     def record_command(self, multi_waypoint, datastream, env_id: int, play_action) -> None:

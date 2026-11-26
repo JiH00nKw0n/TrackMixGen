@@ -592,9 +592,10 @@ def test_fit_coefficients_dispatches_isaaclab_generators_to_the_per_arm_fit(tmp_
 
     seen = {}
 
-    def fake_isaaclab(randmix, unmix, *, num_sources, with_cv=True, allow_fallback=False):
+    def fake_isaaclab(randmix, unmix, *, num_sources, with_cv=True, allow_fallback=False, no_step_signals=False):
         seen["isaaclab"] = num_sources
         seen["allow_fallback"] = allow_fallback
+        seen["no_step_signals"] = no_step_signals
         block = {"a": [0.0, 0.0], "g": dict.fromkeys(("dx", "dy", "rotation", "inhand_position", "inhand_rotation"), 0.0),
                  "d": 0.3, "c0": 0.0, "penalty": 1.0, "rows": {"randmix": 1, "unmix": 1}, "successes": 1,
                  "cv_log_loss_gain_percent": {"all_rows": 0.0, "randmix_rows": 0.0}}
@@ -610,8 +611,10 @@ def test_fit_coefficients_dispatches_isaaclab_generators_to_the_per_arm_fit(tmp_
     fc.fit_coefficients(OmegaConf.merge(cfg, {"fit": {"allow_reached_fallback": True}}))
     assert seen["allow_fallback"] is True
     summary = fc.fit_coefficients(cfg)
-    assert seen == {"isaaclab": 2, "allow_fallback": False} and summary["reached_from"] == {"right/0": "first subtask: every attempt reaches it"}
+    assert seen == {"isaaclab": 2, "allow_fallback": False, "no_step_signals": False} and summary["reached_from"] == {"right/0": "first subtask: every attempt reaches it"}
     assert load_rule(str(tmp_path / "out" / "coefficients.yaml")).for_subtask(0, "right").d == 0.3
+    fc.fit_coefficients(OmegaConf.merge(cfg, {"generator": {"per_step_subtask_signals": False}}))
+    assert seen["no_step_signals"] is True and seen["allow_fallback"] is False
 
 
 # symmetry alignment ----------------------------------------------------------------------------------------------------
@@ -757,3 +760,27 @@ def test_the_mixer_checks_the_deformable_frame_against_the_rule_file(tmp_path):
     with pytest.raises(ValueError, match="object frame"):
         mix(_rule(2), frame)                                          # a rule fitted without frames
     assert "weights" in mix(_rule(2), None).record                    # a rigid reference object: nothing to check
+
+
+def test_a_generator_without_per_step_signals_falls_back_only_for_attempts_that_recorded_none():
+    """DexMimicGen (generator.per_step_subtask_signals: false): an attempt with no per-step signal at all counts its recorded
+    subtasks as reached; one that recorded signals but not the subtask's own still raises (a name mismatch)."""
+    from tmg.generation.fit_coefficients import Attempts, isaaclab_outcomes
+
+    rng = np.random.default_rng(8)
+    silent = _isaaclab_attempt(rng, success=True, grasped=True)
+    silent["term_first"] = {}
+    out, used = isaaclab_outcomes(Attempts([silent], [], []), "right", 2, no_step_signals=True)
+    assert out == [[True, True]] and used[0] == {"term_signal": 0, "fallback": 1}
+    with pytest.raises(ValueError, match="allow_reached_fallback"):
+        isaaclab_outcomes(Attempts([silent], [], []), "right", 2)
+    renamed = _isaaclab_attempt(rng, success=True, grasped=True)
+    renamed["term_first"] = {"other_signal": 2}
+    with pytest.raises(ValueError, match="grasp_bottle"):
+        isaaclab_outcomes(Attempts([renamed], [], []), "right", 2, no_step_signals=True)
+
+
+def test_the_dexmimicgen_generator_declares_no_per_step_signals():
+    root = Path(__file__).resolve().parents[2] / "configs" / "experiment" / "generator"
+    assert yaml.safe_load((root / "dexmimicgen.yaml").read_text())["per_step_subtask_signals"] is False
+    assert "per_step_subtask_signals" not in yaml.safe_load((root / "softmimicgen.yaml").read_text())

@@ -344,8 +344,8 @@ def check_isaaclab_records(attempts: Sequence[Mapping]) -> dict | None:
     return {"version": version, "reference_sha256": sha}
 
 
-def isaaclab_outcomes(attempts: Attempts, eef: str, num_subtasks: int,
-                      allow_fallback: bool = False) -> tuple[list[list[bool]], dict]:
+def isaaclab_outcomes(attempts: Attempts, eef: str, num_subtasks: int, allow_fallback: bool = False,
+                      no_step_signals: bool = False) -> tuple[list[list[bool]], dict]:
     """Success of every subtask of one end effector in every attempt (module docstring), and how many attempts each
     subtask's outcome came from: ``{k: {"term_signal": n, "fallback": n}}`` (the last subtask: the task success).
 
@@ -355,7 +355,9 @@ def isaaclab_outcomes(attempts: Attempts, eef: str, num_subtasks: int,
     subtask k. An attempt without steps (a plan that failed before execution) reached nothing past what it recorded. A
     recorded signal that the attempt's per-step signals do not have raises (a name mismatch, or a stack that records no
     per-step signals). Without a usable signal the fallback (a recorded subtask counts as reached, the label alone
-    decides) is used only with ``allow_fallback`` (``fit.allow_reached_fallback``); otherwise that raises too."""
+    decides) is used only with ``allow_fallback`` (``fit.allow_reached_fallback``), or, for an attempt that recorded no
+    per-step signal at all, when the generator declares that its environments publish none (``no_step_signals``:
+    ``generator.per_step_subtask_signals: false``, DexMimicGen); otherwise that raises too."""
     out, used = [], {k: {"term_signal": 0, "fallback": 0} for k in range(num_subtasks - 1)}
     for a in attempts.records:
         subs = {int(s["subtask_ind"]): s for s in eef_subtasks(a, eef)}
@@ -378,7 +380,7 @@ def isaaclab_outcomes(attempts: Attempts, eef: str, num_subtasks: int,
                 first = int(fired.get(str(signal), -1))
                 row.append(0 <= first < end)
                 continue
-            if not allow_fallback:
+            if not (allow_fallback or (no_step_signals and not fired)):
                 why = (f"its term signal {signal!r} is not among the attempt's per-step signals {sorted(fired)}"
                        if signal is not None else "it has no term signal")
                 raise ValueError(f"{where}: {why}; set fit.allow_reached_fallback=true to count a recorded subtask as "
@@ -401,7 +403,7 @@ def describe_outcomes(used: Mapping) -> str:
 
 
 def fit_isaaclab_blocks(randmix: Attempts, unmix: Attempts, *, num_sources: int, with_cv: bool = True,
-                        allow_fallback: bool = False) -> tuple[dict, dict]:
+                        allow_fallback: bool = False, no_step_signals: bool = False) -> tuple[dict, dict]:
     """The rule-file blocks of an Isaac Lab generator's task (module docstring), keyed by ``skillmix.subtask_key``, and per
     block where its reached signal came from (``allow_fallback``: ``isaaclab_outcomes``)."""
     check_isaaclab_records(randmix.records + unmix.records)
@@ -410,8 +412,8 @@ def fit_isaaclab_blocks(randmix: Attempts, unmix: Attempts, *, num_sources: int,
     two_arms = len(counts) > 1
     blocks, sources = {}, {}
     for eef, K in counts.items():
-        reached_unmix, used_unmix = isaaclab_outcomes(unmix, eef, K, allow_fallback)
-        reached_randmix, used_randmix = isaaclab_outcomes(randmix, eef, K, allow_fallback)
+        reached_unmix, used_unmix = isaaclab_outcomes(unmix, eef, K, allow_fallback, no_step_signals)
+        reached_randmix, used_randmix = isaaclab_outcomes(randmix, eef, K, allow_fallback, no_step_signals)
         for k in range(K):
             if not any(s.get("object_name") is not None for a in unmix.records for s in eef_subtasks(a, eef)
                        if int(s["subtask_ind"]) == k):
@@ -469,8 +471,13 @@ def fit_coefficients(cfg) -> dict:
     if generator.get("simulator") == "isaaclab":
         frame = check_isaaclab_records(attempts["randmix"].records + attempts["unmix"].records)
         allow = bool((plain.get("fit") or {}).get("allow_reached_fallback", False))
+        no_step_signals = generator.get("per_step_subtask_signals", True) is False
+        if no_step_signals:
+            print(f"[tmg] {generator['name']}: the environments publish no per-step subtask signals "
+                  f"(generator.per_step_subtask_signals: false); attempts without signals count every recorded subtask "
+                  f"as reached and are fitted on the task-success label alone", flush=True)
         blocks, reached = fit_isaaclab_blocks(attempts["randmix"], attempts["unmix"], num_sources=num_sources,
-                                              allow_fallback=allow)
+                                              allow_fallback=allow, no_step_signals=no_step_signals)
     else:
         blocks = fit_blocks(attempts["randmix"], attempts["unmix"], num_sources=num_sources,
                             signals=task.get("subtask_term_signals") or None, source=plain["source"])

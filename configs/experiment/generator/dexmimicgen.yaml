@@ -36,6 +36,14 @@ measure_links: {left: left_hand_pitch_link, right: right_hand_pitch_link}
 # randn_like draws of AutoData's target_eef_pose_to_action per step, in order: left pos, left quat, right pos, right quat;
 # a hand whose noise scale is zero at that step draws nothing (the tracking loop's noise ledger tolerates fewer draws)
 noise_draw_shapes: [3, 4, 3, 4]
+# Per-step subtask completion (2026-11-27, read in the isaaclab-dex image): AutoData reads it from the environment's
+# subtask_terms observation group (Datastream.get_subtask_term_signals, used by its automatic annotation), and neither the
+# Arena environments (Microwave Opening, Bottle Placement and Door Closing: their tasks define the Mimic subtask configs
+# and the term-signal names, no subtask_terms group) nor Isaac Lab Mimic's GR1T2 Pick Place env (no
+# get_subtask_term_signals) publish one; the released datasets carry annotated signals. Generation never checks a subtask
+# end online: each subtask runs the selected source's annotated segment, and only the task success is evaluated.
+# tmg fit_coefficients therefore counts every recorded subtask of these tasks as reached (label: task success).
+per_step_subtask_signals: false
 method_overrides:
   skillmix: &closure_events        # the mixer aligns segments by the hands' closure events (a hand's 11 commands:
     mixing: {gripper_events: {type: closure, columns: [0, 1, 2, 3]}}   # proximal index, middle, pinky, ring first)
