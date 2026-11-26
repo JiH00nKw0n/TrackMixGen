@@ -43,7 +43,8 @@ class PolicyRunner:
         self.policy_name = policy_name_of(cfg)
         self.io = load_io(self.checkpoint, self.policy_name, cfg, device)
         self.task = None
-        self.cameras = [camera_of(k) for k in cfg.image_features]
+        # LeRobot π0/π0.5 add empty_camera_<i> slots (config empty_cameras) that the policy fills itself; they are no cameras
+        self.cameras = [camera_of(k) for k in cfg.image_features if not camera_of(k).startswith("empty_camera_")]
         self.state_dim = int(cfg.robot_state_feature.shape[0])
         self.env_state_dim = int(cfg.env_state_feature.shape[0]) if cfg.env_state_feature is not None else 0
         # a policy trained on 6D-rotation actions (CP-Gen, tmg.policy.rotation) answers in the environment's 7 numbers
