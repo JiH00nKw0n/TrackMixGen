@@ -22,7 +22,7 @@ lowdim_terms:
   towel_state:
     func: tmg.generation.simulators.isaaclab_lowdim:deformable_nodes
     params: {object: object, layout: grid, counts: [6, 6], relative: centroid, eef: {sensor: ee_frame}}
-instruction: fold the towel in half
+instruction: "Fold the towel in half, then let go and lift the gripper."        # language instruction for π0; written to match the success check (fold ratio below 0.55, gripper open, hand raised; no published VLA prompt)
 # Official generation settings (softmimicgen/envs/franka_towel_ik_rel_mimic_env_cfg.py @ c9d146ba), used unchanged:
 # one source per attempt (select_src_per_subtask False), selection registration_cost (nn_k 3), action noise 0.01,
 # interpolation steps 5 and 5, relative actions, failed attempts kept, generation_guarantee (trials count successes).

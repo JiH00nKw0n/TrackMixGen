@@ -26,7 +26,7 @@ lowdim_terms:
   microwave_state:
     func: tmg.generation.simulators.isaaclab_lowdim:scene_object_state
     params: {objects: [{name: microwave, joints: [microjoint]}], eef: {links: [left_hand_roll_link, right_hand_roll_link]}}
-instruction: open the microwave door with the right hand
+instruction: "Reach out to the microwave and open it."        # language instruction for π0; used verbatim: NVIDIA Arena-GR1-Manipulation-Task meta/tasks.jsonl (GR00T training and evaluation)
 # Official generation settings (autodata_examples/tasks/gr1_open_microwave.yaml @ 835f4aab), these values used unchanged except that the
 # chunk guarantees its success count: a source per subtask (select_src_per_subtask true), nearest_neighbor_object (nn_k 3),
 # action noise 0.005, interpolation 5 (right arm) and 0 (left arm), term offset [10, 20] on the first right subtask.
