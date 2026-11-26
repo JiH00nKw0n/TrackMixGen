@@ -12,9 +12,11 @@ from tmg.generation.method.skillmix import (
     RandmixDraws,
     SkillMixer,
     SkillMixRule,
+    SourceDraws,
     SubtaskRule,
     load_rule,
     randmix_weights,
+    single_source,
     softmax_weights,
 )
 from tmg.generation.method.success_model import (
@@ -197,6 +199,49 @@ def test_build_method_reads_the_rule_file_and_keeps_randmix_out_of_the_skillmix_
 
 
 # the mixer ------------------------------------------------------------------------------------------------------------
+def test_single_source_is_the_best_or_drawn_from_the_softmax_of_the_scores():
+    s = np.array([0.3, 0.0, -0.2, 5.0])
+    assert single_source(s, [0, 1, 2]) == 0                          # best: largest score among the compatible ones
+    rng = np.random.default_rng(0)
+    draws = np.array([single_source(s, [0, 1, 2], u) for u in rng.random(20000)])
+    p = np.exp(s[:3]) / np.exp(s[:3]).sum()
+    assert np.allclose([np.mean(draws == j) for j in range(3)], p, atol=0.015)     # sample: softmax(s), T = 1
+    assert not np.any(draws == 3)                                    # an incompatible source is never drawn
+    w = softmax_weights(s, -0.5, [0, 1, 2], u=0.999)
+    assert w.tolist() == [0.0, 0.0, 1.0, 0.0]                         # the top of the cumulative distribution
+    assert softmax_weights(s, -0.5, [0, 1, 2], u=0.0).tolist() == [1.0, 0.0, 0.0, 0.0]
+
+
+def test_source_draws_are_reproducible_and_kept_within_an_attempt():
+    a, b = SourceDraws(30001), SourceDraws(30001)
+    first = a.draw(0)
+    assert a.draw(0) == first and b.draw(0) == first                  # one draw per subtask; same chunk seed, same draws
+    a.begin_attempt()
+    assert a.draw(0) != first
+
+
+def test_skillmix_sample_draws_one_source_only_where_the_fit_gives_no_spread():
+    segs = [_segment(0.0), _segment(0.0), _segment(0.0)]
+    objs = [pose(0.0), pose(0.0), pose(0.0)]
+    rule = SkillMixRule(name="g/t", num_sources=3, subtasks={
+        0: SubtaskRule(a=np.array([0.2, 0.1, 0.0]), g=np.zeros(5), d=-0.3, c0=0.0),
+        1: SubtaskRule(a=np.array([0.2, 0.1, 0.0]), g=np.zeros(5), d=0.5, c0=0.0)})
+    picked = set()
+    for seed in range(40):
+        m = SkillMixer(coefficients=rule, chunk_seed=seed, single_source="sample")
+        m.begin_attempt()
+        w, rec = m.weights(0, np.zeros((3, 3)), None, [0, 1, 2])
+        assert sorted(w.tolist()) == [0.0, 0.0, 1.0] and "source_draw" in rec
+        picked.add(int(np.argmax(w)))
+        w1, rec1 = m.weights(1, np.zeros((3, 3)), None, [0, 1, 2])
+        assert (w1 > 0).sum() == 3 and "source_draw" not in rec1      # d > 0: blended as before
+    assert picked == {0, 1, 2}
+    best = SkillMixer(coefficients=rule, chunk_seed=0)
+    assert best.weights(0, np.zeros((3, 3)), None, [0, 1, 2])[0].tolist() == [1.0, 0.0, 0.0]
+    with pytest.raises(ValueError, match="single_source"):
+        SkillMixer(coefficients=rule, single_source="random")
+
+
 def _segment(x, T=6):
     targets = np.stack([pose(x + 0.01 * t) for t in range(T)])
     return (pose(x), targets, np.full((T, 1), -1.0))

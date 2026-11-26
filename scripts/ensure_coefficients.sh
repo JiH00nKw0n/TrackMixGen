@@ -12,11 +12,19 @@
 #   METHOD=<method config>: do nothing unless that method mixes with SkillMix's softmax rule (`make generate` uses this)
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
+# method config $2 (or a method file it inherits through its defaults list) has a line matching $1
+method_has() {
+  local file="$REPO/configs/experiment/method/$2.yaml" base
+  [ -f "$file" ] || return 1
+  grep -qE "$1" "$file" && return 0
+  for base in $(sed -nE 's/^  - ([A-Za-z0-9_]+)$/\1/p' "$file"); do
+    method_has "$1" "$base" && return 0
+  done
+  return 1
+}
 if [ -n "${METHOD:-}" ]; then
-  f="$REPO/configs/experiment/method/$METHOD.yaml"
-  [ -f "$f" ] || exit 0
-  grep -qE '^  type: skillmix' "$f" || exit 0
-  grep -qE '^  rule: softmax' "$f" || exit 0
+  method_has '^  type: skillmix' "$METHOD" || exit 0
+  method_has '^  rule: softmax' "$METHOD" || exit 0
   case " ${OVERRIDES:-} " in *" method.mixing.rule=randmix "*) exit 0;; esac   # a randmix pool needs no rule file
 fi
 : "${GENERATOR:?}" "${TASK:?}"

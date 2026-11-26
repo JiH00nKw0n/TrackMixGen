@@ -34,6 +34,11 @@ def test_method_variants_compose(monkeypatch, tmp_path):
     assert plain["method"]["mixing"]["type"] == "skillmix" and plain["method"]["mixing"]["rule"] == "softmax"
     assert plain["method"]["mixing"]["coefficients"] == "mimicgen/square"
     assert "tracking" not in plain["method"] and "sources" not in plain["method"]
+    sample = resolved(compose("generate", ["task=square", "method=skillmix_sample"]))
+    assert sample["method"]["name"] == "skillmix_sample" and sample["method"]["mixing"]["single_source"] == "sample"
+    assert sample["method"]["mixing"]["rule"] == "softmax" and plain["method"]["mixing"]["single_source"] == "best"
+    assert {k: v for k, v in sample["method"]["mixing"].items() if k != "single_source"} == \
+        {k: v for k, v in plain["method"]["mixing"].items() if k != "single_source"}   # everything else from skillmix
     plain = resolved(compose("generate", ["task=square", "method=none"]))
     assert plain["method"] == {"name": "none", "mixing": {"enabled": False}, "tracking": {"enabled": False}}   # identity kept
 

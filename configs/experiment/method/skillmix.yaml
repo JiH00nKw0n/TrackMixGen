@@ -9,6 +9,8 @@ mixing:
                                     # method.name=skillmix_randmix (`make coefficients` does both)
   coefficients: ${generator.name}/${task.name}   # rule file configs/experiment/generator/<gen>/coefficients/<task>.yaml
                                     # (tmg fit_coefficients); `make generate` builds it when missing (scripts/ensure_coefficients.sh)
+  single_source: best               # the one source when the fit gives d <= 0: best (largest score) | sample (drawn with
+                                    # probability softmax(score); method skillmix_sample)
   symmetries: ${oc.select:task.mixing_symmetries,null}   # object symmetries the mixer may align sources with before blending
                                     # (skillmix.py step 1; the parallel-gripper 180 deg flip needs no entry)
 labels: executed

@@ -25,7 +25,7 @@ the fitted mixed-effects logistic model of the task success given the mixing wei
 
 `a_j` is source j's own effect, `g` the feature slopes, `d` the effect of spreading the weight (`H` the entropy of `w`). The
 weights that maximize it over the sources compatible with the selected one (same gripper events) are `softmax(s / d)` when
-`d > 0`, and the best-scored source alone when `d <= 0`; weights below 1e-3 are dropped. The retained segments are aligned
+`d > 0`; weights below 1e-3 are dropped. When `d <= 0` one source takes all the weight: the best-scored one (`mixing.single_source: best`, method `skillmix`) or one drawn with probability `softmax(s)` (`sample`, method `skillmix_sample`; with `best` every scene can get the same source). The retained segments are aligned
 by the object and gripper symmetries and blended in their reference-object frames (`skillmix.py` module docstring). CP-Gen
 blends its re-solved constraints itself (`tmg/generation/generators/cpgen/mixing.py`) and takes the weights and their record
 from the same call, `SkillMixer.decide`, so both generators apply one rule.
