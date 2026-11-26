@@ -31,10 +31,10 @@ for p in $PORTS; do
   STARTED_PORTS="$STARTED_PORTS $p"
 done
 for p in $PORTS; do
-  for i in $(seq 1 90); do
+  for i in $(seq 1 150); do
     if make -s -C "$REPO" serve-ready CLUSTER="$CLUSTER" PORT="$p" >/dev/null 2>&1; then break; fi
     sleep 2
-    [ "$i" = 90 ] && { echo "[evaluate] server on port $p did not come up"; exit 1; }
+    [ "$i" = 150 ] && { echo "[evaluate] server on port $p did not come up"; exit 1; }
   done
 done
 # one Isaac Sim per GPU by default: two on one T4 made the driver time out a context switch (Xid 109) and the simulator exit
