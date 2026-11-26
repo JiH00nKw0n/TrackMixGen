@@ -387,17 +387,55 @@ def test_run_pool_rejects_a_renderer_other_than_egl(pool, tmp_path, monkeypatch,
         pool(_cfg(tmp_path))
 
 
-def test_isaaclab_chunk_processes_are_capped_per_gpu():
+def test_isaaclab_chunk_processes_are_capped_per_pool_unless_set_explicitly():
     from tmg.core.workers import ISAACLAB_MAX_WORKERS, cap_simulator_workers
 
     assert ISAACLAB_MAX_WORKERS == 3
-    expected = "auto -> 16, capped at 3 Isaac Sim processes (cluster.isaaclab_max_workers)"
-    assert cap_simulator_workers(16, "auto -> 16", "isaaclab", {}) == (3, expected)
-    assert cap_simulator_workers(16, "workers=16", "isaaclab", {"isaaclab_max_workers": 5})[0] == 5
-    assert cap_simulator_workers(2, "workers=2", "isaaclab", {}) == (2, "workers=2")           # below the cap: unchanged
-    assert cap_simulator_workers(16, "auto -> 16", "robosuite", {}) == (16, "auto -> 16")      # other simulators unchanged
+    expected = "auto -> 16, capped at 3 Isaac Sim processes per pool (cluster.isaaclab_max_workers)"
+    assert cap_simulator_workers(16, "auto -> 16", "isaaclab", {}, requested="auto") == (3, expected)
+    assert cap_simulator_workers(16, "auto -> 16", "isaaclab", {"isaaclab_max_workers": 5})[0] == 5
+    assert cap_simulator_workers(2, "workers=2", "isaaclab", {}, requested=2) == (2, "workers=2")     # below the cap
+    n, why = cap_simulator_workers(8, "workers=8", "isaaclab", {}, requested=8)                       # explicit: kept, warned
+    assert n == 8 and "WARNING" in why
+    assert cap_simulator_workers(16, "auto -> 16", "robosuite", {}) == (16, "auto -> 16")            # other simulators
     with pytest.raises(ValueError, match="isaaclab_max_workers"):
         cap_simulator_workers(4, "", "isaaclab", {"isaaclab_max_workers": 0})
+
+
+def test_run_pool_applies_the_isaac_sim_cap(pool, tmp_path, monkeypatch, capsys):
+    seen = {}
+    original = runner._run_pending
+
+    def spy(generator, pending, output, env, workers, retries=1):
+        seen["workers"] = workers
+        return original(generator, pending, output, env, workers, retries)
+
+    monkeypatch.setattr(runner, "_run_pending", spy)
+    monkeypatch.setattr(FakeGenerator, "simulator", "isaaclab", raising=False)
+    cfg = _cfg(tmp_path)
+    cfg.cluster.workers, cfg.cluster.max_workers = "auto", 16
+    monkeypatch.setattr(runner, "resolve_workers", lambda value, cap: (16, "auto -> 16"))
+    pool(cfg)
+    assert seen["workers"] == 3 and "capped at 3 Isaac Sim processes" in capsys.readouterr().out
+    monkeypatch.setattr(FakeGenerator, "simulator", "robosuite", raising=False)
+    pool(_cfg(tmp_path / "other"))
+    assert seen["workers"] == 16
+
+
+def test_a_chunk_that_stops_the_pool_skips_the_chunks_not_started(monkeypatch, tmp_path):
+    from tmg.core.chunks import plan_chunks
+
+    calls = []
+
+    def fake_run_chunk(generator, chunk, output, env, retries=1):
+        calls.append(chunk.name)
+        if len(calls) == 1:
+            return {"chunk": chunk.name, "ok": False, "stop_pool": True, "elapsed_s": 1.0, "log": "x.log", "error": "scene"}
+        return {"chunk": chunk.name, "ok": True, "elapsed_s": 1.0, "log": "y.log", "successes": 1, "attempts": 1}
+
+    monkeypatch.setattr(runner, "_run_chunk", fake_run_chunk)
+    results = runner._run_pending(None, plan_chunks(4, 1, 0), tmp_path, {}, workers=1)
+    assert len(calls) == 1 and [r.get("skipped", False) for r in results] == [False, True, True, True]
 
 
 def test_the_isaac_cluster_caps_isaac_sim_at_three_processes():

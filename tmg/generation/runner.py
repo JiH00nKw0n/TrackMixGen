@@ -5,6 +5,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
@@ -189,6 +190,9 @@ def _run_chunk(generator, chunk: Chunk, output: Path, env: Mapping[str, str], re
             return result
         failure = {"chunk": chunk.name, "ok": False, "exit_code": launched.exit_code, "log": str(log),
                    "elapsed_s": launched.elapsed_s, "error": None if result is None else result["error"]}
+        if result is not None and result.get("stop_pool"):     # a failure that every chunk would repeat: no retry
+            failure["stop_pool"] = True
+            break
         if attempt < retries:
             kept = log.with_name(f"{chunk.name}.failed{attempt + 1}.log")
             log.replace(kept)
@@ -204,8 +208,20 @@ def _run_pending(generator, pending: list[Chunk], output: Path, env: Mapping[str
     results = []
     if not pending:
         return results
+    stop = threading.Event()        # set by a chunk result with stop_pool: the chunks not started yet are skipped
+
+    def run(chunk: Chunk) -> dict:
+        if stop.is_set():
+            return {"chunk": chunk.name, "ok": False, "skipped": True, "elapsed_s": 0.0, "log": None,
+                    "error": "not run: an earlier chunk stopped the pool"}
+        result = _run_chunk(generator, chunk, output, env, retries)
+        if result.get("stop_pool"):
+            stop.set()
+            print(f"[tmg] chunk {chunk.name}: {result.get('error')}; stopping the pool", flush=True)
+        return result
+
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        for result in pool.map(lambda chunk: _run_chunk(generator, chunk, output, env, retries), pending):
+        for result in pool.map(run, pending):
             flag = "ok" if result["ok"] else "FAILED"
             print(f"[tmg] chunk {result['chunk']}: {flag} ({result.get('successes', '?')}/"
                   f"{result.get('attempts', '?')} successes, {result['elapsed_s']:.0f}s)", flush=True)
@@ -295,7 +311,8 @@ def run_pool(cfg) -> dict:
 
     pending = [c for c in chunks if states[c.index] != "done" and (own is None or c.index in own)]
     workers, explained = resolve_workers(cluster.get("workers", "auto"), int(cluster.get("max_workers", 16)))
-    workers, explained = cap_simulator_workers(workers, explained, str(getattr(generator, "simulator", "")), cluster)
+    workers, explained = cap_simulator_workers(workers, explained, str(getattr(generator, "simulator", "")), cluster,
+                                               requested=cluster.get("workers", "auto"))
     done = sum(1 for c in chunks if states[c.index] == "done")
     mine = f" (shard {shard[0]}/{shard[1]}: {len(own)} chunks)" if own is not None else ""
     print(f"[tmg] pool {output}: {len(chunks)} chunks, {done} done, {len(pending)} to run here{mine}; "
@@ -303,7 +320,7 @@ def run_pool(cfg) -> dict:
     results = _run_pending(generator, pending, output, _chunk_env(cluster), workers, int(generation.get("chunk_retries", 1)))
     failed = [r for r in results if not r["ok"]]
     if failed:
-        raise PoolError(f"{len(failed)} chunk(s) failed; see " + ", ".join(r["log"] for r in failed))
+        raise PoolError(f"{len(failed)} chunk(s) failed; see " + ", ".join(r["log"] for r in failed if r.get("log")))
     if own is not None:
         waiting = [c.name for c in chunks if not chunk_is_done(c.folder(output))]
         if waiting:
