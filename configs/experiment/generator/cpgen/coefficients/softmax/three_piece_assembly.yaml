@@ -7,9 +7,9 @@
 generator: cpgen
 task: three_piece_assembly
 rule: softmax
-basis: 'Fit (tmg fit_coefficients) on the randmix pools [''/data/pools/cpgen/three_piece_assembly/ours/ours/mixup_only/pool_calib'',
-  ''/data/scratch_calib/ana/cp_isaac/three_piece_assembly''] (2000 attempts) and the unmix pools [''/data/pools/cpgen/three_piece_assembly/ours/ours/none/pool_ctrl'']
-  (2000 attempts); rows of subtask k: the attempts that reached it, label = the attempt''s task success.'
+basis: 'Fit (tmg fit_coefficients) on the randmix pools [''/data/pools/cpgen/three_piece_assembly/ours/ours/skillmix_randmix/pool_randmix_wt'']
+  (2000 attempts) and the unmix pools [''/data/scratch_calib/ctrl_records/three_piece_assembly''] (2000 attempts); rows of
+  subtask k: the attempts that reached it, label = the attempt''s task success.'
 num_sources: 10
 features:
 - dx
@@ -26,113 +26,113 @@ units:
 subtasks:
   0:
     a:
-    - 0.028265671322683865
-    - 0.07476014007832961
-    - 0.05230204473045037
-    - -0.058785292574121385
-    - 0.04239938295404846
-    - -0.5866360724270948
-    - 0.20821911366025267
-    - 0.2811559807660347
-    - -0.029545858429006568
-    - -0.07516384974089398
+    - 0.07262091615929091
+    - -0.01725778031784577
+    - -0.012509418664598523
+    - -0.052099946361749194
+    - 0.10854181565126372
+    - -0.5613351329303434
+    - 0.1735287430742488
+    - 0.2908897321097228
+    - 0.04265455244991739
+    - -0.08820688592914253
     g:
-      dx: -0.08548307691513034
-      dy: -0.16687591186210818
-      rotation: -0.07672988049914037
+      dx: 0.003823835002010507
+      dy: -0.26013699353840597
+      rotation: -0.026328222968078602
       inhand_position: 0.0
       inhand_rotation: 0.0
-    d: -0.07216974642939365
-    c0: 0.14901322634451922
+    d: -0.08038190783680481
+    c0: 0.14330119687765888
     penalty: 100.0
     rows:
       randmix: 2000
       unmix: 1998
-    successes: 2013
+    successes: 2023
     cv_log_loss_gain_percent:
       all_rows: 0.2
-      randmix_rows: -0.2
+      randmix_rows: -0.1
   1:
     a:
-    - 0.1202407253623597
-    - -0.1894944417178321
-    - 0.05041071614752317
-    - -0.22060362442103104
-    - 0.033826791803885606
-    - 0.46663832927022525
-    - 0.26618953028824915
-    - -0.9712230366125495
-    - 0.6534614040202981
-    - -0.14563186859053795
+    - 0.23918960234267286
+    - -0.24282523246145327
+    - 0.060145046081535716
+    - -0.21456380701669264
+    - 0.08546280802466248
+    - 0.5605063866469979
+    - 0.276874944264733
+    - -1.1530042281688804
+    - 0.7327959377162515
+    - -0.26689999394932845
     g:
-      dx: -0.48732997701883574
-      dy: 0.18585976239349788
-      rotation: -0.14554870405119424
-      inhand_position: -50.274859244936074
-      inhand_rotation: -0.5923760798786964
-    d: -0.22739232517248922
-    c0: 0.9884170049429531
-    penalty: 100.0
-    rows:
-      randmix: 1998
-      unmix: 1923
-    successes: 2013
-    cv_log_loss_gain_percent:
-      all_rows: 3.4
-      randmix_rows: 3.5
-  2:
-    a:
-    - 0.0053581261595678584
-    - 0.14337895146375954
-    - 0.0018355935291517738
-    - 0.15065244228672664
-    - 0.17623320050689634
-    - 0.009252569102629976
-    - -0.09309665125329422
-    - -0.014076155566554767
-    - -0.19783474550448182
-    - -0.16718998790138717
-    g:
-      dx: -0.9417653055496213
-      dy: -0.18528031145806848
-      rotation: -0.16628316636113344
-      inhand_position: 0.0
-      inhand_rotation: 0.0
-    d: -0.20704653630031805
-    c0: 0.6120614873964764
-    penalty: 100.0
-    rows:
-      randmix: 1961
-      unmix: 1791
-    successes: 2013
-    cv_log_loss_gain_percent:
-      all_rows: 0.6
-      randmix_rows: 0.4
-  3:
-    a:
-    - 0.39063740576638056
-    - -1.1594414278014253
-    - 0.07768498264122926
-    - 0.034516441560320237
-    - 0.09740754047631406
-    - 0.3516639666534119
-    - 0.08050011987301924
-    - -0.10232764730951727
-    - -0.15574766335653464
-    - 0.2904724781091473
-    g:
-      dx: 0.688677379484551
-      dy: 0.01330336252190077
-      rotation: -5.427145896994177
-      inhand_position: -41.42151032662977
-      inhand_rotation: 0.0814717370298471
-    d: -0.27706615352134817
-    c0: 2.788047869836853
+      dx: -1.5195929999119173
+      dy: -0.1321761822341455
+      rotation: 0.2445503502615288
+      inhand_position: -58.45294184826871
+      inhand_rotation: -0.8931936423254293
+    d: -0.2345102311884536
+    c0: 1.2581173031736712
     penalty: 1.0
     rows:
-      randmix: 1844
-      unmix: 1454
-    successes: 2013
+      randmix: 1997
+      unmix: 1923
+    successes: 2023
     cv_log_loss_gain_percent:
-      all_rows: 15.8
-      randmix_rows: 14.4
+      all_rows: 5.6
+      randmix_rows: 7.8
+  2:
+    a:
+    - 0.012669176834813963
+    - 0.15518106898949294
+    - -0.047083311837825804
+    - 0.12583063617455525
+    - 0.204329789187813
+    - -0.04645844843896905
+    - -0.06220507835703389
+    - 0.06878434802565031
+    - -0.16251662817351495
+    - -0.23766491173503715
+    g:
+      dx: -0.913897907850102
+      dy: 0.11302659366143471
+      rotation: -0.06205592774503445
+      inhand_position: 0.0
+      inhand_rotation: 0.0
+    d: -0.17339254763802028
+    c0: 0.4827468064674181
+    penalty: 100.0
+    rows:
+      randmix: 1969
+      unmix: 1791
+    successes: 2023
+    cv_log_loss_gain_percent:
+      all_rows: 0.5
+      randmix_rows: 0.2
+  3:
+    a:
+    - 0.27595997496860974
+    - -1.1947214701212239
+    - -0.06065971167201335
+    - 0.10740792724003026
+    - 0.12907731010059487
+    - 0.20591219412369244
+    - 0.32093797583057454
+    - -0.06631327668615075
+    - 0.12493155949289494
+    - 0.15354897015788968
+    g:
+      dx: -1.209963163036963
+      dy: -0.4847328532446577
+      rotation: -5.195783020604577
+      inhand_position: -49.71274323109036
+      inhand_rotation: -1.3672575093347612
+    d: -0.24335443669632895
+    c0: 3.401593951028172
+    penalty: 10.0
+    rows:
+      randmix: 1872
+      unmix: 1454
+    successes: 2023
+    cv_log_loss_gain_percent:
+      all_rows: 22.4
+      randmix_rows: 25.1

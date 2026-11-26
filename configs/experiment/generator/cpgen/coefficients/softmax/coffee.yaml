@@ -7,9 +7,9 @@
 generator: cpgen
 task: coffee
 rule: softmax
-basis: 'Fit (tmg fit_coefficients) on the randmix pools [''/data/pools/cpgen/coffee/ours/ours/mixup_only/pool_calib'', ''/data/scratch_calib/ana/cp_isaac/coffee'']
-  (2000 attempts) and the unmix pools [''/data/pools/cpgen/coffee/ours/ours/none/pool_ctrl''] (2000 attempts); rows of subtask
-  k: the attempts that reached it, label = the attempt''s task success.'
+basis: 'Fit (tmg fit_coefficients) on the randmix pools [''/data/pools/cpgen/coffee/ours/ours/skillmix_randmix/pool_randmix_wt'']
+  (2000 attempts) and the unmix pools [''/data/scratch_calib/ctrl_records/coffee''] (2000 attempts); rows of subtask k: the
+  attempts that reached it, label = the attempt''s task success.'
 num_sources: 10
 features:
 - dx
@@ -26,85 +26,85 @@ units:
 subtasks:
   0:
     a:
-    - -0.2702419967490618
-    - 0.3277672821914819
-    - 0.08419849133421022
-    - -0.07524687505109437
-    - -0.10398595947573902
-    - 0.24131765820337867
-    - -0.06478882794073637
-    - -0.18545202397969018
-    - -0.015447879721899286
-    - 0.04912847150110842
+    - -0.21608092027599696
+    - 0.4552666592045403
+    - 0.08467254749777851
+    - -0.047858060207094606
+    - -0.22556288620477807
+    - 0.1897910366335309
+    - -0.04274042453638914
+    - -0.15220862782867817
+    - -0.01789740588853333
+    - -0.023800543548402667
     g:
-      dx: -1.467773038355086
-      dy: 0.3019910863877559
-      rotation: -432.4332371277692
+      dx: -0.5427870902471155
+      dy: -0.7598119843817291
+      rotation: -459.77374273952233
       inhand_position: 0.0
       inhand_rotation: 0.0
-    d: 0.16804660505960123
-    c0: -0.8265389525152937
+    d: 0.22749473982147597
+    c0: -0.8332199108865149
     penalty: 1.0
     rows:
       randmix: 2000
       unmix: 1977
-    successes: 699
+    successes: 734
     cv_log_loss_gain_percent:
-      all_rows: 3.2
-      randmix_rows: 4.8
+      all_rows: 3.8
+      randmix_rows: 5.7
   1:
     a:
-    - -0.6078877839318368
-    - 0.3682524258098643
-    - 0.17452171037178332
-    - -0.46909826602990257
-    - -0.1630609740233881
-    - 0.3704191495523173
-    - -0.037097244035335326
-    - 0.2409566723077218
-    - -0.09142236173435711
-    - 0.3907130543694609
+    - -0.4596015914709588
+    - 0.3653911430366183
+    - 0.1686594138305174
+    - -0.38731315985460485
+    - -0.13040532813125147
+    - 0.16419466017911172
+    - 0.08374365202008985
+    - 0.11077518024453385
+    - -0.008651429625564248
+    - 0.3366732681428452
     g:
-      dx: -2.0097692809522156
-      dy: -1.5415331038081497
-      rotation: -0.10295979284545975
-      inhand_position: -316.5756001470885
-      inhand_rotation: -0.9645414091338083
-    d: -0.09752552055001856
-    c0: 0.6745721037347208
+      dx: -0.3763899613626748
+      dy: -1.757651750864428
+      rotation: 0.01923199726428185
+      inhand_position: -239.43470797350065
+      inhand_rotation: 3.5461552438635637
+    d: -0.031666146086127424
+    c0: -0.08747532562091198
     penalty: 0.1
     rows:
-      randmix: 1976
+      randmix: 1987
       unmix: 1296
-    successes: 699
+    successes: 734
     cv_log_loss_gain_percent:
-      all_rows: 11.1
-      randmix_rows: 17.2
+      all_rows: 8.1
+      randmix_rows: 11.3
   2:
     a:
-    - -0.24816647630751298
-    - 0.21606885172585175
-    - -0.15726695690713194
-    - 0.14673948227556496
-    - -1.0487488127990847
-    - 0.394343495784
-    - 0.17024705183257308
-    - -0.2187834359017348
-    - -0.04153305706239965
-    - 0.655081055380534
+    - -0.1353421359293701
+    - 0.26287846149119065
+    - -0.1922081969070356
+    - 0.26980592532678793
+    - -1.0777143320753513
+    - 0.1146162620617496
+    - 0.09502526545174314
+    - -0.23762151011133517
+    - -0.036678871265108395
+    - 0.6794969468996542
     g:
-      dx: -1.3848701129017758
-      dy: -1.318310657211936
-      rotation: -0.03280830605242079
+      dx: -0.2607918586545884
+      dy: -1.205651735141288
+      rotation: 0.03530298331182349
       inhand_position: 0.0
       inhand_rotation: 0.0
-    d: 0.0008853207110512835
-    c0: -0.5570905153391215
+    d: 0.11171499779557884
+    c0: -0.7470793099234595
     penalty: 100.0
     rows:
-      randmix: 1227
+      randmix: 1209
       unmix: 1021
-    successes: 699
+    successes: 734
     cv_log_loss_gain_percent:
-      all_rows: 1.2
-      randmix_rows: 0.9
+      all_rows: 1.0
+      randmix_rows: 0.8
