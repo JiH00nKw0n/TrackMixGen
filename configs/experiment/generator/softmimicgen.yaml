@@ -21,4 +21,11 @@ hand_prefixes: null
 hand_term: null
 measure_links: null                     # the observed eef pose is the controller target for the Franka
 noise_draw_shapes: [6]                  # target_eef_pose_to_action draws one 6-vector per step (also at zero noise)
+# Per-step subtask signals (2026-11-27, read in the isaaclab-soft image): the rope environment publishes them (its
+# subtask_terms observation group has the term grasp = mdp.object_grasped, read by FrankaRopeMimicEnv.get_subtask_term_signals);
+# the towel environment (softmimicgen_tasks/franka_towel/env_cfg.py) has the policy group only, its mdp has no grasp term
+# and FrankaTowelMimicEnv implements no get_subtask_term_signals, so its source signal grasp_1 is an annotation and
+# generation records none. tmg fit_coefficients therefore counts every recorded towel subtask as reached (label: task
+# success). Listed here, not in the task config, so finished towel pools keep their chunk identity.
+tasks_without_step_signals: [towel]
 method_overrides: {}

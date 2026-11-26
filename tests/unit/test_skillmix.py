@@ -780,7 +780,39 @@ def test_a_generator_without_per_step_signals_falls_back_only_for_attempts_that_
         isaaclab_outcomes(Attempts([renamed], [], []), "right", 2, no_step_signals=True)
 
 
-def test_the_dexmimicgen_generator_declares_no_per_step_signals():
+def test_the_generators_declare_which_tasks_publish_no_per_step_signals():
+    from tmg.generation.fit_coefficients import no_step_signals_declared
+
     root = Path(__file__).resolve().parents[2] / "configs" / "experiment" / "generator"
-    assert yaml.safe_load((root / "dexmimicgen.yaml").read_text())["per_step_subtask_signals"] is False
-    assert "per_step_subtask_signals" not in yaml.safe_load((root / "softmimicgen.yaml").read_text())
+    dex = yaml.safe_load((root / "dexmimicgen.yaml").read_text())
+    soft = yaml.safe_load((root / "softmimicgen.yaml").read_text())
+    assert all(no_step_signals_declared(dex, t) for t in ("pick_place", "microwave", "bottle_door"))
+    assert no_step_signals_declared(soft, "towel") and not no_step_signals_declared(soft, "rope")   # rope records grasp
+    mimicgen = yaml.safe_load((root / "mimicgen.yaml").read_text())
+    assert not no_step_signals_declared(mimicgen, "square")
+
+
+def test_fit_coefficients_falls_back_for_towel_and_not_for_rope(tmp_path, monkeypatch):
+    from omegaconf import OmegaConf
+
+    import tmg.generation.fit_coefficients as fc
+
+    seen = {}
+
+    def fake(randmix, unmix, *, num_sources, with_cv=True, allow_fallback=False, no_step_signals=False):
+        seen["no_step_signals"] = no_step_signals
+        g = dict.fromkeys(("dx", "dy", "rotation", "inhand_position", "inhand_rotation"), 0.0)
+        return ({0: {"a": [0.0, 0.0], "g": g, "d": 0.3, "c0": 0.0, "penalty": 1.0, "rows": {"randmix": 1, "unmix": 1},
+                     "successes": 1, "cv_log_loss_gain_percent": {"all_rows": 0.0, "randmix_rows": 0.0}}}, {})
+
+    monkeypatch.setattr(fc, "fit_isaaclab_blocks", fake)
+    monkeypatch.setattr(fc, "write_provenance", lambda *a, **k: None)
+    monkeypatch.setattr(fc, "read_pools", lambda paths: fc.Attempts([{"success": True, "subtasks": []}], [tmp_path], [0]))
+    soft = yaml.safe_load((Path(__file__).resolve().parents[2] / "configs/experiment/generator/softmimicgen.yaml").read_text())
+    for task, expected in (("towel", True), ("rope", False)):
+        cfg = OmegaConf.create({"randmix_pools": ["r"], "unmix_pools": ["u"], "output": str(tmp_path / task), "min_attempts": 1,
+                                "task": {"name": task, "num_sources": 2}, "source": None, "write_config": False,
+                                "generator": {"name": "softmimicgen", "simulator": "isaaclab",
+                                              "tasks_without_step_signals": soft["tasks_without_step_signals"]}})
+        fc.fit_coefficients(cfg)
+        assert seen["no_step_signals"] is expected
