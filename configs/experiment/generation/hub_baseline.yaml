@@ -1,0 +1,12 @@
+defaults:
+  - hub
+  - _self_
+# The MimicGen baseline datasets (MimicGen's own source selection, no mixing; 1,000 demos per task, image observations)
+# published as Mayfull/Mimicgen-baseline, a copy of Ever2after/mimicgen-baseline-image-n1000 laid out one <task>.hdf5 per
+# task like Mayfull/Mimicgen-skillmix. They were rendered with Mesa (made 2026-11-02, before the EGL switch of 2026-11-22):
+# evaluate policies trained on them with the Mesa of the A100 robosuite image. Use with GENERATOR=mimicgen SCENE=ours
+# SELECTION=official METHOD=none OBSERVATION=image GENERATION=hub_baseline.
+name: hub_baseline
+hub:
+  repo_id: Mayfull/Mimicgen-baseline
+  made_with: {generator: mimicgen, scene: ours, selection: official, method: none, observation: image}
