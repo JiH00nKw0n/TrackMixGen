@@ -210,10 +210,10 @@ def test_two_arm_rule_files_key_their_blocks_by_end_effector_and_subtask(tmp_pat
 def test_randmix_and_source_draws_of_two_arms_do_not_collide_and_one_arm_streams_are_unchanged():
     one, keyed = RandmixDraws(3), RandmixDraws(3)
     assert one.draw(0, 4)[0] == keyed.draw(0, 4, None)[0]        # single arm: same key, same stream as before
-    two = RandmixDraws(3)
+    two = RandmixDraws(3, arms=["left", "right"])
     right, left = two.draw(0, 4, "right"), two.draw(0, 4, "left")
     assert right[0] != left[0] and two.draw(0, 4, "right") is right      # kept within the attempt per arm
-    src = SourceDraws(5)
+    src = SourceDraws(5, arms=["left", "right"])
     assert src.draw(0, "right") != src.draw(0, "left") and src.draw(0, "right") == src.draw(0, "right")
 
 
@@ -648,3 +648,43 @@ def test_mimicgen_task_symmetries_name_reference_objects():
                         ("stack_three", "cubeB"): 3, ("stack_three", "cubeC"): 3}
     method = yaml.safe_load(Path("configs/experiment/method/skillmix.yaml").read_text())
     assert method["mixing"]["symmetries"] == "${oc.select:task.mixing_symmetries,null}"
+
+
+# per-arm random streams ---------------------------------------------------------------------------------------------
+def test_single_arm_draw_streams_are_unchanged_by_the_arms():
+    """MimicGen and CP-Gen (eef None) and SoftMimicGen (one arm, robot0) keep SeedSequence([chunk seed, word])."""
+    from tmg.generation.method.skillmix import SOURCE_SEED
+
+    ref = np.random.default_rng(np.random.SeedSequence([11, RANDMIX_SEED]))
+    c = float(np.exp(ref.uniform(np.log(0.05), np.log(20.0))))
+    gamma = ref.gamma(c, size=4)
+    for draws, eef in ((RandmixDraws(11), None), (RandmixDraws(11, arms=["robot0"]), "robot0")):
+        got = draws.draw(0, 4, eef)
+        assert got[0] == c and np.array_equal(got[1], gamma)
+    u = np.random.default_rng(np.random.SeedSequence([11, SOURCE_SEED])).random()
+    assert SourceDraws(11).draw(0) == u == SourceDraws(11, arms=["robot0"]).draw(0, "robot0")
+
+
+def test_two_arm_draws_come_from_per_arm_streams_independent_of_the_call_order():
+    import zlib
+
+    first = RandmixDraws(5, arms=["left", "right"])
+    a_right, a_left = first.draw(0, 3, "right")[0], first.draw(0, 3, "left")[0]
+    second = RandmixDraws(5, arms=["left", "right"])
+    b_left, b_right = second.draw(0, 3, "left")[0], second.draw(0, 3, "right")[0]
+    assert (a_right, a_left) == (b_right, b_left) and a_right != a_left
+    ref = np.random.default_rng(np.random.SeedSequence([5, RANDMIX_SEED, zlib.crc32(b"right")]))
+    assert a_right == float(np.exp(ref.uniform(np.log(0.05), np.log(20.0))))
+    with pytest.raises(KeyError, match="stream"):
+        first.draw(1, 3, None)                      # a two-arm generator must name the arm
+    src = SourceDraws(5, arms=["left", "right"])
+    assert src.draw(0, "left") != src.draw(0, "right")
+
+
+def test_the_mixer_takes_the_generators_end_effectors_before_its_first_call():
+    mixer = SkillMixer(rule="randmix", chunk_seed=2)
+    mixer.set_end_effectors(["left", "right"])
+    assert mixer.arms == ["left", "right"] and mixer.draws._streams.multi
+    mixer.mix(_context([_segment(0.0)] * 2, [pose()] * 2, 0, pose(), extra={"eef": "left"}))
+    with pytest.raises(RuntimeError, match="before the first"):
+        mixer.set_end_effectors(["left"])

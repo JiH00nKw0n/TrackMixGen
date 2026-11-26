@@ -352,3 +352,11 @@ def test_install_from_spec_grafts_autodata_and_wraps_the_success_term_setup(tmp_
     ds = types.SimpleNamespace(get_env=lambda: "E")
     ns["setup_async_generation"](ds, 0, cfg)
     assert seen == [(ds, cfg)] and cfg.func.env == "E"
+
+
+def test_the_runtime_gives_the_mixer_the_generators_end_effectors():
+    from tmg.generation.method.skillmix import SkillMixer
+
+    mixer = SkillMixer(rule="randmix", chunk_seed=1)
+    make_runtime(Method0(mixer))
+    assert mixer.arms == ["left", "right"] and mixer.draws._streams.multi

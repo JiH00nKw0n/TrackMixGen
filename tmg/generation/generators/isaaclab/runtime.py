@@ -191,6 +191,8 @@ class IsaacLabRuntime:
     def __init__(self, method: Method, layout: IsaacLabLayout, records_dir: Path | None):
         self.method = method
         self.layout = layout
+        if hasattr(method.mixer, "set_end_effectors"):     # per-arm random streams and rule blocks for two arms
+            method.mixer.set_end_effectors(layout.eefs)
         self.rec = AttemptRecorder()
         self.rec.configure(records_dir)
         self.records_dir = records_dir

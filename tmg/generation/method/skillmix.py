@@ -67,6 +67,7 @@ so both generators apply one rule.
 """
 from __future__ import annotations
 
+import zlib
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -217,13 +218,37 @@ def softmax_weights(scores, d: float, compatible: list[int], u: float | None = N
     return _drop_small(w)
 
 
+class ArmStreams:
+    """The random streams of one kind of draw (second seed word ``word``). A single-arm generator (``arms`` None or one end
+    effector: MimicGen, CP-Gen, SoftMimicGen) has one stream, ``SeedSequence([chunk seed, word])``, the same as before arms
+    were known. With two or more end effectors (DexMimicGen's GR1) every arm has its own stream,
+    ``SeedSequence([chunk seed, word, crc32(eef)])``, so an arm's draws do not depend on the order in which the
+    generator builds the arms' subtasks."""
+
+    def __init__(self, chunk_seed: int, word: int, arms=None):
+        arms = [str(a) for a in (arms or [])]
+        self.multi = len(arms) > 1
+        if self.multi:
+            self._rngs = {a: np.random.default_rng(np.random.SeedSequence([int(chunk_seed), int(word), zlib.crc32(a.encode())]))
+                          for a in arms}
+        else:
+            self._rng = np.random.default_rng(np.random.SeedSequence([int(chunk_seed), int(word)]))
+
+    def rng(self, eef: str | None) -> np.random.Generator:
+        if not self.multi:
+            return self._rng
+        if eef is None or str(eef) not in self._rngs:
+            raise KeyError(f"no random stream of end effector {eef!r} (arms {sorted(self._rngs)})")
+        return self._rngs[str(eef)]
+
+
 class RandmixDraws:
     """The random weights of ``mixing.rule: randmix``: one draw ``(c, gamma variates (J,), fallback index)`` per
     subtask (and end effector, ``subtask_key``) of an attempt, kept until the next ``begin_attempt`` (CP-Gen may solve a
-    constraint more than once)."""
+    constraint more than once). One stream per arm of a two-armed generator (``ArmStreams``)."""
 
-    def __init__(self, chunk_seed: int):
-        self._rng = np.random.default_rng(np.random.SeedSequence([int(chunk_seed), RANDMIX_SEED]))
+    def __init__(self, chunk_seed: int, arms=None):
+        self._streams = ArmStreams(chunk_seed, RANDMIX_SEED, arms)
         self._drawn: dict = {}
 
     def begin_attempt(self) -> None:
@@ -232,20 +257,21 @@ class RandmixDraws:
     def draw(self, subtask: int, num_sources: int, eef: str | None = None) -> tuple[float, np.ndarray, int]:
         key = subtask_key(subtask, eef)
         if key not in self._drawn:
-            c = float(np.exp(self._rng.uniform(*RANDMIX_LOG_C)))
-            gamma = self._rng.gamma(c, size=int(num_sources))
-            fallback = int(self._rng.integers(int(num_sources)))
+            rng = self._streams.rng(eef)
+            c = float(np.exp(rng.uniform(*RANDMIX_LOG_C)))
+            gamma = rng.gamma(c, size=int(num_sources))
+            fallback = int(rng.integers(int(num_sources)))
             self._drawn[key] = (c, gamma, fallback)
         return self._drawn[key]
 
 
 class SourceDraws:
     """The uniform numbers of ``mixing.single_source: sample``: one per subtask of an attempt, kept until the next
-    ``begin_attempt`` (CP-Gen may solve a constraint more than once, and keeps the drawn source). Keyed like
-    ``RandmixDraws``."""
+    ``begin_attempt`` (CP-Gen may solve a constraint more than once, and keeps the drawn source). Keyed and streamed
+    like ``RandmixDraws``."""
 
-    def __init__(self, chunk_seed: int):
-        self._rng = np.random.default_rng(np.random.SeedSequence([int(chunk_seed), SOURCE_SEED]))
+    def __init__(self, chunk_seed: int, arms=None):
+        self._streams = ArmStreams(chunk_seed, SOURCE_SEED, arms)
         self._drawn: dict = {}
 
     def begin_attempt(self) -> None:
@@ -254,7 +280,7 @@ class SourceDraws:
     def draw(self, subtask: int, eef: str | None = None) -> float:
         key = subtask_key(subtask, eef)
         if key not in self._drawn:
-            self._drawn[key] = float(self._rng.random())
+            self._drawn[key] = float(self._streams.rng(eef).random())
         return self._drawn[key]
 
 
@@ -378,6 +404,17 @@ class SkillMixer:
         self.chunk_seed = int(chunk_seed)
         self.calls = 0
         self.symmetries = {str(k): [dict(p) for p in v] for k, v in (symmetries or {}).items()}   # object -> transforms
+        self.arms: list[str] | None = None                 # the generator's end effectors (set_end_effectors), None: unknown
+
+    def set_end_effectors(self, eefs) -> None:
+        """The generator's end effectors (an Isaac Lab runtime calls this before the first attempt). Two or more give
+        every arm its own random streams (``ArmStreams``) and require per-arm blocks in the rule file
+        (``SkillMixRule.for_subtask``); one keeps the single-arm streams and rule files."""
+        if self.calls:
+            raise RuntimeError("set_end_effectors must come before the first mix call")
+        self.arms = [str(e) for e in eefs]
+        self.draws = RandmixDraws(self.chunk_seed, self.arms)
+        self.sources = SourceDraws(self.chunk_seed, self.arms)
 
     @classmethod
     def from_config(cls, cfg: Mapping, *, chunk_seed: int, method_name: str) -> SkillMixer:
