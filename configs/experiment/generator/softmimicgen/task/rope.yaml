@@ -22,7 +22,7 @@ lowdim_terms:
   rope_state:
     func: tmg.generation.simulators.isaaclab_lowdim:deformable_nodes
     params: {object: object, layout: line, counts: [16], relative: ends, eef: {sensor: ee_frame}}
-instruction: pick up the rope and shape it into a U
+instruction: "Bend the rope into a U shape so that its two ends come close together."        # language instruction for π0; written to match the success check (rope ends 2-8 cm apart; no published VLA prompt)
 # Success term timing (2026-10-27 audit): rope_ends_close_tracked picks the two rope end nodes at its FIRST call of an
 # episode and keeps them; the official generator and evaluator first call it after the first action. Calling it right
 # after reset picks other nodes (the rope has not settled) and changes the verdict. Generation only reads the official
