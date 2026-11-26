@@ -1,0 +1,35 @@
+# 2026-11-24 pool_robosuite_image under its own folder for the pools made after the CP-Gen weighted-timeline fix (cbe3a03).
+# Full pool of a robosuite generator (MimicGen, CP-Gen) with the images the policies train on: enough attempts for
+# 1,000 successes per task (attempts are set per task on the command line, generation.attempts=...), chunks of 250
+# attempts, chunk seeds 30001, 30002, ... This file holds the generation protocol that every other generation config
+# inherits (`pool_robosuite_lowdim`, `pool_unmix`, `pool_isaac`, and the `test/` configs).
+#
+# Naming: pool_<simulator>_<observation> for the full pools; `test/` holds the small configs for smoke runs and checks.
+name: pool_robosuite_image_wt
+attempts: 10000
+chunk: 250
+seed_offset: 30000                # chunk seeds are seed_offset + 1, + 2, ...
+protocol:
+  keep_failed: false              # failed attempts are not written to MimicGen's demo_failed.hdf5 (with images, a failed attempt is
+                                  # about 13 MB; our records keep every attempt's steps and outcome anyway). The low-dim pools and the
+                                  # SkillMix fit pools keep them (their own files say so).
+  max_num_failures: null
+  guarantee: false                # fixed attempt count (successes are selected at the dataset stage)
+  # source selection comes from the `selection` group (selection=official | ours), independent of this file. official: what
+  # MimicGen's scripts/generate_core_configs.py writes on top of the templates (Stack Three a source per subtask, see
+  # docs/GENERATORS.md 1.4). ours: a source at random for every subtask
+  select_src_per_subtask: ${selection.select_src_per_subtask}
+  selection_strategy: ${selection.selection_strategy}
+  selection_strategy_kwargs: ${selection.selection_strategy_kwargs}
+  action_noise: 0.05
+  interpolation_steps: 5
+  num_fixed_steps: 0
+  collect_obs: true
+  camera_names: ${task.cameras}   # the full image pool stores the task's cameras (no replay rendering exists)
+  camera_size: ${task.image_size}
+  render_video: false
+  num_source_demos: null          # null = all
+on_config_change: error           # error | rebuild (finished chunks made under another config)
+chunk_retries: 1                  # a failed chunk runs again right away this many times before the pool fails
+shard: null                       # [index, count]: run only the chunks whose index is index modulo count, so count runners
+                                  # (one container per GPU) share the pool; the last one to finish writes DONE.json
