@@ -245,6 +245,20 @@ def _constraint(name, kind, objects, carries, x, steps=3):
                                     "robot0_eef_quat_site": np.tile([0, 0, 0, 1.0], (steps, 1))})
 
 
+class FakeOfficial:
+    """CP-Gen's ``compute_X_W_eef_des`` without keypoints: the source end-effector pose relative to the source object, put
+    on the current object (enough to align and solve a retained source)."""
+    generate_se3_transforms = staticmethod(lambda transforms: [])
+
+    @staticmethod
+    def compute_X_W_eef_des(c, obs, rc, ec, X_obj0_transf=None, X_obj1_transf=None, X_eef_transf=None, src_t_idx=0,
+                            ignore_scaling=False):
+        obj = c.obj_names[0]
+        src_eef = np.eye(4)
+        src_eef[:3, 3] = c.src_obs["robot0_eef_pos"][src_t_idx]
+        return obs[f"{obj}_pose"] @ np.linalg.inv(c.src_obj_pose[obj][src_t_idx]) @ src_eef
+
+
 class GraspThenPlacePolicy:
     """CP-Gen's policy for a task of two constraints (grasp the pod, place it on the machine) as the grafted
     ``generate_demo`` drives it: ``get_action`` solves the current constraint when the queue is empty and queues a bridge
@@ -261,6 +275,7 @@ class GraspThenPlacePolicy:
         self.current_constraint_sequence_idx, self.current_constraint_idx = 0, 0
         self.action_queue, self.new_constraint, self.solves = [], False, {0: 0, 1: 0}
         self.curr_motion_plan_steps = self.curr_constraint_steps = 0
+        self.solved_constraints = []
 
     @property
     def current_constraint(self):
@@ -268,7 +283,8 @@ class GraspThenPlacePolicy:
 
     def solve_constraint(self, constraint, obs):
         eye = np.eye(4)
-        self.runtime.prepare_mix(self, constraint, obs, eye, eye, eye)
+        constraint, *_ = self.runtime.prepare_mix(self, constraint, obs, eye, eye, eye)
+        self.solved_constraints.append(constraint)
         k = self.current_constraint_idx
         self.solves[k] += 1
         again = self.solves[k] > 1
@@ -288,7 +304,7 @@ class GraspThenPlacePolicy:
         return {"action": self.action_queue.pop(0)}
 
 
-def _grasp_then_place(tmp_path, method="none", resolve=None, resolve_after_bridge=True):
+def _grasp_then_place(tmp_path, method="none", resolve=None, resolve_after_bridge=True, drawn=0):
     """Run one attempt of the two-constraint task through the grafted callbacks: ``(executed actions, attempt record,
     policy)``. The pod sits 2 cm from where the hand left it when the placement starts."""
     cfg = {"name": method, "mixing": {"enabled": False}}
@@ -297,15 +313,15 @@ def _grasp_then_place(tmp_path, method="none", resolve=None, resolve_after_bridg
 
         block = {"a": [5.0, 0.0], "g": dict.fromkeys(("dx", "dy", "rotation", "inhand_position", "inhand_rotation"), 0.0),
                  "d": -1.0, "c0": 0.0}
-        path = write_rule(tmp_path / "rule.yaml", generator="cpgen", task="t", basis="test", num_sources=2, blocks={0: block, 1: block})
+        path = write_rule(tmp_path / "rule.yaml", rule="softmax", generator="cpgen", task="t", basis="test", num_sources=2, blocks={0: block, 1: block})
         cfg["mixing"] = {"enabled": True, "type": "skillmix", "rule": "softmax", "coefficients": str(path)}
     runtime = rt.CPGenRuntime(build_method(cfg, chunk_seed=3), chunk_seed=3, records_dir=tmp_path / "records", all_sources=True,
                               resolve_after_bridge=resolve_after_bridge)
-    runtime.official = SimpleNamespace()                                      # no other source is solved: never called
+    runtime.official = FakeOfficial                                           # aligns a retained source to the drawn one
     policy = GraspThenPlacePolicy(runtime, resolve)
     generator = SimpleNamespace(policy=policy, env=SimpleNamespace(env=None))
     runtime.begin_attempt(generator)
-    policy.current_constraint_sequence_idx = 0                                # the attempt's source, whatever was drawn
+    policy.current_constraint_sequence_idx = drawn                            # the attempt's source, whatever was drawn
     obs = {"robot0_eef_pos": np.array([0.0, 0.0, 1.0]), "robot0_eef_quat": np.array([0, 0, 0, 1.0]),
            "robot0_eef_quat_site": np.array([0, 0, 0, 1.0]), "pod_pose": _pose(0.02), "machine_pose": _pose(0.5)}
     noise = SimpleNamespace(constraint_segment_noise_magnitude=0.0, motion_segment_noise_magnitude=0.0)
@@ -350,3 +366,13 @@ def test_resolve_after_bridge_records_the_mix_that_was_executed(tmp_path):
     assert "unplanned_mixes" not in record                                    # the second solve is not a failed plan
     _, record, _ = _grasp_then_place(tmp_path / "kept", method="skillmix", resolve={"success": False})
     assert "mix_before_resolve" not in record["subtasks"][1] and "unplanned_mixes" not in record
+
+
+def test_one_retained_source_other_than_the_drawn_one_runs_on_its_own_window(tmp_path):
+    # the rule keeps source 0 alone (d <= 0) while CP-Gen drew source 1: as in MimicGen, source 0 keeps its own window and
+    # speed (the step loop runs on its own constraint), aligned to the drawn source's symmetry; the record names source 0
+    _, record, policy = _grasp_then_place(tmp_path, method="skillmix", resolve_after_bridge=False, drawn=1)
+    assert policy.solved_constraints[0] is policy.constraint_sequences[0][0]
+    grasp = record["subtasks"][0]
+    assert grasp["src_demo_ind"] == 0 and grasp["mix"]["source_a"] == 1 and grasp["mix"]["anchor"] == 0
+    assert grasp["mix"]["mixed"] is True and "alignment" not in grasp["mix"]

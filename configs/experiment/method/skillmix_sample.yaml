@@ -1,0 +1,10 @@
+# SkillMix, softmax rule, with the one source of a subtask whose fit gives d <= 0 drawn at random with probability
+# softmax(score) over the compatible sources instead of always the best-scored one (tmg/generation/method/skillmix.py,
+# mixing.single_source). Subtasks with d > 0 are blended as in skillmix. Added 2026-11-23: with "best", CP-Gen Threading
+# made all its demonstrations from the same source per subtask.
+defaults:
+  - skillmix
+  - _self_
+name: skillmix_sample
+mixing:
+  single_source: sample

@@ -14,4 +14,4 @@ cameras: [agentview, robot0_eye_in_hand]
 image_size: [84, 84]
 robot_state: [robot0_eef_pos, robot0_eef_quat, robot0_gripper_qpos]
 object_state: [object]              # low-dim object observation (robosuite object-state: poses and relative positions)
-instruction: pick up the needle and thread it through the hole of the tripod        # language instruction for π0
+instruction: "Pick up the needle and insert it through the ring on the tripod."        # language instruction for π0; written to match the success check (needle tip inside the ring; no published VLA prompt)

@@ -1,0 +1,82 @@
+# SkillMix softmax rule of cpgen threading (tmg fit_coefficients). Per subtask k, with phi_j = (|dx|, |dy|,
+# rotation, inhand_position, inhand_rotation) of source j against the current scene (in-hand terms 0 for k = 0):
+#   P(task succeeds | reached k, weights w) = sigmoid(c0 + sum_j w_j s_j + d spread(w)),
+#   s_j = a[j] + g . phi_j,  spread(w) = -sum_j w_j log w_j
+#   weights: softmax(s / d) over the sources compatible with the selected one when d > 0, the best one when d <= 0
+# Units: {'dx': 'm', 'dy': 'm', 'rotation': 'rad', 'inhand_position': 'm', 'inhand_rotation': 'rad'}.
+generator: cpgen
+task: threading
+rule: softmax
+basis: 'Fit (tmg fit_coefficients) on the randmix pools [''/data/pools/cpgen/threading/ours/ours/mixup_only/pool_calib'',
+  ''/data/scratch_calib/ana/cp_isaac/threading''] (2000 attempts) and the unmix pools [''/data/pools/cpgen/threading/ours/ours/none/pool_ctrl'']
+  (2000 attempts); rows of subtask k: the attempts that reached it, label = the attempt''s task success.'
+num_sources: 10
+features:
+- dx
+- dy
+- rotation
+- inhand_position
+- inhand_rotation
+units:
+  dx: m
+  dy: m
+  rotation: rad
+  inhand_position: m
+  inhand_rotation: rad
+subtasks:
+  0:
+    a:
+    - 0.23282923258058383
+    - 0.16498553686172818
+    - 0.03753936218591892
+    - 0.16578368256871487
+    - 0.019309527254253053
+    - 0.006640050771635775
+    - 0.02782788209315927
+    - -0.165406879533848
+    - -0.6113020838719737
+    - 0.0885236736157027
+    g:
+      dx: 0.16045222812472465
+      dy: 2.2683676372678088
+      rotation: 0.02062827411320705
+      inhand_position: 0.0
+      inhand_rotation: 0.0
+    d: -0.7746772523433622
+    c0: -0.5252132942353646
+    penalty: 10.0
+    rows:
+      randmix: 2000
+      unmix: 1859
+    successes: 1078
+    cv_log_loss_gain_percent:
+      all_rows: 8.0
+      randmix_rows: 9.0
+  1:
+    a:
+    - 0.8543506792570471
+    - 4.2701649053822335
+    - -28.631589254419197
+    - 3.6159014561586087
+    - 4.829387505899765
+    - 4.46620041593624
+    - 3.9166453918834
+    - 3.2526831624356976
+    - 4.073425161497824
+    - 2.7759709639359142
+    g:
+      dx: -3.8129917512113014
+      dy: 3.397984322749287
+      rotation: -0.4356864071519594
+      inhand_position: -19.863631080788796
+      inhand_rotation: 0.7685714954273645
+    d: -0.23831609412277516
+    c0: -3.127752468760605
+    penalty: 0.1
+    rows:
+      randmix: 1982
+      unmix: 1842
+    successes: 1078
+    cv_log_loss_gain_percent:
+      all_rows: 33.1
+      randmix_rows: 38.8

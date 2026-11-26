@@ -1,0 +1,112 @@
+# SkillMix sparsemax rule of mimicgen hammer_cleanup (tmg fit_coefficients). Per subtask k, with phi_j = (|dx|, |dy|,
+# rotation, inhand_position, inhand_rotation) of source j against the current scene (in-hand terms 0 for k = 0):
+#   P(task succeeds | reached k, weights w) = sigmoid(c0 + sum_j w_j s_j + d spread(w)),
+#   s_j = a[j] + g . phi_j,  spread(w) = 1 - sum_j w_j^2
+#   weights: sparsemax(s / (2 d)) over the sources compatible with the selected one when d > 0, the best one when d <= 0
+# Units: {'dx': 'm', 'dy': 'm', 'rotation': 'rad', 'inhand_position': 'm', 'inhand_rotation': 'rad'}.
+generator: mimicgen
+task: hammer_cleanup
+rule: sparsemax
+basis: 'Fitted on 2026-11-23 on the A100 with tmg fit_coefficients on the pools of softmax/hammer_cleanup.yaml:
+  /data/pools/mimicgen/hammer_cleanup/ours/ours/mixup_only/pool_calib [the randmix pool; in this repository skillmix_randmix/pool_randmix]
+  (2,000 attempts) and /data/pools/mimicgen/hammer_cleanup/ours/ours/none/pool_ctrl [the unmix pool; in this repository none/pool_unmix]
+  (2,000 attempts); rows of subtask k: the attempts that reached it, label = the attempt''s task success. Equal to
+  within 2e-13 to the rule the MimicGen sparsemax pools of 2026-11-21 were generated with (ana/fit_all.py, gini form).'
+num_sources: 10
+features:
+- dx
+- dy
+- rotation
+- inhand_position
+- inhand_rotation
+units:
+  dx: m
+  dy: m
+  rotation: rad
+  inhand_position: m
+  inhand_rotation: rad
+subtasks:
+  0:
+    a:
+    - 0.21356205605414008
+    - 0.05288897387765824
+    - -0.006126691810414045
+    - -0.3289702754769567
+    - -0.07160517865104328
+    - 0.15697268946472026
+    - -0.08190408098684313
+    - -0.013551587619115839
+    - 0.04135184419009796
+    - 0.04036205308881946
+    g:
+      dx: -1.5495376699687622
+      dy: -3.8809097324616695
+      rotation: -1.1187628381945671
+      inhand_position: 0.0
+      inhand_rotation: 0.0
+    d: 0.09724624680967894
+    c0: -0.8374244853865911
+    penalty: 100.0
+    rows:
+      randmix: 2000
+      unmix: 2000
+    successes: 767
+    cv_log_loss_gain_percent:
+      all_rows: 0.7
+      randmix_rows: 1.3
+  1:
+    a:
+    - 0.37167939987894244
+    - -0.014555804063690229
+    - -0.017269722716481015
+    - -0.046798055025444825
+    - 0.05573219044431849
+    - 0.4565867849044849
+    - 0.30732455616889565
+    - -0.5515197371618014
+    - -0.4095272877959637
+    - -0.11682066838615573
+    g:
+      dx: -3.06205275883615
+      dy: -0.4122696735121155
+      rotation: -1.3565958237462132
+      inhand_position: -6.3097219583184625
+      inhand_rotation: -2.546782438925183
+    d: 0.558949556788935
+    c0: 2.132140133088012
+    penalty: 10.0
+    rows:
+      randmix: 1880
+      unmix: 1878
+    successes: 760
+    cv_log_loss_gain_percent:
+      all_rows: 20.7
+      randmix_rows: 3.9
+  2:
+    a:
+    - -0.14323823708064526
+    - 0.26818586638649144
+    - -0.3850672705807447
+    - -0.2944980219386474
+    - 0.26634350207451835
+    - -0.13572667520499684
+    - 0.34403487612138983
+    - 0.03192766357439403
+    - -0.2499360992055129
+    - 0.4728019315501746
+    g:
+      dx: -3.834085459757585
+      dy: -9.37636232057694
+      rotation: 0.10019130852858961
+      inhand_position: -86.5862136862605
+      inhand_rotation: 0.13624768829648043
+    d: 0.06180640391094445
+    c0: 2.6503942321179412
+    penalty: 0.1
+    rows:
+      randmix: 707
+      unmix: 693
+    successes: 758
+    cv_log_loss_gain_percent:
+      all_rows: 35.3
+      randmix_rows: 36.1

@@ -1,5 +1,5 @@
-"""CP-Gen SkillMix: per-source features and weights from the constraint data, and the multi-source blend on the primary's
-timeline."""
+"""CP-Gen SkillMix: per-source features and weights from the constraint data, the multi-source blend on the weighted
+timeline, and the step loop's constraint resampled onto it."""
 from types import SimpleNamespace
 
 import numpy as np
@@ -30,7 +30,7 @@ def constraint(x, n=6, kind="robot-object", obj="pod", carried=None, grip=None):
 
 def mixer(n, d=0.05, rule="softmax"):
     g = np.array([-20.0, 0.0, 0.0, -50.0, 0.0])
-    fitted = SkillMixRule(name="cpgen/t", num_sources=n, subtasks={k: SubtaskRule(a=np.zeros(n), g=g, d=d, c0=0.0) for k in (0, 1)})
+    fitted = SkillMixRule(name="cpgen/t", rule="softmax", num_sources=n, subtasks={k: SubtaskRule(a=np.zeros(n), g=g, d=d, c0=0.0) for k in (0, 1)})
     return SkillMixer(rule=rule, coefficients=None if rule == "randmix" else fitted, chunk_seed=3)
 
 
@@ -39,7 +39,7 @@ def test_decide_weighs_the_compatible_sources_by_the_softmax_of_their_scores():
     obs = {"pod_pose": pose(0.0), "robot0_eef_pos": [0, 0, 1.0], "robot0_eef_quat_site": [0, 0, 0, 1.0]}
     record, w = mixing.decide(mixer(4), seqs, 0, 1, obs, None)
     assert record["incompatible"] == [3] and w[3] == 0     # gripper events differ from the primary's
-    # scores 0, -1, -6 (-20 per metre of dx): softmax over d = 0.05 leaves source 0 alone; the primary (1) gives the timeline
+    # scores 0, -1, -6 (-20 per metre of dx): softmax over d = 0.05 leaves source 0 alone
     assert record["rule"] == "softmax" and record["scores"][:3] == [0.0, -1.0, -6.0]
     assert w[0] == pytest.approx(1.0) and w[1] == 0 and w[2] == 0
     record, w = mixing.decide(mixer(4, d=1.0), seqs, 0, 1, obs, None)
@@ -71,17 +71,33 @@ def test_decide_randmix_draws_once_per_constraint_and_attempt():
     assert not np.array_equal(w1, w3)
 
 
-def test_multi_mix_plan_blends_on_the_primary_timeline():
-    n = 5
-    primary_grip = np.full((n, 1), -1.0)
-    other = np.stack([pose(0.1 * t + 1.0) for t in range(n)])
-    plan = mixing.MultiMixPlan(primary_grip, {2: (other, np.full((n, 1), -1.0))}, {"primary": 0.5, 2: 0.5})
-    out = plan.pose(0, pose(0.0))
-    assert out[0, 3] == pytest.approx(0.5) and np.allclose(out[:3, :3], np.eye(3))
-    plan0 = mixing.MultiMixPlan(primary_grip, {2: (other, np.full((n, 1), -1.0))}, {"primary": 0.0, 2: 1.0})
-    assert plan0.pose(n - 1, pose(0.0))[0, 3] == pytest.approx(other[-1, 0, 3])
+def test_mixed_window_blends_on_the_weighted_timeline():
+    a = np.stack([pose(0.0)] * 4)
+    b = np.stack([pose(1.0)] * 8)
+    win = mixing.MixedWindow({0: (a, np.full((4, 1), -1.0)), 2: (b, np.full((8, 1), -1.0))}, {0: 0.5, 2: 0.5}, anchor=2)
+    assert win.n == 6 and win.pose(0)[0, 3] == pytest.approx(0.5)            # length 0.5 * 4 + 0.5 * 8
+    assert win.anchor_index.tolist() == [0, 1, 2, 4, 5, 6]                  # the anchor's (2) steps on the blended window
+    assert win.meta["sources"]["2"]["source_samples"] == 8
+    lone = mixing.MixedWindow({2: (b, np.full((8, 1), -1.0))}, {2: 1.0}, anchor=2)
+    assert lone.n == 8 and lone.anchor_index.tolist() == list(range(8))     # one source: its own window, its own speed
+    assert np.allclose(lone.pose(7), b[7])
     with pytest.raises(IndexError):
-        plan.pose(n, pose(0.0))
+        win.pose(6)
+
+
+def test_window_on_resamples_the_per_step_data_and_keeps_the_rest():
+    c = constraint(0.0, n=6, grip=[-1, -1, 1, 1, 1, 1])
+    c.src_obj_transform = {"pod": len}                                      # a callable stays as it is
+    c.symmetries, c.post_constraint_behavior = ["s"], ["lift"]
+    w = mixing.window_on(c, np.array([0, 0, 1, 2, 3, 3, 4, 5, 5]))
+    assert len(w.timesteps) == 9 and w.src_gripper_action.tolist() == [-1, -1, -1, 1, 1, 1, 1, 1, 1]
+    assert w.src_obs["robot0_eef_pos"].shape == (9, 3) and w.src_obj_pose["pod"].shape == (9, 4, 4)
+    assert w.src_obj_transform["pod"] is len and w.symmetries == ["s"] and w.post_constraint_behavior == ["lift"]
+    assert len(c.timesteps) == 6 and c.src_gripper_action.shape == (6,)    # the source's own constraint is untouched
+    w.src_gripper_action[0] = 5.0                                           # CP-Gen writes into it: a copy
+    assert c.src_gripper_action[0] == -1
+    with pytest.raises(ValueError):
+        mixing.window_on(c, np.array([0, 6]))
 
 
 # symmetry alignment ----------------------------------------------------------------------------------------------------
@@ -132,7 +148,7 @@ def test_symmetry_candidates_follow_find_best_transform():
 
 def test_sources_held_from_the_other_side_are_aligned_to_the_primary_before_blending():
     # sources 0 and 2 hold the hammer at y=-0.06, source 1 (and 3, also turned about the approach axis) from the other
-    # side, 180 degrees about the hammer z axis: the object symmetry maps them onto the primary's side
+    # side, 180 degrees about the hammer z axis: the object symmetry maps them onto the primary's (0) side
     seqs = [[grasp(-0.06, 0.0)], [grasp(0.06, np.pi)], [grasp(-0.05, 0.05)], [grasp(0.06, 0.0)]]
     obs = {"hammer_pose": pose(0.1, 0.2, 0.3)}
     chosen, info = mixing.align_sources(FakeOfficial, POLICY, seqs, 0, 0, [1, 2, 3], obs, IDENTITY)
@@ -141,10 +157,11 @@ def test_sources_held_from_the_other_side_are_aligned_to_the_primary_before_blen
     assert info["1"]["pos_cm"] < 0.1 and info["1"]["rot_deg"] < 0.1
     assert info["1"]["primary_symmetry_pos_cm"] == pytest.approx(12.0, abs=0.01)
     assert info["1"]["primary_symmetry_rot_deg"] == pytest.approx(180.0, abs=0.1)
-    solved = mixing.solve_sources(FakeOfficial, POLICY, seqs, 0, [1, 2, 3], obs, chosen)
-    plan = mixing.MultiMixPlan(mixing.gripper_series(seqs[0][0]), solved, {"primary": 0.25, 1: 0.25, 2: 0.25, 3: 0.25})
+    chosen[0] = IDENTITY
+    solved = mixing.solve_sources(FakeOfficial, POLICY, seqs, 0, [0, 1, 2, 3], obs, chosen)
+    win = mixing.MixedWindow(solved, {0: 0.25, 1: 0.25, 2: 0.25, 3: 0.25}, anchor=0)
     primary = FakeOfficial.compute_X_W_eef_des(seqs[0][0], obs, None, None, src_t_idx=0, **IDENTITY)
-    dp, dr = mixing.pose_distance(plan.pose(0, primary), primary)
+    dp, dr = mixing.pose_distance(win.pose(0), primary)
     assert dp < 0.01 and np.degrees(dr) < 2.0             # without alignment: the hammer's middle, 180 degrees off
 
 
@@ -153,6 +170,7 @@ def test_alignment_records_the_distance_to_the_primary():
     obs = {"hammer_pose": pose()}
     chosen, info = mixing.align_sources(FakeOfficial, POLICY, seqs, 0, 0, [1], obs, IDENTITY)
     assert info["1"]["symmetry"] == "identity" and info["1"]["pos_cm"] == pytest.approx(8.0, abs=0.01)
-    solved = mixing.solve_sources(FakeOfficial, POLICY, seqs, 0, [1], obs, chosen)
-    plan = mixing.MultiMixPlan(mixing.gripper_series(seqs[0][0]), solved, {"primary": 0.5, 1: 0.5})
-    assert plan.pose(0, FakeOfficial.compute_X_W_eef_des(seqs[0][0], obs, None, None, **IDENTITY))[0, 3] == pytest.approx(0.04)
+    chosen[0] = IDENTITY
+    solved = mixing.solve_sources(FakeOfficial, POLICY, seqs, 0, [0, 1], obs, chosen)
+    win = mixing.MixedWindow(solved, {0: 0.5, 1: 0.5}, anchor=0)
+    assert win.pose(0)[0, 3] == pytest.approx(0.04)

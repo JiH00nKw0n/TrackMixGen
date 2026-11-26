@@ -1,6 +1,7 @@
 # @package _global_
-# tmg fit_coefficients: fit the SkillMix model of one task on its finished randmix and unmix pools and write the
-# rule file configs/experiment/generator/<generator>/coefficients/<task>.yaml (tmg/generation/fit_coefficients.py).
+# tmg fit_coefficients: fit the SkillMix model of one task on its finished randmix and unmix pools and write the rule
+# file configs/experiment/generator/<generator>/coefficients/<rule>/<task>.yaml of every rule in `rules` (the same rows,
+# the spread measured per rule; tmg/generation/fit_coefficients.py).
 #   tmg fit_coefficients task=hammer_cleanup scene=ours selection=ours generation=pool_unmix
 # `make coefficients` builds both pools (scripts/ensure_coefficients.sh) and runs this.
 defaults:
@@ -24,5 +25,6 @@ output: ${paths.reports}/fit_coefficients/${generator.name}/${task.name}/${scene
 command: fit_coefficients
 source: ${task.source}           # source demonstrations with datagen_info (each source's in-hand pose, MimicGen)
 overrides: []
-write_config: true                # also write configs/experiment/generator/<generator>/coefficients/<task>.yaml
+rules: [softmax, sparsemax]       # the rules to fit and write; a rule left out keeps its rule file
+write_config: true                # also write configs/experiment/generator/<generator>/coefficients/<rule>/<task>.yaml
 min_attempts: 100                 # refuse to fit on fewer attempts (per kind of pool)

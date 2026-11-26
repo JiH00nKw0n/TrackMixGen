@@ -17,4 +17,4 @@ cameras: ['agentview', 'robot0_eye_in_hand']
 image_size: [84, 84]
 robot_state: ['robot0_eef_pos', 'robot0_eef_quat', 'robot0_gripper_qpos']
 object_state: [object]              # low-dim object observation (robosuite object-state: poses and relative positions)
-instruction: assemble the two pieces onto the base one after the other        # language instruction for π0
+instruction: "Insert the first piece into the base, then insert the second piece into the first piece."        # language instruction for π0; written to match the success check (piece 1 on base, piece 2 on piece 1; no published VLA prompt)

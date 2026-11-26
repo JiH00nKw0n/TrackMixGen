@@ -14,28 +14,30 @@ several sources, each solved for the current scene:
    now and in source j; 0 where unknown). These are the quantities the runtime records for every constraint, so the fit
    and the mixing read the same values.
 2. Weights (``SkillMixer.decide`` of ``tmg.generation.method.skillmix``, the same call MimicGen's mixing makes). The
-   sources whose gripper events match the primary's (only those can be put on the primary's timeline) are compatible. ``mixing.rule: softmax``: the scores ``s_j = a_j + g . phi_j`` of the
-   task's rule file and the softmax of ``s / d`` over the compatible sources (the best one alone when ``d <= 0``).
-   ``mixing.rule: randmix``: random Dirichlet weights over the compatible sources, drawn once per constraint and
-   attempt (the randmix pools of the fit).
+   sources whose gripper events match the primary's (the source CP-Gen drew for the attempt, as in MimicGen) are
+   compatible. ``mixing.rule: softmax`` or ``sparsemax``: the scores ``s_j = a_j + g . phi_j`` of the task's rule file and
+   ``softmax(s / d)`` or ``sparsemax(s / (2 d))`` over the compatible sources (one source alone when ``d <= 0``).
+   ``mixing.rule: randmix``: random Dirichlet weights over the compatible sources, drawn once per constraint and attempt
+   (the randmix pools of the fit).
 3. Symmetry alignment and solve. A source can be recorded in a different but equivalent representation of the same
    grasp: the reference object may be symmetric (the constraint's ``symmetries``, e.g. the hammer turned 180 degrees about
    its z axis) and the parallel gripper is symmetric under 180 degrees about its approach axis (CP-Gen's ``reflect_eef``).
    CP-Gen's ``find_best_transform`` picks one combination of these transforms for the primary (the one whose desired
-   pose at the window start is closest to the current end-effector pose). Each retained source picks its own
+   pose at the window start is closest to the current end-effector pose). Each other retained source picks its own
    combination from the same candidate list, the one whose desired pose at the window start is closest to the primary's
-   desired pose there (same score as ``find_best_transform``: 5 per metre plus 1 per radian, reference = the primary's
-   pose; the compositions of two annotated object symmetries are candidates too, e.g. Hammer Cleanup's placement needs
-   the hammer turned about z and y at once), and is then solved for the current scene by the official ``compute_X_W_eef_des`` at every step of its own
-   window with that combination. Without this step two sources that hold the hammer from opposite sides are averaged
-   into a pose in the middle of the hammer, rotated 180 degrees from both (Hammer Cleanup pilot, 2026-11-13). The record
-   keeps per source the chosen combination and its distance to the primary after alignment (and with the primary's
-   combination, the old behaviour).
-4. Blend on the primary's timeline. Each retained source is time-warped onto the primary's window (gripper events moved
-   to the primary's event steps, linear stretching between them, ``event_mix.align_segments``). At each step t the
-   blended pose has the weighted mean position and the weighted mean rotation (``Rotation.mean`` with the weights). The
-   primary keeps its timeline, gripper commands and post-constraint behaviour; CP-Gen's inverse kinematics and cuRobo
-   then run on the blended poses.
+   desired pose there (as MimicGen aligns to the primary; same score as ``find_best_transform``: 5 per metre plus 1 per
+   radian; the compositions of two annotated object symmetries are candidates too, e.g. Hammer Cleanup's placement needs
+   the hammer turned about z and y at once). Every retained source is then solved for the current scene by the official
+   ``compute_X_W_eef_des`` at every step of its own window. Without the alignment two sources that hold the hammer from
+   opposite sides are averaged into a pose in the middle of the hammer (Hammer Cleanup pilot, 2026-11-13).
+4. Blend on the weighted timeline (``event_mix.mix_many``, the blend MimicGen uses). Each gripper event is placed at the
+   weighted mean of the sources' event steps and the window length is the weighted mean of their lengths; every interval
+   is time-warped separately; at each step the blended pose has the weighted mean position and the weighted mean
+   rotation. One retained source is returned unchanged (its own window, its own speed), as in MimicGen. CP-Gen's step
+   loop then runs on a copy of the anchor's (the retained source with the largest weight) constraint whose per-step data are resampled onto the blended timeline (``window_on``), so the
+   number of solved steps, the gripper commands and the gripper opening follow the blended timeline; the desired pose of
+   every step is the blended one (``MixedWindow.pose``), and CP-Gen's inverse kinematics and cuRobo run on it. With one
+   retained source this is exactly CP-Gen's own solve of that source.
 
 The reference object of constraint k is ``obj_names[0]`` for a robot-object constraint and ``obj_names[1]`` for an
 object-object constraint (the object the held one is placed on). Object-object constraints keep the gripper closed in
@@ -43,10 +45,12 @@ CP-Gen, so their event series is all closed.
 """
 from __future__ import annotations
 
+import copy
+
 import numpy as np
 from scipy.spatial.transform import Rotation
 
-from tmg.generation.method.event_mix import align_segments
+from tmg.generation.method.event_mix import events, mix_many
 from tmg.generation.method.skillmix import gripper_flip, pose_distance, symmetry_label, symmetry_score
 from tmg.generation.method.success_model import in_hand, inhand_features, scene_features
 
@@ -121,38 +125,66 @@ def decide(mixer, sequences: list, idx: int, primary: int, obs: dict, carried: s
     return {"subtask": int(idx), "source_a": int(primary), **decided, "carried_object": carried}, weights
 
 
-class MultiMixPlan:
-    """The retained sources' solved poses on the primary's timeline and their weights (module docstring, step 4)."""
+class MixedWindow:
+    """The retained sources' solved poses blended on the weighted timeline (module docstring, step 4)."""
 
-    def __init__(self, primary_gripper, others: dict, weights: dict):
-        """``others`` maps a source index to ``(solved poses (n_j,4,4), gripper series (n_j,1))``; ``weights`` maps every
-        retained source (the primary under key ``"primary"``) to its weight."""
-        primary_gripper = np.asarray(primary_gripper, dtype=float).reshape(-1, 1)
-        n = len(primary_gripper)
-        placeholder = np.tile(np.eye(4), (n, 1, 1))
-        self.n = n
-        self.w_primary = float(weights.get("primary", 0.0))
-        self.aligned, self.w, self.meta = {}, {}, {"samples": int(n), "sources": {}}
-        for j, (poses, grip) in others.items():
-            _a, warped, _ia, ib, meta = align_segments(placeholder, primary_gripper, np.asarray(poses, dtype=float),
-                                                       np.asarray(grip, dtype=float).reshape(-1, 1), 1.0)
-            self.aligned[j] = np.asarray(warped, dtype=float)
-            self.w[j] = float(weights[j])
-            self.meta["sources"][str(j)] = {"weight": round(float(weights[j]), 4), "source_samples": int(meta["source_b_samples"]),
-                                            "event_steps": meta["source_b_event_steps"]}
-        self.meta["primary_weight"] = round(self.w_primary, 4)
+    def __init__(self, solved: dict, weights: dict, anchor: int):
+        """``solved`` maps every retained source to ``(solved poses (n_j,4,4), gripper series (n_j,1))``, ``weights`` maps it
+        to its weight (sum 1) and ``anchor`` is the retained source whose constraint CP-Gen's step loop runs on."""
+        keep = list(solved)
+        w = np.array([float(weights[j]) for j in keep])
+        poses = [np.asarray(solved[j][0], dtype=float) for j in keep]
+        series = [np.asarray(solved[j][1], dtype=float).reshape(-1) for j in keep]
+        self.poses, _grip, meta = mix_many(poses, series, w / w.sum())
+        self.n = len(self.poses)
+        self.anchor = int(anchor)
+        a = keep.index(self.anchor)
+        if "source_index" in meta:
+            self.anchor_index = np.asarray(meta["source_index"][str(a)], dtype=int)
+        else:                                               # one retained source: its own steps
+            self.anchor_index = np.arange(self.n)
+        self.meta = {"samples": int(self.n), "anchor": self.anchor,
+                     "sources": {str(j): {"weight": round(float(weights[j]), 4), "source_samples": int(len(poses[i])),
+                                          "event_steps": events(series[i])[1].tolist()} for i, j in enumerate(keep)}}
+        if "actual_event_steps" in meta:
+            self.meta["actual_event_steps"] = meta["actual_event_steps"]
 
-    def pose(self, t: int, primary_pose: np.ndarray) -> np.ndarray:
-        """The blended pose of step ``t`` from the primary's solved pose of that step."""
+    def pose(self, t: int) -> np.ndarray:
+        """The blended desired end-effector pose of step ``t`` of the blended window."""
         if not 0 <= t < self.n:
-            raise IndexError(f"step {t} outside the primary's window of {self.n} steps")
-        poses = ([np.asarray(primary_pose, dtype=float)] if self.w_primary > 0 else []) + [self.aligned[j][t] for j in self.aligned]
-        w = np.array(([self.w_primary] if self.w_primary > 0 else []) + [self.w[j] for j in self.aligned], dtype=float)
-        w = w / w.sum()
-        out = np.eye(4)
-        out[:3, 3] = np.einsum("i,ij->j", w, np.stack([p[:3, 3] for p in poses]))
-        out[:3, :3] = Rotation.from_matrix(np.stack([p[:3, :3] for p in poses])).mean(weights=w).as_matrix()
-        return out
+            raise IndexError(f"step {t} outside the blended window of {self.n} steps")
+        return self.poses[t]
+
+
+STEP_FIELDS = ("timesteps", "src_obj_pose", "src_obs", "src_obj_transform", "src_obj_geoms_size", "src_action", "src_state",
+               "src_gripper_action", "keypoints_obj_frame", "keypoints_robot_link_frame")
+
+
+def _resample(value, index: np.ndarray, n: int):
+    """``value`` indexed by ``index`` along its first axis when that axis is the window (length ``n``); dictionaries are
+    resampled per entry; anything else (a callable, per-demo data) is kept."""
+    if isinstance(value, dict):
+        return {k: _resample(v, index, n) for k, v in value.items()}
+    if isinstance(value, np.ndarray) and value.ndim >= 1 and len(value) == n:
+        return value[index].copy()
+    if isinstance(value, (list, tuple)) and len(value) == n:
+        return [value[int(i)] for i in index]
+    return value
+
+
+def window_on(constraint, index: np.ndarray):
+    """A copy of ``constraint`` whose per-step data (``STEP_FIELDS``, first axis = the window) are resampled at the source
+    steps ``index`` (one per step of the blended window), so CP-Gen's step loop runs ``len(index)`` steps."""
+    n = window_length(constraint)
+    index = np.asarray(index, dtype=int)
+    if index.size and (index.min() < 0 or index.max() >= n):
+        raise ValueError(f"source steps {index.min()}..{index.max()} outside the window of {n} steps")
+    out = copy.copy(constraint)
+    for name in STEP_FIELDS:
+        if getattr(constraint, name, None) is not None:
+            setattr(out, name, _resample(getattr(constraint, name), index, n))
+    out.timesteps = [constraint.timesteps[int(i)] for i in index]
+    return out
 
 
 def symmetry_candidates(official, constraint) -> list[tuple[str, dict]]:
