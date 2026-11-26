@@ -6,6 +6,7 @@ sif: null
 data_root: /home/gpuadmin/workspace/jihoonkwon/tmg_data
 workers: auto
 max_workers: 16
+isaaclab_max_workers: 3       # Isaac Sim chunk processes at once (about 15 GB of RAM each; 12 at once ran out of memory)
 threads_per_worker: 1
 min_free_disk_gib: 20
 render: egl                     # offscreen rendering of the robosuite images: EGL only (GPU, NVIDIA EGL; EGL device i = GPU i here)

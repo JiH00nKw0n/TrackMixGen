@@ -385,3 +385,23 @@ def test_run_pool_rejects_a_renderer_other_than_egl(pool, tmp_path, monkeypatch,
     monkeypatch.setenv("TMG_RENDER", value)       # Mesa was removed on main: refused, not recorded
     with pytest.raises(ValueError, match="TMG_RENDER"):
         pool(_cfg(tmp_path))
+
+
+def test_isaaclab_chunk_processes_are_capped_per_gpu():
+    from tmg.core.workers import ISAACLAB_MAX_WORKERS, cap_simulator_workers
+
+    assert ISAACLAB_MAX_WORKERS == 3
+    assert cap_simulator_workers(16, "auto -> 16", "isaaclab", {}) == (3, "auto -> 16, capped at 3 Isaac Sim processes "
+                                                                          "(cluster.isaaclab_max_workers)")
+    assert cap_simulator_workers(16, "workers=16", "isaaclab", {"isaaclab_max_workers": 5})[0] == 5
+    assert cap_simulator_workers(2, "workers=2", "isaaclab", {}) == (2, "workers=2")           # below the cap: unchanged
+    assert cap_simulator_workers(16, "auto -> 16", "robosuite", {}) == (16, "auto -> 16")      # other simulators unchanged
+    with pytest.raises(ValueError, match="isaaclab_max_workers"):
+        cap_simulator_workers(4, "", "isaaclab", {"isaaclab_max_workers": 0})
+
+
+def test_the_isaac_cluster_caps_isaac_sim_at_three_processes():
+    import yaml
+
+    cluster = yaml.safe_load((Path(__file__).resolve().parents[2] / "configs/machine/cluster/isaac.yaml").read_text())
+    assert cluster["isaaclab_max_workers"] == 3 and cluster["max_workers"] == 16

@@ -29,7 +29,7 @@ from tmg.core.chunks import (
 )
 from tmg.core.provenance import write_provenance
 from tmg.core.records import RECORDS_DIR
-from tmg.core.workers import resolve_workers
+from tmg.core.workers import cap_simulator_workers, resolve_workers
 from tmg.generation.base import ChunkSpec
 from tmg.generation.generators import make_generator
 
@@ -295,6 +295,7 @@ def run_pool(cfg) -> dict:
 
     pending = [c for c in chunks if states[c.index] != "done" and (own is None or c.index in own)]
     workers, explained = resolve_workers(cluster.get("workers", "auto"), int(cluster.get("max_workers", 16)))
+    workers, explained = cap_simulator_workers(workers, explained, str(getattr(generator, "simulator", "")), cluster)
     done = sum(1 for c in chunks if states[c.index] == "done")
     mine = f" (shard {shard[0]}/{shard[1]}: {len(own)} chunks)" if own is not None else ""
     print(f"[tmg] pool {output}: {len(chunks)} chunks, {done} done, {len(pending)} to run here{mine}; "
