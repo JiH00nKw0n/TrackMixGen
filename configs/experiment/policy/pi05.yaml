@@ -32,7 +32,7 @@ params:
   n_action_steps: 15             # all executed before the next prediction
   num_inference_steps: 10        # flow-matching integration steps per prediction
   dtype: bfloat16
-  gradient_checkpointing: true   # memory only; the result is the same
+  gradient_checkpointing: false  # off (user, 2026-11-26): it recomputes activations and cost ~25-30 % speed on the B200 runs; memory is ample (42 of 183 GB with it on)
   empty_cameras: 1               # third image slot left empty, as openpi feeds DROID
   freeze_vision_encoder: false
   train_expert_only: false
