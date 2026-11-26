@@ -179,7 +179,9 @@ def test_every_committed_rule_file_loads_unchanged_with_single_arm_keys():
         assert sorted(rule.subtasks) == sorted(int(k) for k in data["subtasks"])
         for k, block in data["subtasks"].items():
             b = rule.for_subtask(int(k))
-            assert b is rule.for_subtask(int(k), "robot0")              # single-arm file, any end effector
+            assert b is rule.for_subtask(int(k), "robot0", single_arm=True)   # a single-arm generator (SoftMimicGen)
+            with pytest.raises(KeyError, match="more than one end effector"):
+                rule.for_subtask(int(k), "right")                        # never for a two-armed generator
             assert b.a.tolist() == [float(block["a"][j]) for j in range(rule.num_sources)] and b.d == float(block["d"])
         assert rule.describe()["subtasks"] == sorted(rule.subtasks)
 
@@ -224,7 +226,9 @@ def test_skillmix_mixer_scores_with_feature_poses_and_zero_inhand_for_unknown_so
     world = [np.eye(4)] * 3
     nodal = [pose(0.0), pose(0.05), pose(0.3)]
     rule = _rule(3, g=[-10.0, 0.0, 0.0, -10.0, 0.0], d=0.5, subtasks=(0, 1))
-    out = SkillMixer(coefficients=rule).mix(_context(segs, world, 0, pose(0.0), extra={"feature_object_poses": nodal, "eef": "robot0"}))
+    mixer = SkillMixer(coefficients=rule)
+    mixer.set_end_effectors(["robot0"])
+    out = mixer.mix(_context(segs, world, 0, pose(0.0), extra={"feature_object_poses": nodal, "eef": "robot0"}))
     rec = out.record
     assert rec["scores"] == [0.0, -0.5, -3.0] and rec["eef"] == "robot0" and rec["mixed"] is True
     assert len(set(rec["weights"])) == 3                              # non-identity weights from the nodal frames
@@ -238,7 +242,9 @@ def test_skillmix_mixer_with_a_current_object_pose_gives_non_identity_weights():
     segs = [_segment(0.0), _segment(0.0), _segment(0.0)]
     objs = [pose(0.0), pose(0.02), pose(0.04)]
     rule = _rule(3, g=[-5.0, 0.0, 0.0, 0.0, 0.0], d=1.0)
-    rec = SkillMixer(coefficients=rule).mix(_context(segs, objs, 1, pose(0.01), extra={"eef": "right"})).record
+    mixer = SkillMixer(coefficients=rule)
+    mixer.set_end_effectors(["right"])
+    rec = mixer.mix(_context(segs, objs, 1, pose(0.01), extra={"eef": "right"})).record
     assert "identity_reason" not in rec and rec["mixed"] is True and max(rec["weights"]) < 1.0
     rec = SkillMixer(coefficients=rule).mix(_context(segs, objs, 1, None)).record
     assert rec["mixed"] is False and rec["identity_reason"] == "no current object pose"
@@ -688,3 +694,39 @@ def test_the_mixer_takes_the_generators_end_effectors_before_its_first_call():
     mixer.mix(_context([_segment(0.0)] * 2, [pose()] * 2, 0, pose(), extra={"eef": "left"}))
     with pytest.raises(RuntimeError, match="before the first"):
         mixer.set_end_effectors(["left"])
+
+
+def test_a_two_armed_generator_refuses_a_rule_file_without_per_arm_blocks():
+    mixer = SkillMixer(coefficients=_rule(2))
+    mixer.set_end_effectors(["left", "right"])
+    with pytest.raises(KeyError, match="more than one end effector"):
+        mixer.mix(_context([_segment(0.0)] * 2, [pose()] * 2, 0, pose(), extra={"eef": "right"}))
+    with pytest.raises(ValueError, match="mixes per-arm keys"):
+        SkillMixRule.from_mapping({"rule": "softmax", "num_sources": 1, "subtasks": {
+            0: {"a": [0.0], "g": dict.fromkeys(("dx", "dy", "rotation", "inhand_position", "inhand_rotation"), 0.0), "d": 1, "c0": 0},
+            "right/1": {"a": [0.0], "g": dict.fromkeys(("dx", "dy", "rotation", "inhand_position", "inhand_rotation"), 0.0), "d": 1, "c0": 0}}})
+
+
+def test_the_mixer_checks_the_deformable_frame_against_the_rule_file(tmp_path):
+    from tmg.generation.fit_coefficients import write_rule
+
+    g = dict.fromkeys(("dx", "dy", "rotation", "inhand_position", "inhand_rotation"), 0.0)
+    frame = {"version": "nodal_yaw_v1", "reference_sha256": "abc"}
+    path = write_rule(tmp_path / "rope.yaml", generator="softmimicgen", task="rope", basis="t", num_sources=2,
+                      blocks={0: {"a": [0.0, 0.0], "g": g, "d": 1.0, "c0": 0.0}}, object_frame=frame)
+    rule = load_rule(str(path))
+    assert rule.object_frame == frame
+    segs, world = [_segment(0.0)] * 2, [np.eye(4)] * 2
+
+    def mix(rule, frame):
+        mixer = SkillMixer(coefficients=rule)
+        mixer.set_end_effectors(["robot0"])
+        return mixer.mix(_context(segs, world, 0, pose(), extra={"eef": "robot0", "object_frame": frame,
+                                                                 "feature_object_poses": [pose(), pose(0.1)]}))
+
+    assert "weights" in mix(rule, frame).record
+    with pytest.raises(ValueError, match="object frame"):
+        mix(rule, {"version": "nodal_yaw_v1", "reference_sha256": "other"})
+    with pytest.raises(ValueError, match="object frame"):
+        mix(_rule(2), frame)                                          # a rule fitted without frames
+    assert "weights" in mix(_rule(2), None).record                    # a rigid reference object: nothing to check

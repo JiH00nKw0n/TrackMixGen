@@ -134,13 +134,27 @@ class SkillMixRule:
     num_sources: int
     subtasks: dict               # subtask_key (k, or "<eef>/<k>") -> SubtaskRule
     path: str = ""
+    object_frame: dict | None = None   # deformable reference object: the frame the fit's records used (soft_frame)
 
-    def for_subtask(self, k: int, eef: str | None = None) -> SubtaskRule:
-        """The block of subtask k of end effector ``eef``: the ``<eef>/<k>`` block, else (a single-arm file) the ``k`` one."""
-        for key in ((subtask_key(k, eef), int(k)) if eef is not None else (int(k),)):
-            if key in self.subtasks:
-                return self.subtasks[key]
-        raise KeyError(f"SkillMix rule {self.name}: no subtask {subtask_key(k, eef)!r}")
+    @property
+    def per_arm(self) -> bool:
+        """True when the blocks are keyed ``<eef>/<k>`` (a file has either per-arm keys or plain ``k`` keys only)."""
+        return any(isinstance(key, str) for key in self.subtasks)
+
+    def for_subtask(self, k: int, eef: str | None = None, single_arm: bool = False) -> SubtaskRule:
+        """The block of subtask k of end effector ``eef``: the ``<eef>/<k>`` block of a per-arm file; the ``k`` block of a
+        single-arm file when ``eef`` is None (MimicGen, CP-Gen) or the generator has one end effector (``single_arm``,
+        SoftMimicGen). A two-armed generator never reads a file without per-arm blocks (KeyError)."""
+        if self.per_arm:
+            key = subtask_key(k, eef) if eef is not None else None
+        else:
+            key = int(k) if eef is None or single_arm else None
+        if key is None or key not in self.subtasks:
+            why = ("the file has per-arm blocks <eef>/<k>, the call names no end effector" if self.per_arm and eef is None else
+                   "the file has no per-arm blocks and the generator has more than one end effector" if key is None else
+                   "no such block")
+            raise KeyError(f"SkillMix rule {self.name}: subtask {subtask_key(k, eef)!r}: {why}")
+        return self.subtasks[key]
 
     @classmethod
     def from_mapping(cls, data: Mapping, *, name: str = "", path: str = "") -> SkillMixRule:
@@ -156,8 +170,12 @@ class SkillMixRule:
             subtasks[subtask_key(k, eef)] = SubtaskRule(a=a, g=g, d=float(block["d"]), c0=float(block["c0"]))
         if not subtasks:
             raise KeyError(f"{path or name}: rule file has no subtasks")
+        if len({isinstance(key, str) for key in subtasks}) > 1:
+            raise ValueError(f"{path or name}: rule file mixes per-arm keys <eef>/<k> and plain subtask keys")
+        frame = data.get("object_frame")
         return cls(name=name or f"{data.get('generator', '')}/{data.get('task', '')}", num_sources=n, subtasks=subtasks,
-                   path=path)
+                   path=path, object_frame=None if frame is None else {"version": str(frame["version"]),
+                                                                       "reference_sha256": str(frame["reference_sha256"])})
 
     def describe(self) -> dict:
         order = sorted(self.subtasks, key=lambda key: (parse_subtask_key(key)[0] or "", parse_subtask_key(key)[1]))
@@ -446,7 +464,7 @@ class SkillMixer:
         if self.rule == "randmix":
             draw = self.draws.draw(subtask, len(scene), eef)
             return randmix_weights(draw, compatible), {"dirichlet_c": round(draw[0], 5)}
-        block = self.coefficients.for_subtask(subtask, eef)
+        block = self.coefficients.for_subtask(subtask, eef, single_arm=self.arms is not None and len(self.arms) == 1)
         s = block.scores(scene, inhand)
         about = {"scores": [round(float(v), 4) for v in s], "d": round(block.d, 4)}
         u = None
@@ -512,6 +530,7 @@ class SkillMixer:
         if not context.has_reference_object or context.extra.get("current_object_pose") is None:
             record["identity_reason"] = "subtask has no reference object" if not context.has_reference_object else "no current object pose"
             return identity
+        self._check_frame(context.extra.get("object_frame"))
         n = context.num_sources
         scene, inhand = self.features(context)
         series = [self._event_series(np.asarray(context.src_segments[j][2], dtype=float)) for j in range(n)]
@@ -531,6 +550,18 @@ class SkillMixer:
         record.update(mixed=len(keep) > 1 or keep[0] != primary,
                       alignment={key: meta[key] for key in ("samples", "segments", "actual_event_steps") if key in meta})
         return MixedSegment(obj_primary @ eef_mixed, transform_all(obj_primary, mixed_obj), gripper, record)
+
+    def _check_frame(self, frame) -> None:
+        """A deformable object's features are only comparable with the fit's when both use the same nodal frame
+        (definition and reference cloud, ``soft_frame``): the rule file records the frame of its records."""
+        if self.coefficients is None:
+            return
+        if frame is None:                                  # a rigid reference object
+            return
+        fitted = self.coefficients.object_frame
+        if fitted is None or dict(frame) != fitted:
+            raise ValueError(f"SkillMix rule {self.coefficients.name}: object frame of the scene {frame} differs from the "
+                             f"rule file's {fitted}; refit the rule on records of this frame")
 
     def _align(self, context: MixContext, keep: list[int], series: list, poses: list, eef_obj: list) -> dict:
         """Step 1 of the module docstring, in place on ``poses`` and ``eef_obj`` (object frames of the ``keep`` sources)."""

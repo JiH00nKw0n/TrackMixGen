@@ -133,6 +133,7 @@ class SubtaskScene:
                  "current_object_pose": self.current_object_pose, "carried_object": self.carried}
         if self.soft:
             extra["feature_object_poses"] = self.source_object_poses
+            extra["object_frame"] = self.object_frame
         now = self.current_in_hand()
         if now is not None:
             extra["current_in_hand"] = now
@@ -191,8 +192,9 @@ class IsaacLabRuntime:
     def __init__(self, method: Method, layout: IsaacLabLayout, records_dir: Path | None):
         self.method = method
         self.layout = layout
-        if hasattr(method.mixer, "set_end_effectors"):     # per-arm random streams and rule blocks for two arms
-            method.mixer.set_end_effectors(layout.eefs)
+        mixer = getattr(method, "mixer", None)
+        if hasattr(mixer, "set_end_effectors"):            # per-arm random streams and rule blocks for two arms
+            mixer.set_end_effectors(layout.eefs)
         self.rec = AttemptRecorder()
         self.rec.configure(records_dir)
         self.records_dir = records_dir

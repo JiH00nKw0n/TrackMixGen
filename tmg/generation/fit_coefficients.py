@@ -318,9 +318,10 @@ def isaaclab_subtasks(attempts: Sequence[Mapping]) -> dict[str, int]:
     return dict(sorted(out.items()))
 
 
-def check_isaaclab_records(attempts: Sequence[Mapping]) -> None:
+def check_isaaclab_records(attempts: Sequence[Mapping]) -> dict | None:
     """Refuse records without the scene of their subtasks (made before the Isaac Lab runtimes recorded it, or whose scene
-    could not be read: ``scene_error``) and deformable-object frames of different definitions or reference clouds."""
+    could not be read: ``scene_error``) and deformable-object frames of different definitions or reference clouds.
+    Returns the one deformable-object frame of the records (``{version, reference_sha256}``), or None."""
     missing, errors, frames = 0, [], set()
     for a in attempts:
         for s in a["subtasks"]:
@@ -337,6 +338,10 @@ def check_isaaclab_records(attempts: Sequence[Mapping]) -> None:
                          f"recorded the subtask scene; regenerate them")
     if len(frames) > 1:
         raise ValueError(f"the records use different deformable-object frames {sorted(frames)}")
+    if not frames:
+        return None
+    version, sha = next(iter(frames))
+    return {"version": version, "reference_sha256": sha}
 
 
 def isaaclab_outcomes(attempts: Attempts, eef: str, num_subtasks: int) -> tuple[list[list[bool]], dict]:
@@ -400,7 +405,8 @@ def fit_isaaclab_blocks(randmix: Attempts, unmix: Attempts, *, num_sources: int,
 
 
 # rule file ------------------------------------------------------------------------------------------------------------
-def write_rule(path: Path, *, generator: str, task: str, basis: str, num_sources: int, blocks: Mapping) -> Path:
+def write_rule(path: Path, *, generator: str, task: str, basis: str, num_sources: int, blocks: Mapping,
+               object_frame: Mapping | None = None) -> Path:
     """Write a SkillMix softmax rule file (read by ``tmg.generation.method.skillmix.load_rule``)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     head = (f"# SkillMix rule of {generator} {task} (tmg fit_coefficients). Per subtask k, with phi_j = (|dx|, |dy|, rotation,\n"
@@ -414,6 +420,8 @@ def write_rule(path: Path, *, generator: str, task: str, basis: str, num_sources
     data = {"generator": generator, "task": task, "rule": "softmax", "basis": basis, "num_sources": int(num_sources),
             "features": list(FEATURES), "units": UNITS,
             "subtasks": {(str(k) if keyed else int(k)): dict(blocks[k]) for k in sorted(blocks, key=str if keyed else int)}}
+    if object_frame is not None:          # deformable reference object: the mixer checks the frame of the scene against it
+        data["object_frame"] = dict(object_frame)
     path.write_text(head + yaml.safe_dump(data, sort_keys=False, width=120))
     return path
 
@@ -434,8 +442,9 @@ def fit_coefficients(cfg) -> dict:
             raise ValueError(f"{len(read)} attempts in the {kind} pools {pools[kind]}, fewer than "
                              f"min_attempts={plain['min_attempts']}")
     num_sources = int(task["num_sources"])
-    reached = {}
+    reached, frame = {}, None
     if generator.get("simulator") == "isaaclab":
+        frame = check_isaaclab_records(attempts["randmix"].records + attempts["unmix"].records)
         blocks, reached = fit_isaaclab_blocks(attempts["randmix"], attempts["unmix"], num_sources=num_sources)
     else:
         blocks = fit_blocks(attempts["randmix"], attempts["unmix"], num_sources=num_sources,
@@ -448,7 +457,8 @@ def fit_coefficients(cfg) -> dict:
     basis = (f"Fit (tmg fit_coefficients) on the randmix pools {pools['randmix']} ({len(attempts['randmix'])} "
              f"attempts) and the unmix pools {pools['unmix']} ({len(attempts['unmix'])} attempts); rows of "
              f"subtask k: the attempts that reached it, label = the attempt's task success.")
-    kwargs = dict(generator=generator["name"], task=task["name"], basis=basis, num_sources=num_sources, blocks=blocks)
+    kwargs = dict(generator=generator["name"], task=task["name"], basis=basis, num_sources=num_sources, blocks=blocks,
+                  object_frame=frame)
     written = [str(write_rule(output / COEFFICIENT_FILE, **kwargs))]
     if plain.get("write_config", True):
         written.append(str(write_rule(rule_path(f"{generator['name']}/{task['name']}"), **kwargs)))
