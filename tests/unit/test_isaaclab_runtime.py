@@ -158,10 +158,33 @@ def soft_locals(infos, primary=0, subtask=0, soft=False):
     local_vars = {"src_subtask_eef_poses": info.eef_pose["robot0"][start:end], "src_subtask_target_poses": info.target_eef_pose["robot0"][start:end],
                   "src_subtask_gripper_actions": info.gripper_action["robot0"][start:end], "eef_name": "robot0", "subtask_ind": subtask,
                   "selected_src_demo_ind": primary, "all_randomized_subtask_boundaries": {"robot0": bounds}, "subtask_object_name": "rope",
-                  "subtask_object_soft": soft}
+                  "subtask_object_soft": soft, "env_id": 0, "subtask_object_pose": T(pose(105.0))}
     if soft:
         local_vars["src_subtask_nodal_positions"] = info.object_nodal_positions["rope"][start]
+        local_vars["subtask_nodal_positions"] = info.object_nodal_positions["rope"][start]
     return local_vars
+
+
+class SceneEnv:
+    """The environment's pose getters the scene of a subtask reads (eef pose now, rigid object poses now)."""
+
+    def __init__(self, eef=None, objects=None):
+        self.eef = {} if eef is None else eef
+        self.objects = {} if objects is None else objects
+
+    def get_robot_eef_pose(self, eef_name, env_ids):
+        return T(self.eef.get(eef_name, np.eye(4)))[None]
+
+    def get_object_poses(self, env_ids):
+        return {k: T(v)[None] for k, v in self.objects.items()}
+
+    def target_eef_pose_to_action(self, target_eef_pose_dict, gripper_action_dict, action_noise_dict=None, env_id=0):
+        return T(np.zeros(6))
+
+
+def soft_generator(infos, env=None):
+    return types.SimpleNamespace(src_demo_datagen_info_pool=types.SimpleNamespace(datagen_infos=infos),
+                                 env=env or SceneEnv())
 
 
 def make_runtime(method, records_dir=None):
@@ -185,11 +208,12 @@ def test_mix_segment_hands_the_mixer_every_source_and_repacks_the_mixed_segment(
     local_vars = soft_locals(infos, primary=1)
     mixer = RecordingMixer()
     rt = make_runtime(Method0(mixer))
-    gen = types.SimpleNamespace(src_demo_datagen_info_pool=types.SimpleNamespace(datagen_infos=infos))
+    gen = soft_generator(infos)
     eef, targets, grippers = rt.mix_segment(gen, local_vars)
     ctx = mixer.contexts[0]
     assert ctx.subtask_ind == 0 and ctx.primary == 1 and ctx.num_sources == 2 and ctx.has_reference_object is True
-    assert ctx.extra == {"eef": "robot0", "soft": False, "reference_object": "rope"}
+    assert _same_extra(ctx.extra, {"eef": "robot0", "soft": False, "reference_object": "rope", "current_object_pose": pose(105.0),
+                                   "carried_object": None})         # subtask 0: no carried object, no in-hand poses
     assert ctx.rng.random() == np.random.default_rng(0).random()                     # the mixer's stream is always default_rng(0)
     np.testing.assert_array_equal(ctx.primary_eef_start, pose(10))
     np.testing.assert_array_equal(ctx.primary_targets, infos[1].target_eef_pose["robot0"].a[0:4])
@@ -209,8 +233,7 @@ def test_mix_segment_keeps_the_primary_when_the_mixer_declines(torch):
     infos = [datagen_info(6, 0), datagen_info(6, 10)]
     local_vars = soft_locals(infos)
     rt = make_runtime(Method0(RecordingMixer(mixed=False)))
-    gen = types.SimpleNamespace(src_demo_datagen_info_pool=types.SimpleNamespace(datagen_infos=infos))
-    out = rt.mix_segment(gen, local_vars)
+    out = rt.mix_segment(soft_generator(infos), local_vars)
     assert out[0] is local_vars["src_subtask_eef_poses"] and out[2] is local_vars["src_subtask_gripper_actions"]
     assert rt._last_mix == {"mixed": False, "donor": 1}
 
@@ -223,21 +246,51 @@ def test_mix_segment_registers_donor_segments_into_the_primary_rope(torch, monke
         calls.append((float(tgt_obj_nodal_pos.a[0, 0]), float(src_obj_nodal_pos.a[0, 0]), use_rotation_transform, bend_coef, rot_coef))
         return T(src_eef_poses.a + 1000)
 
+    install_fake_registration(monkeypatch, register)
+    infos = [rope_info(6, 0), rope_info(6, 10), rope_info(6, 20)]
+    mixer = RecordingMixer()
+    rt = make_runtime(Method0(mixer))
+    rt.mix_segment(soft_generator(infos), soft_locals(infos, primary=1, soft=True))
+    ctx = mixer.contexts[0]
+    assert [c[2:] for c in calls] == [(True, 0.1, 1e-3)] * 2 and calls[0][0] == calls[1][0] == float(infos[1].object_nodal_positions["rope"].a[0, 0, 0])
+    assert ctx.extra["eef"] == "robot0" and ctx.extra["soft"] is True and ctx.extra["reference_object"] == "rope"
+    assert all(np.array_equal(p, np.eye(4)) for p in ctx.src_object_poses)          # blending frames: the world after registration
+    assert ctx.src_segments[0][1][0, 0, 3] == 1000.5 and ctx.src_segments[1][1][0, 0, 3] == 10.5 and ctx.src_segments[2][1][0, 0, 3] == 1020.5
+    # the donors' start poses are registered too (the primary's is its own)
+    assert ctx.src_segments[0][0][0, 3] == 1000.0 and ctx.src_segments[1][0][0, 3] == 10.0 and ctx.src_segments[2][0][0, 3] == 1020.0
+    # features: the nodal frames of soft_frame (source 0's first cloud is the reference, so source 0 has the identity rotation)
+    from tmg.generation.method.soft_frame import nodal_frame
+    ref = infos[0].object_nodal_positions["rope"].a[0]
+    for j, info in enumerate(infos):
+        np.testing.assert_allclose(ctx.extra["feature_object_poses"][j], nodal_frame(info.object_nodal_positions["rope"].a[0], ref))
+    np.testing.assert_allclose(ctx.extra["current_object_pose"], nodal_frame(infos[1].object_nodal_positions["rope"].a[0], ref))
+
+
+def _same_extra(a, b):
+    return a.keys() == b.keys() and all(np.array_equal(a[k], b[k]) if isinstance(b[k], np.ndarray) else a[k] == b[k] for k in b)
+
+
+def install_fake_registration(monkeypatch, register):
     for name in ("softmimicgen", "softmimicgen.datagen"):
         monkeypatch.setitem(sys.modules, name, types.ModuleType(name))
     dg = types.ModuleType("softmimicgen.datagen.data_generator")
     dg.transform_source_data_segment_using_nodal_registration = register
     monkeypatch.setitem(sys.modules, "softmimicgen.datagen.data_generator", dg)
-    infos = [datagen_info(6, 0, nodal=True), datagen_info(6, 10, nodal=True), datagen_info(6, 20, nodal=True)]
-    mixer = RecordingMixer()
-    rt = make_runtime(Method0(mixer))
-    gen = types.SimpleNamespace(src_demo_datagen_info_pool=types.SimpleNamespace(datagen_infos=infos))
-    rt.mix_segment(gen, soft_locals(infos, primary=1, soft=True))
-    ctx = mixer.contexts[0]
-    assert calls == [(10.0, 0.0, True, 0.1, 1e-3), (10.0, 20.0, True, 0.1, 1e-3)]
-    assert ctx.extra == {"eef": "robot0", "soft": True, "reference_object": "rope"}
-    assert all(np.array_equal(p, np.eye(4)) for p in ctx.src_object_poses)
-    assert ctx.src_segments[0][1][0, 0, 3] == 1000.5 and ctx.src_segments[1][1][0, 0, 3] == 10.5 and ctx.src_segments[2][1][0, 0, 3] == 1020.5
+
+
+def rope_cloud(offset, yaw=0.0, n=12):
+    """A bent rope of n nodes, turned by ``yaw`` and shifted by ``offset`` along x."""
+    t = np.linspace(-0.2, 0.2, n)
+    c, s = np.cos(yaw), np.sin(yaw)
+    pts = np.stack([t, 2.0 * t ** 2, np.full(n, 0.02)], axis=1) @ np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]]).T
+    return pts + [offset, 0.0, 0.0]
+
+
+def rope_info(num_steps, offset, yaw_step=0.1):
+    """A SoftMimicGen source whose rope turns by ``yaw_step`` per step (and per source offset)."""
+    info = datagen_info(num_steps, offset)
+    info.object_nodal_positions = {"rope": T(np.stack([rope_cloud(offset, yaw_step * (i + offset)) for i in range(num_steps)]))}
+    return info
 
 
 # pre-noise labels --------------------------------------------------------------------------------------
@@ -353,6 +406,119 @@ def test_selected_sources_are_reset_at_every_attempt(torch, tmp_path):
     rt.end_attempt(gen, 0, {"success": False})
     lines = [json.loads(s) for s in (tmp_path / "attempts.jsonl").read_text().splitlines()]
     assert [line["src_demo_inds"] for line in lines] == [[4, 5], [6]]
+
+
+# scene of a subtask: mixer inputs and record fields ----------------------------------------------------
+def rope_generator(infos, eef_pose=None):
+    cfg = [types.SimpleNamespace(num_interpolation_steps=5, num_fixed_steps=0, action_noise=0.0, subtask_term_signal="grasp"),
+           types.SimpleNamespace(num_interpolation_steps=5, num_fixed_steps=0, action_noise=0.0, subtask_term_signal=None)]
+    gen = soft_generator(infos, SceneEnv(eef={"robot0": pose(0.3) if eef_pose is None else eef_pose}))
+    gen.env_cfg = types.SimpleNamespace(subtask_configs={"robot0": cfg})
+    return gen
+
+
+def rope_subtask(rt, gen, infos, subtask, primary, current_nodes):
+    local_vars = soft_locals(infos, primary=primary, subtask=subtask, soft=True)
+    local_vars.update({"self": gen, "subtask_nodal_positions": T(current_nodes), "selected_src_subtask_boundary": T([0, 4] if subtask == 0 else [4, 6])})
+    local_vars.pop("subtask_object_pose")                              # a deformable object has no rigid pose
+    out = rt.mix_segment(gen, local_vars)
+    rt.record_subtask(local_vars)
+    return out
+
+
+def test_rope_records_the_nodal_frames_and_in_hand_poses_the_fit_needs(torch, tmp_path, monkeypatch):
+    """Method none (baseline): the records carry the scene of every subtask; nothing reaches the generation."""
+    import json
+
+    from tmg.generation.method.soft_frame import FRAME_VERSION, nodal_frame, reference_hash
+    from tmg.generation.method.success_model import in_hand
+    from tmg.generation.method.success_model import pose12 as P
+
+    infos = [rope_info(6, 0), rope_info(6, 10), rope_info(6, 20)]
+    gen = rope_generator(infos)
+    rt = make_runtime(Method0(None), records_dir=tmp_path)
+    rt.begin_attempt(gen, 0)
+    now0, now1 = rope_cloud(0.5, 0.7), rope_cloud(0.6, 0.9)
+    out = rope_subtask(rt, gen, infos, 0, 2, now0)
+    assert out[0] is not None and rt._last_mix is None                 # no mixer: the builder's segment untouched
+    rope_subtask(rt, gen, infos, 1, 2, now1)
+    rt.end_attempt(gen, 0, {"success": True})
+    line = json.loads((tmp_path / "attempts.jsonl").read_text().splitlines()[0])
+    s0, s1 = line["subtasks"]
+    ref = infos[0].object_nodal_positions["rope"].a[0]
+    assert "scene_error" not in s0 and s0["term_signal"] == "grasp" and s1["term_signal"] is None
+    assert s0["object_frame"] == {"version": FRAME_VERSION, "reference_sha256": reference_hash(ref)}
+    np.testing.assert_allclose(P(s0["cur_obj_pose"]), nodal_frame(now0, ref), atol=1e-6)
+    np.testing.assert_allclose(P(s0["src_obj_pose"]), nodal_frame(infos[2].object_nodal_positions["rope"].a[0], ref), atol=1e-6)
+    np.testing.assert_allclose(P(s1["src_obj_pose"]), nodal_frame(infos[2].object_nodal_positions["rope"].a[4], ref), atol=1e-6)
+    np.testing.assert_allclose(P(s0["eef_pose"]), pose(0.3))
+    np.testing.assert_allclose(P(s0["src_eef_pose"]), pose(20.0))
+    assert s0["carried_object"] is None and s1["carried_object"] == "rope"
+    np.testing.assert_allclose(P(s1["objects"]["rope"]), nodal_frame(now1, ref), atol=1e-6)
+    np.testing.assert_allclose(P(s1["src_objects"]["rope"]), P(s1["src_obj_pose"]))
+    # the in-hand features the fit computes from these fields are non-zero for this scene
+    assert np.linalg.norm(in_hand(P(s1["eef_pose"]), P(s1["objects"]["rope"]))[:3, 3] - in_hand(P(s1["src_eef_pose"]), P(s1["src_objects"]["rope"]))[:3, 3]) > 0
+
+
+def test_rope_mixer_gets_nodal_scene_and_in_hand_inputs_from_the_second_subtask(torch, monkeypatch):
+    install_fake_registration(monkeypatch, lambda **kw: kw["src_eef_poses"])
+    infos = [rope_info(6, 0), rope_info(6, 10), rope_info(6, 20)]
+    gen = rope_generator(infos)
+    mixer = RecordingMixer(mixed=False)
+    rt = make_runtime(Method0(mixer))
+    rt.begin_attempt(gen, 0)
+    rope_subtask(rt, gen, infos, 0, 1, rope_cloud(0.5, 0.7))
+    rope_subtask(rt, gen, infos, 1, 1, rope_cloud(0.6, 0.9))
+    first, second = (c.extra for c in mixer.contexts)
+    assert "current_in_hand" not in first and first["current_object_pose"] is not None and len(first["feature_object_poses"]) == 3
+    assert second["carried_object"] == "rope" and second["current_in_hand"].shape == (4, 4) and len(second["source_in_hand"]) == 3
+    rots = [p[:2, :2] for p in second["feature_object_poses"]]
+    assert not np.allclose(rots[0], rots[1])                           # the sources' frames differ: non-zero scene features
+
+
+def test_a_scene_that_cannot_be_read_is_noted_without_a_mixer_and_raises_with_one(torch):
+    infos = [rope_info(6, 0), rope_info(6, 10)]
+    gen = rope_generator(infos)
+    for method, raises in ((Method0(None), False), (Method0(RecordingMixer()), True)):
+        rt = make_runtime(method)
+        rt.begin_attempt(gen, 0)
+        local_vars = soft_locals(infos, soft=True)
+        local_vars.update({"self": gen, "selected_src_subtask_boundary": T([0, 4])})
+        local_vars.pop("subtask_nodal_positions")
+        if raises:
+            with pytest.raises(KeyError, match="subtask_nodal_positions"):
+                rt.mix_segment(gen, local_vars)
+            continue
+        rt.mix_segment(gen, local_vars)
+        rt.record_subtask(local_vars)
+        assert "subtask_nodal_positions" in rt.rec.subtasks[0]["scene_error"]
+
+
+def test_rigid_objects_use_the_builder_pose_and_the_environment_for_another_carried_object(torch):
+    infos = [datagen_info(6, 0, obj="bottle"), datagen_info(6, 10, obj="bottle")]
+    for info, offset in zip(infos, (0, 10)):
+        info.object_poses["fridge"] = T(np.stack([pose(200 + offset + i) for i in range(6)]))
+    env = SceneEnv(eef={"robot0": pose(1.0)}, objects={"bottle": pose(0.9), "fridge": pose(300.0)})
+    gen = soft_generator(infos, env)
+    gen.env_cfg = types.SimpleNamespace(subtask_configs={"robot0": [types.SimpleNamespace(
+        num_interpolation_steps=0, num_fixed_steps=0, action_noise=0.0, subtask_term_signal="grasp")] * 2})
+    from tmg.generation.method.success_model import pose12 as P
+
+    rt = make_runtime(Method0(None))
+    rt.begin_attempt(gen, 0)
+    for k, obj in enumerate(("bottle", "fridge")):
+        local_vars = soft_locals(infos, primary=1, subtask=k)
+        local_vars.update({"self": gen, "subtask_object_name": obj, "subtask_object_pose": T(pose(150.0 + k)),
+                           "selected_src_subtask_boundary": T([0, 4] if k == 0 else [4, 6])})
+        rt.record_subtask(local_vars)
+    s0, s1 = rt.rec.subtasks
+    np.testing.assert_allclose(P(s0["cur_obj_pose"]), pose(150.0))
+    np.testing.assert_allclose(P(s0["src_obj_pose"]), pose(110.0))
+    assert s1["carried_object"] == "bottle" and sorted(s1["objects"]) == ["bottle", "fridge"]
+    np.testing.assert_allclose(P(s1["objects"]["bottle"]), pose(0.9))
+    np.testing.assert_allclose(P(s1["src_objects"]["bottle"]), pose(114.0))
+    np.testing.assert_allclose(P(s1["cur_obj_pose"]), pose(151.0))
+    np.testing.assert_allclose(P(s1["src_obj_pose"]), pose(214.0))
 
 
 # grafts and the entrypoint dispatch -------------------------------------------------------------------

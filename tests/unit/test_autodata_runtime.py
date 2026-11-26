@@ -48,7 +48,8 @@ def dex_locals(infos, primary=0, with_base=True):
         passthrough["base"] = info.passthrough_action["base"][start:end]
     return {"src_subtask_eef_poses": info.eef_pose["right"][start:end], "src_subtask_target_poses": info.target_eef_pose["right"][start:end],
             "src_subtask_passthrough_actions": passthrough, "eef_name": "right", "subtask_ind": 0, "selected_src_demo_ind": primary,
-            "all_randomized_subtask_boundaries": {"right": bounds}, "subtask_object_name": "object"}
+            "all_randomized_subtask_boundaries": {"right": bounds}, "subtask_object_name": "object", "env_id": 0,
+            "subtask_object_pose": T(pose(105.0))}
 
 
 class FakeDatastream:
@@ -79,6 +80,14 @@ class FakeDatastream:
     def get_robot_eef_pose(self, env_ids, eef_name):
         return T(self.last_target.get(eef_name, np.eye(4)))[None]
 
+    def get_object_poses(self, env_ids):
+        return {k: T(v)[None] for k, v in getattr(self, "objects", {}).items()}
+
+
+def dex_generator(infos, torch=None, datastream=None):
+    return types.SimpleNamespace(src_demo_datagen_info_pool=types.SimpleNamespace(datagen_infos=infos),
+                                 datastream=datastream or FakeDatastream(torch))
+
 
 # source mixing ---------------------------------------------------------------------------------------------
 def test_mix_segment_keeps_other_passthrough_channels_next_to_the_mixed_hand(torch):
@@ -86,10 +95,13 @@ def test_mix_segment_keeps_other_passthrough_channels_next_to_the_mixed_hand(tor
     local_vars = dex_locals(infos, primary=1)
     mixer = RecordingMixer()
     rt = make_runtime(Method0(mixer))
-    gen = types.SimpleNamespace(src_demo_datagen_info_pool=types.SimpleNamespace(datagen_infos=infos))
+    gen = dex_generator(infos, torch)
     eef, targets, passthrough = rt.mix_segment(gen, local_vars)
     ctx = mixer.contexts[0]
-    assert ctx.primary == 1 and ctx.extra == {"eef": "right", "soft": False, "reference_object": "object"} and ctx.rng.random() == np.random.default_rng(0).random()
+    assert ctx.primary == 1 and ctx.rng.random() == np.random.default_rng(0).random()
+    assert sorted(ctx.extra) == ["carried_object", "current_object_pose", "eef", "reference_object", "soft"]
+    assert ctx.extra["eef"] == "right" and ctx.extra["reference_object"] == "object" and ctx.extra["carried_object"] is None
+    np.testing.assert_array_equal(ctx.extra["current_object_pose"], pose(105.0))
     np.testing.assert_array_equal(ctx.primary_gripper, np.full((4, 2), 10))
     np.testing.assert_array_equal(ctx.primary_eef_start, pose(60))
     np.testing.assert_array_equal(ctx.primary_targets, infos[1].target_eef_pose["right"].a[0:4])
@@ -104,7 +116,7 @@ def test_mix_segment_keeps_other_passthrough_channels_next_to_the_mixed_hand(tor
 
 def test_mix_segment_without_a_mixer_or_without_a_mix_returns_the_passthrough_dict(torch):
     infos = [datagen_info(6, 0), datagen_info(6, 10)]
-    gen = types.SimpleNamespace(src_demo_datagen_info_pool=types.SimpleNamespace(datagen_infos=infos))
+    gen = dex_generator(infos, torch)
     for method in (Method0(None), Method0(RecordingMixer(mixed=False))):
         local_vars = dex_locals(infos)
         eef, targets, passthrough = make_runtime(method).mix_segment(gen, local_vars)
@@ -116,9 +128,59 @@ def test_mix_segment_refuses_other_channels_of_another_length(torch):
     infos = [datagen_info(6, 0), datagen_info(6, 10)]
     local_vars = dex_locals(infos)
     local_vars["src_subtask_passthrough_actions"]["base"] = T(np.zeros((3, 3)))
-    gen = types.SimpleNamespace(src_demo_datagen_info_pool=types.SimpleNamespace(datagen_infos=infos))
+    gen = dex_generator(infos, torch)
     with pytest.raises(NotImplementedError):
         make_runtime(Method0(RecordingMixer())).mix_segment(gen, local_vars)
+
+
+def test_two_arms_record_and_mix_their_own_subtasks_without_colliding(torch, tmp_path):
+    """GR1 Bottle Placement: right subtask 0 grasps the bottle, right subtask 1 places it in the fridge (carried: the bottle,
+    read through the datastream), left subtask 0 holds; each record and mix call names its end effector."""
+    import json
+
+    from tmg.generation.method.success_model import pose12 as P
+
+    infos = [datagen_info(6, 0, obj="bottle"), datagen_info(6, 10, obj="bottle")]
+    for info, offset in zip(infos, (0, 10)):
+        info.object_poses["fridge"] = T(np.stack([pose(200 + offset + i) for i in range(6)]))
+    ds = FakeDatastream(torch)
+    ds.last_target = {"right": pose(1.0), "left": pose(-1.0)}
+    ds.objects = {"bottle": pose(0.95), "fridge": pose(300.0)}
+    gen = dex_generator(infos, datastream=ds)
+    mixer = RecordingMixer(mixed=False)
+    rt = make_runtime(Method0(mixer), records_dir=tmp_path)
+    rt.begin_attempt(gen, 0)
+    specs = {"right": [types.SimpleNamespace(subtask_term_signal="grasp_bottle"), types.SimpleNamespace(subtask_term_signal=None)],
+             "left": [types.SimpleNamespace(subtask_term_signal=None)]}
+
+    def build(eef, k, obj, object_pose):
+        bounds = T(np.array([[[0, 4], [4, 6]]] * len(infos)))
+        info = infos[1]
+        lv = {"src_subtask_eef_poses": info.eef_pose[eef][0:4], "src_subtask_target_poses": info.target_eef_pose[eef][0:4],
+              "src_subtask_passthrough_actions": {eef: info.passthrough_action[eef][0:4]}, "eef_name": eef, "subtask_ind": k,
+              "selected_src_demo_ind": 1, "all_randomized_subtask_boundaries": {eef: bounds}, "subtask_object_name": obj,
+              "env_id": 0, "subtask_object_pose": T(object_pose), "self": gen, "subtasks": specs[eef],
+              "selected_boundary": T([0, 4] if k == 0 else [4, 6])}
+        rt.mix_segment(gen, lv)
+        rt.record_subtask(lv)
+
+    build("right", 0, "bottle", pose(0.9))
+    build("left", 0, "fridge", pose(300.0))
+    build("right", 1, "fridge", pose(300.0))
+    rt.end_attempt(gen, 0, {"success": True})
+    right0, left0, right1 = (c.extra for c in mixer.contexts)
+    assert (right0["eef"], left0["eef"], right1["eef"]) == ("right", "left", "right")
+    assert right0["carried_object"] is None and left0["carried_object"] is None and right1["carried_object"] == "bottle"
+    np.testing.assert_array_equal(right1["current_in_hand"], np.linalg.inv(pose(1.0)) @ pose(0.95))
+    np.testing.assert_array_equal(right1["source_in_hand"][1], np.linalg.inv(infos[1].eef_pose["right"].a[4]) @ infos[1].object_poses["bottle"].a[4])
+    line = json.loads((tmp_path / "attempts.jsonl").read_text().splitlines()[0])
+    keys = [(s["eef"], s["subtask_ind"]) for s in line["subtasks"]]
+    assert keys == [("right", 0), ("left", 0), ("right", 1)]
+    r0, l0, r1 = line["subtasks"]
+    assert r0["term_signal"] == "grasp_bottle" and r1["term_signal"] is None and r1["carried_object"] == "bottle"
+    np.testing.assert_allclose(P(r1["objects"]["bottle"]), pose(0.95))
+    np.testing.assert_allclose(P(r1["src_eef_pose"]), infos[1].eef_pose["right"].a[4])
+    np.testing.assert_allclose(P(l0["eef_pose"]), pose(-1.0))
 
 
 # attempt records --------------------------------------------------------------------------------------------

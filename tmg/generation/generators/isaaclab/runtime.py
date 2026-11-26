@@ -24,6 +24,18 @@ runs SoftMimicGen (DexMimicGen runs on AutoData, ``..autodata.runtime``).
 | after the first ``play_action = env.target_eef_pose_to_action(...)`` | ``_tmg.record_command(self, env, env_id, state, play_action)`` |
 | after ``success = ...``                           | ``_tmg.record_step(self, env, env_id, obs, success)``         |
 
+Scene of a subtask (``subtask_scene``, once per builder call): the reference object's pose now and in every source at the
+start of its segment, the end-effector pose now and in every source, and the in-hand pose (the previous subtask's reference
+object of the same end effector in its frame) now and in every source. ``mix_segment`` hands them to the mixer
+(``MixContext.extra``: ``current_object_pose``, ``current_in_hand``, ``source_in_hand``, ``carried_object``) and
+``record_subtask`` writes the selected source's into the attempt record (``cur_obj_pose``, ``src_obj_pose``, ``eef_pose``,
+``src_eef_pose``, ``objects``, ``src_objects``, ``carried_object``, ``term_signal``), which is what ``tmg fit_coefficients``
+reads. The record is written for every method, the unmixed baseline included; the values are read from the simulation and
+the source demonstrations and change nothing in the generation. Should reading them fail in a run without a mixer, the
+subtask record says why (``scene_error``) and the generation goes on; with a mixer the error stops the chunk. A deformable
+reference object (SoftMimicGen's rope and towel) has the nodal frame of ``tmg.generation.method.soft_frame`` (also
+recorded: ``object_frame``).
+
 Pre-noise labels: for the attempt's duration ``env.target_eef_pose_to_action`` is replaced by a wrapper that
 first computes the noiseless action (with the torch RNG state saved and restored around that call, so the
 official draw sequence is unchanged) and keeps it as the label, then calls the official method with the
@@ -45,6 +57,7 @@ import numpy as np
 from tmg.core.records import LABELS_FORMAT, AttemptRecorder, record_file
 from tmg.generation.graft import Graft
 from tmg.generation.method.interfaces import Method, MixContext
+from tmg.generation.method.success_model import in_hand
 from tmg.generation.simulators.isaaclab import HandLayout, measured_eef_poses, observed_eef_poses
 
 RECORD_ERROR = "RECORD_ERROR.json"
@@ -84,6 +97,64 @@ class IsaacLabLayout:
         if layout.names != configured:
             raise RuntimeError("the controller's hand joint order differs from the configured hand_joint_names")
         return layout
+
+
+@dataclass
+class SubtaskScene:
+    """What SkillMix needs of one subtask of one end effector (module docstring), per source j at the start of its
+    segment and now. Poses are 4x4 world poses; a pose that is not known is None."""
+
+    eef: str
+    subtask: int
+    reference_object: str | None
+    soft: bool
+    current_object_pose: np.ndarray | None          # reference object now (the nodal frame for a deformable one)
+    source_object_poses: list                       # per source: reference object at its segment start
+    eef_pose: np.ndarray                            # end effector now
+    source_eef_poses: list                          # per source: end effector at its segment start
+    carried: str | None = None                      # the previous subtask's reference object of this end effector
+    current_carried_pose: np.ndarray | None = None
+    source_carried_poses: list | None = None
+    object_frame: dict | None = None                # deformable object: frame definition and reference hash
+
+    def current_in_hand(self) -> np.ndarray | None:
+        if self.current_carried_pose is None:
+            return None
+        return in_hand(self.eef_pose, self.current_carried_pose)
+
+    def source_in_hand(self) -> list:
+        carried = self.source_carried_poses or [None] * len(self.source_eef_poses)
+        return [None if c is None else in_hand(e, c) for e, c in zip(self.source_eef_poses, carried)]
+
+    def mix_extra(self) -> dict:
+        """``MixContext.extra`` (the blending frames stay the generator's; a deformable object's sources are scored with
+        their nodal frames, ``feature_object_poses``)."""
+        extra = {"eef": self.eef, "soft": self.soft, "reference_object": self.reference_object,
+                 "current_object_pose": self.current_object_pose, "carried_object": self.carried}
+        if self.soft:
+            extra["feature_object_poses"] = self.source_object_poses
+        now = self.current_in_hand()
+        if now is not None:
+            extra["current_in_hand"] = now
+            extra["source_in_hand"] = self.source_in_hand()
+        return extra
+
+    def record(self, selected: int) -> dict:
+        """The subtask record's fields for the selected source (what the fit's rows are made of)."""
+        objects, src_objects = {}, {}
+        if self.reference_object is not None and self.current_object_pose is not None:
+            objects[self.reference_object] = self.current_object_pose
+            src_objects[self.reference_object] = self.source_object_poses[selected]
+        if self.carried is not None and self.current_carried_pose is not None:
+            objects[self.carried] = self.current_carried_pose
+            if self.source_carried_poses and self.source_carried_poses[selected] is not None:
+                src_objects[self.carried] = self.source_carried_poses[selected]
+        out = {"cur_obj_pose": self.current_object_pose, "src_obj_pose": self.source_object_poses[selected],
+               "eef_pose": self.eef_pose, "src_eef_pose": self.source_eef_poses[selected], "objects": objects,
+               "src_objects": src_objects, "carried_object": self.carried}
+        if self.object_frame is not None:
+            out["object_frame"] = self.object_frame
+        return out
 
 
 @contextmanager
@@ -129,6 +200,8 @@ class IsaacLabRuntime:
         self._executed: list[np.ndarray] = []
         self._pending: dict | None = None
         self._selected: dict[str, int] = {}           # eef -> source demonstration chosen in this attempt
+        self._carried: dict[str, tuple] = {}          # eef -> (reference object, soft) of its previous subtask in this attempt
+        self._scene: SubtaskScene | None = None       # the scene of the subtask being built (mix_segment, then record_subtask)
         self._seg_id = -1
         self._action_owner = None                     # object whose target_eef_pose_to_action is wrapped
         self._original_action_fn = None
@@ -171,11 +244,68 @@ class IsaacLabRuntime:
         cfg = generator.env_cfg.subtask_configs[eef_name][subtask_ind]
         return int(cfg.num_interpolation_steps), int(cfg.num_fixed_steps), float(cfg.action_noise)
 
+    def subtask_term_signal(self, generator, local_vars: dict, eef_name: str, subtask_ind: int) -> str | None:
+        """The name of the subtask's termination signal (the environment config's ``subtask_term_signal``), or None."""
+        cfg = generator.env_cfg.subtask_configs[eef_name][subtask_ind]
+        signal = getattr(cfg, "subtask_term_signal", None)
+        return None if signal is None else str(signal)
+
+    def current_eef_pose(self, generator, env_id: int, eef_name: str) -> np.ndarray:
+        """The end effector's pose now, in the frame of the sources' ``eef_pose`` (the controller's eef frame)."""
+        return _np(generator.env.get_robot_eef_pose(eef_name=eef_name, env_ids=[env_id])[0])
+
+    def current_object_poses(self, generator, env_id: int) -> dict:
+        """Every rigid object's pose now (4x4), in the frame of the sources' ``object_poses``."""
+        return {k: _np(v[0]) for k, v in generator.env.get_object_poses(env_ids=[env_id]).items()}
+
+    def soft_object_poses(self, generator, local_vars: dict, infos, object_name: str, starts: list) -> tuple:
+        """``(current pose, per-source poses, frame record)`` of a deformable reference object (SoftMimicGen only)."""
+        raise NotImplementedError(f"{type(self).__name__}: no deformable objects")
+
     def measured_poses(self, owner, env_id: int, eefs) -> dict:
         """Measured end-effector poses: the configured links (``measure_links``) or the environment's observed eef poses."""
         if self.layout.measure_links:
             return measured_eef_poses(owner, env_id, self.layout.measure_links)
         return observed_eef_poses(owner, env_id, list(eefs))
+
+    # scene of a subtask ---------------------------------------------------------------------------
+    def subtask_scene(self, generator, local_vars: dict) -> SubtaskScene:
+        """The ``SubtaskScene`` of the subtask the builder is making (module docstring), read once per builder call."""
+        eef = str(local_vars["eef_name"])
+        k = int(local_vars["subtask_ind"])
+        if self._scene is not None and (self._scene.eef, self._scene.subtask) == (eef, k):
+            return self._scene
+        infos = generator.src_demo_datagen_info_pool.datagen_infos
+        bounds = np.asarray(_np(local_vars["all_randomized_subtask_boundaries"][eef]), dtype=int)   # (sources, subtasks, 2)
+        starts = [int(bounds[i, k, 0]) for i in range(len(infos))]
+        env_id = int(local_vars["env_id"])
+        obj = local_vars.get("subtask_object_name")
+        soft = bool(local_vars.get("subtask_object_soft", False))
+        frame = None
+        if obj is None:
+            current, sources = None, [None] * len(infos)
+        elif soft:
+            current, sources, frame = self.soft_object_poses(generator, local_vars, infos, str(obj), starts)
+        else:
+            pose_now = local_vars.get("subtask_object_pose")
+            current = _np(pose_now) if pose_now is not None else self.current_object_poses(generator, env_id)[obj]
+            sources = [_np(info.object_poses[obj][t]) for info, t in zip(infos, starts)]
+        scene = SubtaskScene(eef=eef, subtask=k, reference_object=None if obj is None else str(obj), soft=soft,
+                             current_object_pose=current, source_object_poses=sources,
+                             eef_pose=self.current_eef_pose(generator, env_id, eef),
+                             source_eef_poses=[_np(info.eef_pose[eef][t]) for info, t in zip(infos, starts)],
+                             object_frame=frame)
+        carried, carried_soft = self._carried.get(eef, (None, False))
+        if carried is not None:
+            scene.carried = carried
+            if carried == scene.reference_object:              # the same object (Rope, Towel, Microwave): its poses above
+                scene.current_carried_pose, scene.source_carried_poses = current, sources
+            elif not carried_soft:                             # a rigid object carried to another one (Bottle to the fridge)
+                scene.current_carried_pose = self.current_object_poses(generator, env_id)[carried]
+                scene.source_carried_poses = [_np(info.object_poses[carried][t]) for info, t in zip(infos, starts)]
+            # a deformable object carried to another reference object: in-hand pose unknown (features 0)
+        self._scene = scene
+        return scene
 
     def _label_wrapper(self, original, env_id: int):
         """The replacement ``target_eef_pose_to_action`` (the official parameter names, so keyword calls bind)."""
@@ -192,6 +322,7 @@ class IsaacLabRuntime:
         self._attempt_t0 = time.time()
         self._labels, self._executed, self._pending = [], [], None
         self._selected = {}
+        self._carried, self._scene = {}, None
         self.rec.begin_attempt()
         self._seg_id = -1
         if self.method.mixer is not None:
@@ -261,6 +392,7 @@ class IsaacLabRuntime:
         infos = generator.src_demo_datagen_info_pool.datagen_infos
         object_name = local_vars.get("subtask_object_name")
         soft = bool(local_vars.get("subtask_object_soft", False))
+        scene = self.subtask_scene(generator, local_vars)
         segments, object_poses = [], []
         for i, info in enumerate(infos):
             start, end = (int(v) for v in bounds[i, subtask_ind])
@@ -271,7 +403,7 @@ class IsaacLabRuntime:
         context = MixContext(subtask_ind=subtask_ind, primary=primary, primary_eef_start=_np(eef[0]),
                              primary_targets=_np(targets), primary_gripper=_np(grippers), src_object_poses=object_poses,
                              src_segments=segments, num_sources=len(infos), has_reference_object=object_name is not None,
-                             rng=np.random.default_rng(0), extra={"eef": eef_name, "soft": soft, "reference_object": object_name})
+                             rng=np.random.default_rng(0), extra=scene.mix_extra())
         mixed = self.method.mixer.mix(context)
         self._last_mix = mixed.record
         if not mixed.record.get("mixed"):
@@ -279,19 +411,31 @@ class IsaacLabRuntime:
         return self.pack_mixed(mixed, eef, targets, grippers, unchanged, eef_name)
 
     def record_subtask(self, local_vars: dict) -> None:
-        """Grafted after the transformed sequence: the subtask's source, boundaries and object pose, plus the mix record."""
+        """Grafted after the transformed sequence: the subtask's source, boundaries and scene (module docstring), its
+        termination signal, plus the mix record."""
         generator = local_vars["self"]
         eef_name = str(local_vars["eef_name"])
         subtask_ind = int(local_vars["subtask_ind"])
         selected = int(local_vars["selected_src_demo_ind"])
+        object_name = local_vars.get("subtask_object_name")
         self._selected[eef_name] = selected
         boundary = [int(v) for v in _np(local_vars[self.boundary_var])]
         object_pose = local_vars.get("subtask_object_pose")
         interpolation, fixed, noise = self.subtask_settings(generator, local_vars, eef_name, subtask_ind)
-        self.rec.add_subtask(subtask_ind=subtask_ind, eef=eef_name, object_name=local_vars.get("subtask_object_name"),
+        fields = {"cur_obj_pose": _np(object_pose) if object_pose is not None else None}
+        try:
+            fields.update(self.subtask_scene(generator, local_vars).record(selected))
+            fields["term_signal"] = self.subtask_term_signal(generator, local_vars, eef_name, subtask_ind)
+        except Exception as error:                     # never stop a run without a mixer over a record field
+            if self.method.mixer is not None:
+                raise
+            fields["scene_error"] = f"{type(error).__name__}: {error}"
+        self._scene = None
+        self._carried[eef_name] = (object_name, bool(local_vars.get("subtask_object_soft", False)))
+        self.rec.add_subtask(subtask_ind=subtask_ind, eef=eef_name, object_name=object_name,
                              src_demo_ind=selected, src_subtask_start=boundary[0], src_subtask_end=boundary[1],
-                             cur_obj_pose=_np(object_pose) if object_pose is not None else None,
-                             num_interpolation_steps=interpolation, num_fixed_steps=fixed, action_noise=noise, mix=self._last_mix)
+                             num_interpolation_steps=interpolation, num_fixed_steps=fixed, action_noise=noise,
+                             mix=self._last_mix, **fields)
 
     # per-step records ----------------------------------------------------------------------------
     def record_command(self, multi_waypoint, env, env_id: int, state, play_action) -> None:
@@ -329,12 +473,31 @@ class IsaacLabRuntime:
 class SoftMimicGenRuntime(IsaacLabRuntime):
     """SoftMimicGen's builder is ``generate_trajectory`` with a nodal-position anchor; its rope is a soft object.
 
-    For a soft object every donor segment is first registered into the primary's rope geometry with the official nodal
-    registration, after which the object frame is the world frame.
+    For a soft object every donor segment (its start pose and its targets) is first registered into the primary's rope
+    geometry with the official nodal registration, after which the blending frame is the world frame. The sources are
+    scored with the nodal frame of ``tmg.generation.method.soft_frame`` (reference: source 0's first node cloud); the current
+    nodes are the builder's ``subtask_nodal_positions``.
     """
 
     builder_name = "generate_trajectory"
     mix_anchor = "src_subtask_nodal_positions"
+    current_nodes_var = "subtask_nodal_positions"        # the builder's local holding the reference object's nodes now
+
+    def soft_object_poses(self, generator, local_vars: dict, infos, object_name: str, starts: list) -> tuple:
+        from tmg.generation.method.soft_frame import (
+            FRAME_VERSION,
+            nodal_frame,
+            reference_hash,
+            reference_nodes,
+        )
+
+        if local_vars.get(self.current_nodes_var) is None:
+            raise KeyError(f"SoftMimicGen builder has no {self.current_nodes_var!r} when the subtask is built; the nodal "
+                           f"frame of {object_name!r} needs the current node positions")
+        reference = reference_nodes(infos, object_name)
+        current = nodal_frame(_np(local_vars[self.current_nodes_var]), reference)
+        sources = [nodal_frame(_np(info.object_nodal_positions[object_name][t]), reference) for info, t in zip(infos, starts)]
+        return current, sources, {"version": FRAME_VERSION, "reference_sha256": reference_hash(reference)}
 
     def source_segment(self, local_vars: dict, info, index: int, eef_name: str, object_name, start: int, end: int,
                        soft: bool) -> tuple:
@@ -344,13 +507,19 @@ class SoftMimicGenRuntime(IsaacLabRuntime):
             transform_source_data_segment_using_nodal_registration,
         )
 
+        eef_start = info.eef_pose[eef_name][start:start + 1]
         targets = info.target_eef_pose[eef_name][start:end]
         nodal = info.object_nodal_positions[object_name][start]
         if index != int(local_vars["selected_src_demo_ind"]):
-            targets = transform_source_data_segment_using_nodal_registration(
-                tgt_obj_nodal_pos=local_vars.get("src_subtask_nodal_positions"), src_eef_poses=targets, src_obj_nodal_pos=nodal,
-                use_rotation_transform=True, bend_coef=0.1, rot_coef=1e-3)
-        return _np(info.eef_pose[eef_name][start]), _np(targets), _np(self.source_hand(info, eef_name, start, end)), np.eye(4)
+            import torch
+
+            # the start pose goes through the same registration as the targets: left in the donor's geometry it would
+            # put the blended first waypoint off the primary's rope
+            joined = transform_source_data_segment_using_nodal_registration(
+                tgt_obj_nodal_pos=local_vars.get("src_subtask_nodal_positions"), src_eef_poses=torch.cat([eef_start, targets], dim=0),
+                src_obj_nodal_pos=nodal, use_rotation_transform=True, bend_coef=0.1, rot_coef=1e-3)
+            eef_start, targets = joined[0:1], joined[1:]
+        return _np(eef_start)[0], _np(targets), _np(self.source_hand(info, eef_name, start, end)), np.eye(4)
 
 
 def runtime_class(soft: bool) -> type[IsaacLabRuntime]:

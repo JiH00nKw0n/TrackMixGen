@@ -25,8 +25,9 @@ Pre-noise labels come from wrapping ``datastream.target_eef_pose_to_action`` for
 RNG state saved and restored, then the official call), as the base runtime does on the environment.
 
 Source mixing (``method.mixing.enabled``): ``mix_segment`` hands the mixer every source's segment of the subtask (eef pose at
-the segment start, target poses, the hand's passthrough commands) and the reference object's pose at the segment start, as
-the Isaac Lab runtime does; the mixed segment replaces the selected source's before AutoData transforms it to the current
+the segment start, target poses, the hand's passthrough commands), the reference object's pose at the segment start and the
+scene of the subtask (current object and in-hand poses, read through the datastream), as the Isaac Lab runtime does; the
+GR1's two arms number their subtasks from 0 each, so the mixer and the records key them by (end effector, subtask); the mixed segment replaces the selected source's before AutoData transforms it to the current
 object pose. Non-eef passthrough channels (a base command) of the selected source are kept when their length matches.
 
 Images: Isaac Lab's recorder stores the ``policy`` observation group only, and the tasks keep their cameras in a
@@ -119,6 +120,16 @@ class AutoDataRuntime(IsaacLabRuntime):
         spec = local_vars["subtasks"][subtask_ind]
         return (int(getattr(spec, "num_interpolation_steps", 0)), int(getattr(spec, "num_fixed_steps", 0)),
                 float(getattr(spec, "action_noise", 0.0)))
+
+    def subtask_term_signal(self, generator, local_vars: dict, eef_name: str, subtask_ind: int) -> str | None:
+        signal = getattr(local_vars["subtasks"][subtask_ind], "subtask_term_signal", None)
+        return None if signal is None else str(signal)
+
+    def current_eef_pose(self, generator, env_id: int, eef_name: str) -> np.ndarray:
+        return _np(generator.datastream.get_robot_eef_pose(env_ids=[env_id], eef_name=eef_name)[0])
+
+    def current_object_poses(self, generator, env_id: int) -> dict:
+        return {k: _np(v[0]) for k, v in generator.datastream.get_object_poses(env_ids=[env_id]).items()}
 
     def measured_poses(self, datastream, env_id: int, eefs) -> dict:
         """Measured end-effector poses: the configured links (``measure_links``) or the embodiment's observed eef poses."""
