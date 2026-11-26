@@ -29,8 +29,9 @@ start of its segment, the end-effector pose now and in every source, and the in-
 object of the same end effector in its frame) now and in every source. ``mix_segment`` hands them to the mixer
 (``MixContext.extra``: ``current_object_pose``, ``current_in_hand``, ``source_in_hand``, ``carried_object``) and
 ``record_subtask`` writes the selected source's into the attempt record (``cur_obj_pose``, ``src_obj_pose``, ``eef_pose``,
-``src_eef_pose``, ``objects``, ``src_objects``, ``carried_object``, ``term_signal``), which is what ``tmg fit_coefficients``
-reads. The record is written for every method, the unmixed baseline included; the values are read from the simulation and
+``src_eef_pose``, ``objects``, ``src_objects``, ``carried_object``, ``term_signal``, and ``start_step``, the number of steps
+executed before the subtask was built: the builders make a subtask when the end effector's previous one is exhausted),
+which is what ``tmg fit_coefficients`` reads. The record is written for every method, the unmixed baseline included; the values are read from the simulation and
 the source demonstrations and change nothing in the generation. Should reading them fail in a run without a mixer, the
 subtask record says why (``scene_error``) and the generation goes on; with a mixer the error stops the chunk. A deformable
 reference object (SoftMimicGen's rope and towel) has the nodal frame of ``tmg.generation.method.soft_frame`` (also
@@ -437,6 +438,7 @@ class IsaacLabRuntime:
         self._scene = None
         self._carried[eef_name] = (object_name, bool(local_vars.get("subtask_object_soft", False)))
         self.rec.add_subtask(subtask_ind=subtask_ind, eef=eef_name, object_name=object_name,
+                             start_step=len(self.rec.w_pos),          # steps executed before this subtask was built
                              src_demo_ind=selected, src_subtask_start=boundary[0], src_subtask_end=boundary[1],
                              num_interpolation_steps=interpolation, num_fixed_steps=fixed, action_noise=noise,
                              mix=self._last_mix, **fields)

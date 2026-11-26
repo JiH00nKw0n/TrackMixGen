@@ -460,7 +460,7 @@ def _isaaclab_attempt(rng, *, success, grasped, mix=None, eefs=("right", "left")
     def sub(eef, k, obj, carried=None, signal=None):
         j = int(rng.integers(2))
         eef_now = pose(rng.normal(0, 0.02), 0.1)
-        s = {"eef": eef, "subtask_ind": k, "object_name": obj, "src_demo_ind": j, "src_subtask_start": 4 * k,
+        s = {"eef": eef, "subtask_ind": k, "object_name": obj, "src_demo_ind": j, "src_subtask_start": 4 * k, "start_step": 10 * k,
              "cur_obj_pose": flat(pose(rng.normal(0, 0.05), yaw=rng.normal(0, 0.2))), "src_obj_pose": flat(pose(0.01 * j)),
              "eef_pose": flat(eef_now), "src_eef_pose": flat(pose(0.0, 0.1)), "objects": {}, "src_objects": {},
              "carried_object": carried, "term_signal": signal}
@@ -478,7 +478,7 @@ def _isaaclab_attempt(rng, *, success, grasped, mix=None, eefs=("right", "left")
         subs += [sub("right", 0, "bottle", signal="grasp_bottle"), sub("right", 1, "fridge", carried="bottle")]
     if "left" in eefs:
         subs.insert(1, sub("left", 0, "fridge"))
-    return {"success": bool(success), "subtasks": subs, "term_first": {"grasp_bottle": 3 if grasped else -1}}
+    return {"success": bool(success), "subtasks": subs, "n_steps": 30, "term_first": {"grasp_bottle": 3 if grasped else -1}}
 
 
 def test_fit_reads_isaaclab_records_per_end_effector_and_subtask(tmp_path, capsys):
@@ -534,10 +534,34 @@ def test_fit_of_a_single_arm_isaaclab_task_without_term_signals_falls_back_and_s
 
     _write_pool(tmp_path / "randmix", 2, pool(True))
     _write_pool(tmp_path / "unmix", 2, pool(None))
-    blocks, reached = fit_isaaclab_blocks(read_pools([tmp_path / "randmix"]), read_pools([tmp_path / "unmix"]), num_sources=2,
-                                          with_cv=False)
+    randmix, unmix = read_pools([tmp_path / "randmix"]), read_pools([tmp_path / "unmix"])
+    with pytest.raises(ValueError, match="allow_reached_fallback"):            # a missing signal is loud by default
+        fit_isaaclab_blocks(randmix, unmix, num_sources=2, with_cv=False)
+    blocks, reached = fit_isaaclab_blocks(randmix, unmix, num_sources=2, with_cv=False, allow_fallback=True)
     assert sorted(blocks) == [0, 1] and blocks[1]["rows"] == {"randmix": 40, "unmix": 40}
     assert "FALLBACK" in reached[1]
+
+
+def test_reached_counts_the_signal_only_before_the_next_subtask_of_the_arm_starts():
+    from tmg.generation.fit_coefficients import Attempts, isaaclab_outcomes
+
+    rng = np.random.default_rng(6)
+    early, late, never = (_isaaclab_attempt(rng, success=False, grasped=True) for _ in range(3))
+    late["term_first"] = {"grasp_bottle": 12}                         # right/1 started at step 10: too late
+    never["term_first"] = {"grasp_bottle": -1}
+    no_steps = _isaaclab_attempt(rng, success=False, grasped=True)
+    no_steps.update(n_steps=0, term_first={})                          # the plan failed before the first step
+    out, used = isaaclab_outcomes(Attempts([early, late, never, no_steps], [], []), "right", 2)
+    assert [row[0] for row in out] == [True, False, False, False] and used[0] == {"term_signal": 4, "fallback": 0}
+    renamed = _isaaclab_attempt(rng, success=False, grasped=True)
+    renamed["term_first"] = {"grasp": 3}                               # the recorded name is not among the signals
+    with pytest.raises(ValueError, match="grasp_bottle"):
+        isaaclab_outcomes(Attempts([renamed], [], []), "right", 2)
+    eager = _isaaclab_attempt(rng, success=False, grasped=True)
+    for s in eager["subtasks"]:
+        s["start_step"] = 0                                           # every subtask built before the first step
+    with pytest.raises(ValueError, match="not built when they started"):
+        isaaclab_outcomes(Attempts([eager], [], []), "right", 2)
 
 
 def test_fit_refuses_isaaclab_records_without_their_subtask_scene(tmp_path):
@@ -568,8 +592,9 @@ def test_fit_coefficients_dispatches_isaaclab_generators_to_the_per_arm_fit(tmp_
 
     seen = {}
 
-    def fake_isaaclab(randmix, unmix, *, num_sources, with_cv=True):
+    def fake_isaaclab(randmix, unmix, *, num_sources, with_cv=True, allow_fallback=False):
         seen["isaaclab"] = num_sources
+        seen["allow_fallback"] = allow_fallback
         block = {"a": [0.0, 0.0], "g": dict.fromkeys(("dx", "dy", "rotation", "inhand_position", "inhand_rotation"), 0.0),
                  "d": 0.3, "c0": 0.0, "penalty": 1.0, "rows": {"randmix": 1, "unmix": 1}, "successes": 1,
                  "cv_log_loss_gain_percent": {"all_rows": 0.0, "randmix_rows": 0.0}}
@@ -582,8 +607,10 @@ def test_fit_coefficients_dispatches_isaaclab_generators_to_the_per_arm_fit(tmp_
     cfg = OmegaConf.create({"randmix_pools": ["r"], "unmix_pools": ["u"], "output": str(tmp_path / "out"), "min_attempts": 1,
                             "task": {"name": "bottle_door", "num_sources": 2}, "source": None, "write_config": False,
                             "generator": {"name": "dexmimicgen", "simulator": "isaaclab"}})
+    fc.fit_coefficients(OmegaConf.merge(cfg, {"fit": {"allow_reached_fallback": True}}))
+    assert seen["allow_fallback"] is True
     summary = fc.fit_coefficients(cfg)
-    assert seen == {"isaaclab": 2} and summary["reached_from"] == {"right/0": "first subtask: every attempt reaches it"}
+    assert seen == {"isaaclab": 2, "allow_fallback": False} and summary["reached_from"] == {"right/0": "first subtask: every attempt reaches it"}
     assert load_rule(str(tmp_path / "out" / "coefficients.yaml")).for_subtask(0, "right").d == 0.3
 
 

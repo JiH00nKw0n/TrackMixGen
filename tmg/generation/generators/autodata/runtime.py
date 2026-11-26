@@ -177,9 +177,30 @@ class AutoDataRuntime(IsaacLabRuntime):
             self._frames[cam].append(resize_frames(frame, self.image_size) if self.image_size else frame)
 
     # per-step records ----------------------------------------------------------------------------
+    def record_step(self, multi_waypoint, env, env_id: int, obs, success: bool) -> None:
+        """AutoData's ``MultiWaypoint.execute`` hands no observation to the graft (``obs`` None), so the subtask
+        termination signals of the new state are read from the environment: its ``subtask_terms`` observation group
+        (``env.obs_buf``, what Isaac Lab Mimic's ``get_subtask_term_signals`` reads), else that method."""
+        if obs is None:
+            terms = subtask_terms(env, env_id)
+            obs = {"subtask_terms": terms} if terms else None
+        super().record_step(multi_waypoint, env, env_id, obs, success)
+
     def record_command(self, multi_waypoint, datastream, env_id: int, play_action) -> None:
         self.capture_frames(datastream.get_env(), env_id)       # pre-step observation, paired with this step's action
         self._pend_command(multi_waypoint, self.measured_poses(datastream, env_id, list(multi_waypoint.waypoints)), play_action)
+
+
+def subtask_terms(env, env_id: int) -> dict:
+    """The subtask termination signals of the environment's current state, ``{name: value}`` (empty when it has none)."""
+    groups = getattr(env, "obs_buf", None)
+    if isinstance(groups, dict) and isinstance(groups.get("subtask_terms"), dict) and groups["subtask_terms"]:
+        return dict(groups["subtask_terms"])
+    getter = getattr(env, "get_subtask_term_signals", None)
+    if callable(getter):
+        signals = getter(env_ids=[env_id])
+        return {k: (v[0] if hasattr(v, "__getitem__") and getattr(v, "ndim", 0) > 0 else v) for k, v in dict(signals or {}).items()}
+    return {}
 
 
 def install(runtime: AutoDataRuntime, graft_hashes: dict) -> dict:

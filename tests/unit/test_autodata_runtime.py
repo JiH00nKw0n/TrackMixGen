@@ -360,3 +360,30 @@ def test_the_runtime_gives_the_mixer_the_generators_end_effectors():
     mixer = SkillMixer(rule="randmix", chunk_seed=1)
     make_runtime(Method0(mixer))
     assert mixer.arms == ["left", "right"] and mixer.draws._streams.multi
+
+
+def test_autodata_records_the_subtask_term_signals_from_the_environment(torch, tmp_path):
+    """AutoData's execute passes obs=None to record_step; the runtime reads the environment's subtask_terms group (or
+    get_subtask_term_signals) so the records carry term_first, and every subtask its start step."""
+    from tmg.generation.generators.autodata.runtime import subtask_terms
+
+    rt = make_runtime(Method0(), records_dir=tmp_path)
+    ds = FakeDatastream(torch)
+    gen = types.SimpleNamespace(datastream=ds)
+    rt.begin_attempt(gen, 0)
+    spec = types.SimpleNamespace(num_interpolation_steps=0, num_fixed_steps=0, action_noise=0.0)
+    W = types.SimpleNamespace
+    mw = types.SimpleNamespace(waypoints={"right": W(pose=T(pose(2.0)), passthrough_action={"right": T([0.0, 1.0])}, noise=0.0)})
+    for step, grasped in enumerate((0.0, 0.0, 1.0, 1.0)):
+        if step in (0, 3):
+            rt.record_subtask({"self": gen, "eef_name": "right", "subtask_ind": 0 if step == 0 else 1, "selected_src_demo_ind": 0,
+                               "selected_boundary": T([0, 2]), "subtasks": [spec, spec], "subtask_object_name": None})
+        ds.env.obs_buf["subtask_terms"] = {"grasp_bottle": T([[grasped]])}
+        action = ds.target_eef_pose_to_action({"right": T(pose(2.0))}, {}, None, 0)
+        rt.record_command(mw, ds, 0, action)
+        rt.record_step(mw, ds.get_env(), 0, None, False)
+    rt.end_attempt(gen, 0, {"success": False})
+    line = json.loads((tmp_path / "attempts.jsonl").read_text().splitlines()[0])
+    assert line["term_first"] == {"grasp_bottle": 2} and [s["start_step"] for s in line["subtasks"]] == [0, 3]
+    env = types.SimpleNamespace(obs_buf={}, get_subtask_term_signals=lambda env_ids: {"done": T([1.0])})
+    assert list(subtask_terms(env, 0)) == ["done"] and subtask_terms(types.SimpleNamespace(), 0) == {}
