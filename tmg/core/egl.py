@@ -1,29 +1,29 @@
 """Offscreen rendering of the robosuite images as the launcher set it up: which renderer (``renderer``), and the device
 variables robosuite 1.5 needs (``apply``, the CP-Gen image).
 
-The Makefile chooses the renderer (``RENDER``: egl = the GPU through NVIDIA EGL, mesa = Mesa's software EGL on the CPU) and
-passes it into the container as ``TMG_RENDER``. The two do not draw the same pixels, so everything that produces or
-consumes images under one of them records it (``tmg.generation.base.ChunkSpec``).
+The robosuite images render on the GPU through NVIDIA EGL only; the Makefile passes ``TMG_RENDER=egl`` into the
+container. Mesa's software rendering was removed on main: it rendered every pool and dataset made before 2026-11-22 and
+does not draw the same pixels, so chunk specs record the renderer (``tmg.generation.base.ChunkSpec``) and a spec without
+one counts as Mesa and is refused.
 
 robosuite 1.5 reads the EGL device index from ``MUJOCO_EGL_DEVICE_ID`` (else from ``CUDA_VISIBLE_DEVICES``) and
 asserts at import time that the former appears in the latter. The EGL index is often not the CUDA index of the same GPU:
-with GPU rendering (Makefile ``RENDER=egl``) EGL numbers the GPUs in its own order (A100: GPU 0 is EGL device 2, cluster
-``egl_device_of_gpu``), and with Mesa software rendering on the A100 (``RENDER=mesa``) the index is Mesa's software device
-(8), which is no GPU at all. ``apply`` appends the EGL index to ``CUDA_VISIBLE_DEVICES`` so the assertion passes. The GPU
-the process computes on stays the first entry (``cuda:0``): CUDA ignores an index that is no valid GPU (Mesa's 8), and a
-valid one (GPU rendering on the A100) only becomes a second visible device that nothing uses.
+EGL numbers the GPUs in its own order (A100: GPU 0 is EGL device 2, cluster ``egl_device_of_gpu``). ``apply`` appends the
+EGL index to ``CUDA_VISIBLE_DEVICES`` so the assertion passes. The GPU the process computes on stays the first entry
+(``cuda:0``); the appended one only becomes a second visible device that nothing uses.
 """
 from __future__ import annotations
 
 import os
 
 RENDER_ENV = "TMG_RENDER"
-RENDERERS = ("egl", "mesa")
+RENDERERS = ("egl",)
 
 
 def renderer(environ: dict | None = None) -> str | None:
     """The offscreen renderer of this process (``TMG_RENDER``), or None when the launcher did not say: a process started
-    without the Makefile, or an image that does not render through robosuite (Isaac Lab)."""
+    without the Makefile, or an image that does not render through robosuite (Isaac Lab). Anything but ``egl`` (Mesa
+    included, removed on main) raises ValueError."""
     value = (os.environ if environ is None else environ).get(RENDER_ENV) or None
     if value is not None and value not in RENDERERS:
         raise ValueError(f"{RENDER_ENV} must be one of {RENDERERS}, got {value!r}")

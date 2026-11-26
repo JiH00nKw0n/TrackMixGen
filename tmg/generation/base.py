@@ -20,7 +20,7 @@ from tmg.core.records import RECORDS_DIR
 
 # The renderer a chunk spec without one counts as (``tmg.core.egl.renderer``): such a spec was written before 2026-11-22,
 # when the robosuite images rendered with Mesa, or by an Isaac Lab image, which renders with Isaac Sim and always compares
-# equal to itself.
+# equal to itself. Main renders with EGL only; keeping "mesa" here makes an old Mesa pool refused, not silently mixed.
 LEGACY_RENDER = "mesa"
 
 
@@ -42,8 +42,8 @@ class ChunkSpec:
 
     def identity(self) -> dict:
         """What must be equal for a finished chunk to be reused (machine-specific paths excluded). The renderer is part of
-        it: Mesa and EGL images differ (2026-11-22: 50-61 % of the pixels), so a pool started with one renderer refuses
-        chunks of the other."""
+        it: Mesa and EGL images differ (2026-11-22: 50-61 % of the pixels), so an old Mesa pool (no ``render``) refuses
+        to continue under EGL."""
         return {"generator": self.generator, "chunk": self.chunk, "task": _without_paths(self.task),
                 "scene": self.scene, "method": _without_paths(self.method), "protocol": self.protocol,
                 "extra": self.extra, "render": self.render or LEGACY_RENDER}

@@ -189,11 +189,19 @@ def test_low_dim_dataset_has_object_state_and_no_images(tmp_path):
 def test_egl_device_appended_to_cuda_visible_devices():
     from tmg.core import egl
 
-    env = {"MUJOCO_EGL_DEVICE_ID": "8", "CUDA_VISIBLE_DEVICES": "7"}
-    assert egl.apply(env)["CUDA_VISIBLE_DEVICES"] == "7,8"
-    assert egl.apply({"MUJOCO_EGL_DEVICE_ID": "8", "CUDA_VISIBLE_DEVICES": "7,8"})["CUDA_VISIBLE_DEVICES"] == "7,8"
-    assert "CUDA_VISIBLE_DEVICES" not in egl.apply({"MUJOCO_EGL_DEVICE_ID": "8"})
-    assert egl.apply({"CUDA_VISIBLE_DEVICES": "7"})["CUDA_VISIBLE_DEVICES"] == "7"
+    env = {"MUJOCO_EGL_DEVICE_ID": "2", "CUDA_VISIBLE_DEVICES": "0"}     # A100: GPU 0 is EGL device 2
+    assert egl.apply(env)["CUDA_VISIBLE_DEVICES"] == "0,2"
+    assert egl.apply({"MUJOCO_EGL_DEVICE_ID": "2", "CUDA_VISIBLE_DEVICES": "0,2"})["CUDA_VISIBLE_DEVICES"] == "0,2"
+    assert "CUDA_VISIBLE_DEVICES" not in egl.apply({"MUJOCO_EGL_DEVICE_ID": "2"})
+    assert egl.apply({"CUDA_VISIBLE_DEVICES": "0"})["CUDA_VISIBLE_DEVICES"] == "0"
+
+
+def test_renderer_is_egl_only():
+    from tmg.core import egl
+
+    assert egl.renderer({"TMG_RENDER": "egl"}) == "egl" and egl.renderer({}) is None
+    with pytest.raises(ValueError, match="TMG_RENDER"):
+        egl.renderer({"TMG_RENDER": "mesa"})
 
 
 def test_demo_layout_warns_on_unknown_keys(capsys):

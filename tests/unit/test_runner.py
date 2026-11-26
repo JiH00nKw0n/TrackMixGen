@@ -363,23 +363,25 @@ def test_run_pool_refuses_a_bad_shard(pool, tmp_path):
         pool(_cfg(tmp_path, shard=[2, 2]))
 
 
-def test_run_pool_refuses_to_continue_a_pool_under_another_renderer(pool, tmp_path, monkeypatch):
-    """Chunk specs record TMG_RENDER; specs written before it count as mesa (2026-11-22)."""
-    monkeypatch.delenv("TMG_RENDER", raising=False)
+def test_run_pool_refuses_to_continue_a_legacy_mesa_pool_under_egl(pool, tmp_path, monkeypatch):
+    """Chunk specs record TMG_RENDER; specs written before it (2026-11-22) count as Mesa, which main no longer has."""
+    monkeypatch.setenv("TMG_RENDER", "egl")
     pool(_cfg(tmp_path))
     output = tmp_path / "pool"
     (output / POOL_DONE).unlink()
-    spec_path = output / CHUNKS_DIR / "seed101" / CHUNK_SPEC
-    old = read_json(spec_path)
-    old.pop("render", None)                       # a spec written before the renderer was recorded
-    write_json(spec_path, old)
-    monkeypatch.setenv("TMG_RENDER", "mesa")
-    summary, launch = pool(_cfg(tmp_path))        # Mesa continues the old chunks
+    summary, launch = pool(_cfg(tmp_path))        # an EGL pool continues under EGL
     assert launch.calls == [] and summary["attempts"] == 5
     (output / POOL_DONE).unlink()
-    monkeypatch.setenv("TMG_RENDER", "egl")
+    spec_path = output / CHUNKS_DIR / "seed101" / CHUNK_SPEC
+    old = read_json(spec_path)
+    old.pop("render", None)                       # a spec written before the renderer was recorded: a Mesa chunk
+    write_json(spec_path, old)
     with pytest.raises(runner.PoolError, match=r"seed101: finished chunk was made under another configuration: \['render'\]"):
         pool(_cfg(tmp_path))
-    monkeypatch.setenv("TMG_RENDER", "opengl")    # not a renderer the Makefile knows: refused, not recorded
+
+
+@pytest.mark.parametrize("value", ["mesa", "opengl"])
+def test_run_pool_rejects_a_renderer_other_than_egl(pool, tmp_path, monkeypatch, value):
+    monkeypatch.setenv("TMG_RENDER", value)       # Mesa was removed on main: refused, not recorded
     with pytest.raises(ValueError, match="TMG_RENDER"):
         pool(_cfg(tmp_path))

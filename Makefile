@@ -85,22 +85,22 @@ endif
 
 # -- Offscreen rendering of the robosuite images (robosuite: MimicGen, cpgen: CP-Gen) in every stage that runs them
 # (sources, generate, dataset, resets, eval, check-scene; for CP-Gen also the noisy-state replay and re-rendering of
-# `make dataset`, which runs in the same container and inherits these variables). RENDER (cluster `render`, default egl):
-#   egl   renders on the GPU through NVIDIA EGL (about 4x faster per MimicGen image attempt on the A100, 2026-11-21);
-#   mesa  the rendering of every pool, dataset and evaluation made before 2026-11-22: the robosuite image (and the CP-Gen
-#         image under Singularity) on the CPU with Mesa's software EGL device (RENDER=mesa or cluster `render: mesa`).
-# The two renderers do not draw the same pixels: the same scene rendered both ways differed in 50-61 % of the pixels, by
-# 0.7-1.4 levels on average and up to 76 (2026-11-22). A policy is therefore trained on images of one renderer and
-# evaluated with the same renderer; keep RENDER the same for a dataset and for the evaluation of the policies trained on it.
-# The container gets TMG_RENDER and every chunk spec records it, so a pool refuses to continue under the other renderer.
+# `make dataset`, which runs in the same container and inherits these variables): always on the GPU through NVIDIA EGL
+# (RENDER=egl, cluster `render: egl`; about 4x faster per MimicGen image attempt than Mesa on the A100, 2026-11-21). Mesa's software rendering (RENDER=mesa) was removed on main: every pool, dataset and
+# evaluation made before 2026-11-22 used it, and the two renderers do not draw the same pixels (50-61 % of the pixels
+# differed, 2026-11-22), so a policy trained on such a dataset is evaluated from a checkout that still has it (e.g. branch
+# skillmix-sparsemax). The container gets TMG_RENDER and every chunk spec records it; a spec without it counts as Mesa,
+# so an old Mesa pool is refused rather than continued under EGL.
 RENDER ?= $(or $(call cluster_value,render),egl)
 ifneq (,$(filter robosuite cpgen,$(IMAGE)))
-ifeq (,$(filter egl mesa,$(RENDER)))
-$(error RENDER must be egl or mesa, got '$(RENDER)')
+ifeq ($(RENDER),mesa)
+$(error RENDER=mesa was removed on main (EGL only). Datasets made before 2026-11-22 used Mesa: evaluate policies trained on them from a checkout that still has it, e.g. branch skillmix-sparsemax)
+endif
+ifneq ($(RENDER),egl)
+$(error RENDER must be egl, got '$(RENDER)')
 endif
 CONTAINER_ENV += TMG_RENDER=$(RENDER) $(if $(EGL_DEVICE_ID),MUJOCO_EGL_DEVICE_ID=$(EGL_DEVICE_ID),)
 
-ifeq ($(RENDER),egl)
 # Which EGL device. The GPU that renders is the first entry of the caller's CUDA_VISIBLE_DEVICES (the drivers' GPU variable;
 # "0,3" gives 0), else 0. EGL numbers the GPUs in its own order: cluster `egl_device_of_gpu` lists the EGL index of GPU 0,
 # 1, 2, ... (A100: [2, 3, 0, 1, 6, 7, 4, 5], read with EGL_CUDA_DEVICE_NV); unset means the same index (Isaac).
@@ -127,13 +127,6 @@ ifneq (,$(NVIDIA_EGL_DIR))
 CONTAINER_ENV   += LD_LIBRARY_PATH=/opt/nvegl:/.singularity.d/libs
 CONTAINER_BINDS += $(NVIDIA_EGL_DIR):/opt/nvegl $(NVIDIA_EGL_DIR)/10_nvidia.json:/usr/share/glvnd/egl_vendor.d/10_nvidia.json
 endif
-endif
-else
-# Mesa software rendering picks the EGL device by index too; on a host whose /dev/dri the user cannot open (A100 under
-# Singularity) the index must be set explicitly (cluster `egl_device_id`: Mesa's software device after the GPUs' DRM
-# devices), or image pools and image evaluations fail with "Cannot initialize a EGL device display" (2026-10-29). Docker
-# hosts leave egl_device_id unset: Mesa inside the container finds its software device itself.
-EGL_DEVICE_ID ?= $(call cluster_value,egl_device_id)
 endif
 endif
 

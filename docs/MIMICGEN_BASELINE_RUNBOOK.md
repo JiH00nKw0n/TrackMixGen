@@ -240,7 +240,7 @@ EOF
 
 | 이미지 | 도커 파일 | 내용 | 쓰는 단계 |
 |---|---|---|---|
-| `tmg/robosuite` | `docker/robosuite.Dockerfile` | Python 3.10, MuJoCo 2.3.2, robosuite 1.4.1, MimicGen 72bd767(공식 생성기, 고정 커밋), robosuite_task_zoo(Hammer Cleanup의 서랍 자산), Mesa 소프트웨어 렌더링. GPU를 쓰지 않는다 | 원본 시연, 생성, 고정 장면, 데이터셋, 평가 롤아웃 |
+| `tmg/robosuite` | `docker/robosuite.Dockerfile` | Python 3.10, MuJoCo 2.3.2, robosuite 1.4.1, MimicGen 72bd767(공식 생성기, 고정 커밋), robosuite_task_zoo(Hammer Cleanup의 서랍 자산), GPU의 NVIDIA EGL 렌더링 | 원본 시연, 생성, 고정 장면, 데이터셋, 평가 롤아웃 |
 | `tmg/train` | `docker/train.Dockerfile` | Python 3.12, torch 2.8(CUDA 12.8), LeRobot 0.6.1 | 학습, 체크포인트 선택, 정책 서버 |
 
 ```bash
@@ -419,13 +419,14 @@ Diffusion Policy는 ResNet18 인코더 두 개와 U-Net을 처음부터 학습�
   다음 포트를 쓴다. 평가 중에 중단되면 `tmg-serve-<포트>` 이름의 컨테이너가 남을 수 있다. `docker ps`로 보고 `docker stop`으로 멈춘다.
 - Hammer Cleanup은 서랍 자산을 robosuite_task_zoo에서 읽는다. 이미지에 들어 있으므로 따로 할 일은 없다.
 - Mug Cleanup은 MimicGen이 실행 때 머그잔 자산 폴더에 xml 파일을 쓴다. 이미지 빌드가 그 폴더에 쓰기 권한을 주므로 따로 할 일은 없다.
-- 영상 렌더링은 기본이 GPU(NVIDIA EGL)다(2026-11-22부터, 머신 설정의 `render: egl`). Makefile이 robosuite·CP-Gen 이미지에 GPU를
-  넘기고, 그리는 GPU는 호출한 쪽 `CUDA_VISIBLE_DEVICES`의 첫 번호(없으면 0)다. EGL의 장치 번호가 GPU 번호와 다른 머신은
-  `egl_device_of_gpu`에 GPU 0, 1, …의 EGL 번호를 적는다(A100: `[2, 3, 0, 1, 6, 7, 4, 5]`). GPU가 없는 머신이나 2026-11-22 이전 풀과
-  같은 렌더러가 필요할 때는 `render: mesa`(또는 `make ... RENDER=mesa`)로 CPU의 Mesa 소프트웨어 렌더링으로 되돌린다.
-- 두 렌더러는 같은 장면을 같은 화소로 그리지 않는다. 2026-11-22에 같은 장면을 Mesa와 EGL로 그려 비교했더니 화소의 50–61 %가 달랐다
-  (평균 0.7–1.4 단계, 최대 76 단계). 그래서 정책의 학습 데이터와 평가는 같은 렌더러여야 한다. Mesa로 만든 데이터셋으로 학습한 정책은
-  `RENDER=mesa`로 평가하고, 끝나지 않은 Mesa 풀을 이어서 만들 때도 `RENDER=mesa`를 준다(렌더러는 조각 설정에 기록되지 않아 섞여도 알 수 없다).
+- 영상 렌더링은 GPU(NVIDIA EGL)로만 한다(머신 설정의 `render: egl`). Makefile이 robosuite·CP-Gen 이미지에 GPU를 넘기고, 그리는
+  GPU는 호출한 쪽 `CUDA_VISIBLE_DEVICES`의 첫 번호(없으면 0)다. EGL의 장치 번호가 GPU 번호와 다른 머신은 `egl_device_of_gpu`에
+  GPU 0, 1, …의 EGL 번호를 적는다(A100: `[2, 3, 0, 1, 6, 7, 4, 5]`). CPU의 Mesa 소프트웨어 렌더링은 main에서 뺐다. `RENDER=mesa`나
+  머신 설정 `render: mesa`를 주면 Makefile이 오류로 멈춘다.
+- 2026-11-22 이전의 풀·데이터셋·평가는 모두 Mesa로 그렸다. 두 렌더러는 같은 장면을 같은 화소로 그리지 않는다(2026-11-22 비교: 화소의
+  50–61 %가 평균 0.7–1.4 단계, 최대 76 단계 차이). 그래서 Mesa 데이터셋으로 학습한 정책은 Mesa가 남아 있는 체크아웃(예: 브랜치
+  `skillmix-sparsemax`)에서 평가한다. 조각 설정은 렌더러를 기록하고, 기록이 없는 옛 조각은 Mesa로 치므로 끝나지 않은 Mesa 풀을 main에서
+  이어 돌리면 섞이지 않고 거부된다.
 - 저차원 관측(`OBSERVATION=low_dim`)으로 돌리려면 영상 없는 풀(`GENERATION=pool_robosuite_lowdim`)을 따로 만든다. 원본 선택 규칙은 풀의
   저장 방식과 무관하게 `SELECTION`으로 고르므로, 저차원 풀도 기본값 `official`이면 이 문서의 기준선과 같은 규칙으로 생성된다. 2026-10에
   만든 저차원 탐색 풀은 `ours` 규칙이고 `.../ours/ours/none/pool_robosuite_lowdim/` 폴더에 있다. 이 문서의 기준선은 영상으로 돌린다.

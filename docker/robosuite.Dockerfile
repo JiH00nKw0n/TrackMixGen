@@ -1,5 +1,5 @@
 # tmg/robosuite: MuJoCo 2.3.2 + robosuite 1.4.1 + mimicgen 72bd767 + robosuite_task_zoo 74eab7f + tmg. Offscreen rendering through EGL: NVIDIA's
-# on the GPU when the Makefile passes one (RENDER=egl, the default), else Mesa's software EGL (RENDER=mesa). Build from the repository root:  make build IMAGE=robosuite
+# on the GPU, the one the Makefile passes (EGL only; the Mesa packages below stay as EGL loader dependencies). Build from the repository root:  make build IMAGE=robosuite
 ARG PYTHON_VERSION=3.10
 FROM ubuntu:22.04
 ARG PYTHON_VERSION

@@ -795,14 +795,14 @@ CP-Gen의 행동은 절대 자세 7개 값이다. 위치 3개, 축-각 회전 3�
   채운다)을 붙이고, 조각 프로세스는 자기 조각 폴더의 `cwd/`(체크아웃 최상위를 심볼릭 링크로 비춘 폴더)를 작업 폴더로 쓴다. 그래서
   조각 프로세스 여러 개가 같은 임시 파일을 두고 겹쳐 쓰는 일도 없다.
 - 화면 밖 렌더링 장치. robosuite 1.5의 EGL 문맥은 `MUJOCO_EGL_DEVICE_ID`를 EGL 장치 번호로 쓰고, `CUDA_VISIBLE_DEVICES`가 비어 있지
-  않으면 그 번호가 거기 들어 있는지 확인한다. 기본 렌더링(`render: egl`, 2026-11-22부터)은 GPU의 NVIDIA EGL이다. Makefile이 그리는 GPU
+  않으면 그 번호가 거기 들어 있는지 확인한다. 렌더링은 GPU의 NVIDIA EGL로만 한다(`render: egl`). Makefile이 그리는 GPU
   (`CUDA_VISIBLE_DEVICES`의 첫 번호)의 EGL 번호를 머신 설정 `egl_device_of_gpu`로 찾아 `MUJOCO_EGL_DEVICE_ID`로 넘기고(A100: GPU 0 = EGL 2,
   GPU 3 = EGL 1), CP-Gen 이미지에는 cuRobo용으로 그 GPU를 `CUDA_VISIBLE_DEVICES`로 넘긴다. `tmg.core.egl.apply`가 EGL 번호를
   `CUDA_VISIBLE_DEVICES` 뒤에 덧붙여 확인을 통과시킨다(계산은 첫 번호 GPU, `cuda:0`에서 한다). A100의 Singularity `--nv`는 NVIDIA EGL
   라이브러리를 넣어 주지 않으므로(nvidia-container-cli 방식, graphics 기능 없음) 머신 설정 `nvidia_egl_dir`의 드라이버 EGL 라이브러리
-  복사본과 `10_nvidia.json`을 컨테이너에 붙인다. `render: mesa`는 2026-11-22 이전 방식이다: Mesa가 사용자가 열 수 없는 GPU 8대의 DRM
-  장치 다음에 소프트웨어 장치를 9번째(번호 8)로 나열하므로 `egl_device_id: 8`을 넘긴다. 두 렌더러의 화소는 다르므로(2026-11-22 측정,
-  화소 50–61 %가 평균 0.7–1.4 단계, 최대 76 단계 차이) 학습 데이터와 평가는 같은 렌더러로 만든다.
+  복사본과 `10_nvidia.json`을 컨테이너에 붙인다. 2026-11-22 이전 방식인 Mesa 소프트웨어 렌더링(`render: mesa`)은 main에서 뺐다. 두
+  렌더러의 화소는 다르므로(2026-11-22 측정, 화소 50–61 %가 평균 0.7–1.4 단계, 최대 76 단계 차이) Mesa 데이터셋으로 학습한 정책은 Mesa가
+  남아 있는 체크아웃(예: 브랜치 `skillmix-sparsemax`)에서 평가한다.
 
 ### 3.y Coffee 재현 결과 (2026-10-27, A100 GPU 7, 영상 기반 Diffusion Policy)
 

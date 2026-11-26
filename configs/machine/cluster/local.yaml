@@ -9,7 +9,5 @@ workers: auto                 # chunk processes run at once; auto = cpu count ca
 max_workers: 12
 threads_per_worker: 1         # OMP/MKL threads inside one chunk process
 min_free_disk_gib: 8          # refuse to start a pool when the data root has less free space
-render: egl                   # offscreen rendering of the robosuite images: egl (GPU through NVIDIA EGL, the default) | mesa
-                              # (CPU, Mesa's software EGL: for a machine without an NVIDIA GPU, and the renderer of the pools made
-                              # before 2026-11-22). Train and evaluate a policy with the same renderer. egl_device_of_gpu: [...]
-                              # maps GPU indices to EGL device indices where they differ (configs/machine/cluster/a100.yaml)
+render: egl                   # offscreen rendering of the robosuite images: EGL only (GPU, NVIDIA EGL; Mesa removed on main).
+                              # egl_device_of_gpu: [...] maps GPU indices to EGL device indices where they differ (a100.yaml)
