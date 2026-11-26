@@ -305,6 +305,19 @@ def test_hub_generation_downloads_the_published_dataset_instead_of_reading_a_poo
     assert len(calls) == 2 and not (tmp_path / "none.hdf5").exists()            # refused before downloading
 
 
+def test_hub_baseline_names_the_mimicgen_baseline_copy(tmp_path, monkeypatch):
+    from tmg.config import compose, resolved
+
+    monkeypatch.setenv("TMG_DATA_ROOT", str(tmp_path))
+    plain = resolved(compose("dataset", ["task=stack_three", "scene=ours", "selection=official", "method=none",
+                                         "generation=hub_baseline"]))
+    hub = plain["generation"]["hub"]
+    assert (hub["repo_id"], hub["filename"]) == ("Mayfull/Mimicgen-baseline", "stack_three.hdf5")
+    assert dict(hub["made_with"]) == {"generator": "mimicgen", "scene": "ours", "selection": "official", "method": "none",
+                                      "observation": "image"}
+    assert plain["output"].endswith("/datasets/mimicgen/stack_three/ours/official/none/hub_baseline/image/n1000_seed0.hdf5")
+
+
 def test_hub_generation_has_no_pool_to_generate(tmp_path, monkeypatch):
     from tmg.config import compose
     from tmg.generation import runner
