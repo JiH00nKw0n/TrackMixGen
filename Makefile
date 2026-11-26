@@ -65,17 +65,21 @@ comma  := ,
 # (/etc/vulkan/icd.d/nvidia_icd.json) into the container, which `--gpus all` alone did not on the Isaac server (2026-10-28).
 # ISAAC_GPU (a GPU index, e.g. exported by scripts/run_isaaclab_baseline.sh from its GPU variable) exposes only that GPU to
 # the container, where it is device 0; empty exposes all GPUs and Isaac Sim takes device 0 of the host.
-# On the shared Isaac server (CLUSTER=isaac) an empty ISAAC_GPU would put Isaac Sim on host GPU 0, which other users hold, so
-# the targets that start Isaac Sim (generate and with it coefficients, verify-baseline, resets, eval and with it validate and
-# evaluate, check-scene) refuse to run there without it (ISAAC_GPU_CHECK, the first line of their recipes).
+# On the shared Isaac server an empty ISAAC_GPU would put Isaac Sim on host GPU 0, which other users hold, so the targets that
+# start Isaac Sim (generate and with it coefficients, verify-baseline, resets, eval, validate, evaluate, check-scene) refuse
+# to run there without it (ISAAC_GPU_CHECK, the first line of their recipes; validate and evaluate stop before the policy
+# server starts). The server is CLUSTER=isaac, or any CLUSTER on a host where the isaac cluster's data_root exists (a run
+# that forgot CLUSTER=isaac and got the default, local).
 ISAAC_GPU_CHECK = @true
+ISAAC_HOST_ROOT := $(call config_value,machine/cluster/isaac,data_root)
+ON_ISAAC_HOST   := $(if $(filter isaac,$(strip $(CLUSTER))),1,$(if $(ISAAC_HOST_ROOT),$(if $(wildcard $(ISAAC_HOST_ROOT)),1,),))
 ifneq (,$(filter isaaclab-%,$(IMAGE)))
 DOCKER_GPU   = --runtime=nvidia --gpus $(if $(ISAAC_GPU),device=$(ISAAC_GPU),all) -e NVIDIA_VISIBLE_DEVICES=$(or $(ISAAC_GPU),all) -e NVIDIA_DRIVER_CAPABILITIES=all
 DOCKER_EXTRA = --shm-size 8g
 SING_NV      = --nv
-ifeq ($(strip $(CLUSTER)),isaac)
+ifeq ($(ON_ISAAC_HOST),1)
 ifeq ($(strip $(ISAAC_GPU)),)
-ISAAC_GPU_CHECK = @echo "CLUSTER=isaac with image $(IMAGE): set ISAAC_GPU to the GPU index Isaac Sim may use (e.g. ISAAC_GPU=6); without it the container sees every GPU and Isaac Sim takes host GPU 0" >&2; exit 1
+ISAAC_GPU_CHECK = @echo "Isaac server (CLUSTER=$(strip $(CLUSTER))) with image $(IMAGE): set ISAAC_GPU to the GPU index Isaac Sim may use (e.g. ISAAC_GPU=6); without it the container sees every GPU and Isaac Sim takes host GPU 0" >&2; exit 1
 endif
 endif
 endif
@@ -231,9 +235,11 @@ select-checkpoint:  ## choose the checkpoint of the run (TASK, SCENE, METHOD, GE
 	$(TRAIN_RUN) select_checkpoint $(GEN_ARGS) observation=$(OBSERVATION) policy=$(POLICY) seed=$(SEED)
 
 validate:  ## evaluate checkpoint CKPT of run RUN on the validation scenes: policy server (train image) + rollouts (simulator image)
+	$(ISAAC_GPU_CHECK)
 	RUN=$(RUN) CKPT=$(CKPT) TASK=$(TASK) SCENE=$(SCENE) OBSERVATION=$(OBSERVATION) CLUSTER=$(CLUSTER) SPLIT=val $(REPO)/scripts/evaluate_checkpoint.sh
 
 evaluate:  ## evaluate checkpoint CKPT on the test scenes (SPLIT=test)
+	$(ISAAC_GPU_CHECK)
 	RUN=$(RUN) CKPT=$(CKPT) TASK=$(TASK) SCENE=$(SCENE) OBSERVATION=$(OBSERVATION) CLUSTER=$(CLUSTER) SPLIT=$(SPLIT) $(REPO)/scripts/evaluate_checkpoint.sh
 
 eval:  ## play the fixed scenes against a running policy server (OBSERVATION as trained; OVERRIDES: checkpoint=... split=val|test ...)

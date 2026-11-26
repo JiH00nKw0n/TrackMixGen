@@ -17,15 +17,29 @@ def dry_run(*args, isaac_gpu=None):
     return subprocess.run(["make", "-n", "-C", str(REPO), *args], env=env, capture_output=True, text=True, check=True).stdout
 
 
-@pytest.mark.parametrize("target", ["generate", "verify-baseline", "resets", "eval", "check-scene"])
+@pytest.mark.parametrize("target", ["generate", "verify-baseline", "resets", "eval", "check-scene", "validate", "evaluate"])
 @pytest.mark.parametrize("generator", ["softmimicgen", "dexmimicgen"])
 def test_isaac_sim_targets_on_the_isaac_server_need_isaac_gpu(target, generator):
     refused = dry_run(target, "CLUSTER=isaac", f"GENERATOR={generator}")
-    assert "set ISAAC_GPU" in refused and "exit 1" in refused.splitlines()[0]
+    assert "set ISAAC_GPU" in refused and "exit 1" in refused.splitlines()[0]     # before anything else, the server too
     allowed = dry_run(target, "CLUSTER=isaac", f"GENERATOR={generator}", isaac_gpu="6")
-    assert "set ISAAC_GPU" not in allowed and "device=6" in allowed
+    assert "set ISAAC_GPU" not in allowed
+    if target not in ("validate", "evaluate"):                     # those two run a script that calls make eval
+        assert "device=6" in allowed
 
 
 def test_other_clusters_and_images_are_not_affected():
     assert "set ISAAC_GPU" not in dry_run("generate", "CLUSTER=isaac", "GENERATOR=mimicgen")
     assert "set ISAAC_GPU" not in dry_run("generate", "CLUSTER=local", "GENERATOR=softmimicgen")
+
+
+def test_the_isaac_host_is_recognised_by_its_data_root_whatever_the_cluster(tmp_path):
+    """CLUSTER left at its default (local) on the Isaac server: the isaac cluster's data_root exists there."""
+    import yaml
+
+    root = yaml.safe_load((REPO / "configs/machine/cluster/isaac.yaml").read_text())["data_root"]
+    out = dry_run("generate", "GENERATOR=softmimicgen", f"ISAAC_HOST_ROOT={tmp_path}")       # stands in for that root
+    assert "set ISAAC_GPU" in out and "CLUSTER=local" in out
+    assert "set ISAAC_GPU" not in dry_run("generate", "GENERATOR=softmimicgen", f"ISAAC_HOST_ROOT={tmp_path / 'absent'}")
+    if not Path(root).exists():                                     # not on the Isaac server: the default run is allowed
+        assert "set ISAAC_GPU" not in dry_run("generate", "GENERATOR=softmimicgen")
