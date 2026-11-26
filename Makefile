@@ -134,6 +134,11 @@ else
 # devices), or image pools and image evaluations fail with "Cannot initialize a EGL device display" (2026-10-29). Docker
 # hosts leave egl_device_id unset: Mesa inside the container finds its software device itself.
 EGL_DEVICE_ID ?= $(call cluster_value,egl_device_id)
+# CUDA inside the container: --cleanenv drops the caller's CUDA_VISIBLE_DEVICES and --nv shows every GPU, so a CP-Gen
+# container (cuRobo, torch) would take cuda:0, another user's GPU on a shared host. Keep the caller's first GPU there
+# (tmg.core.egl.apply appends Mesa's device index so robosuite's check passes); the robosuite image needs no CUDA (empty).
+CONTAINER_CUDA_SET = 1
+CONTAINER_CUDA     = $(if $(filter cpgen,$(IMAGE)),$(or $(firstword $(subst $(comma), ,$(CUDA_VISIBLE_DEVICES))),0),)
 endif
 endif
 
