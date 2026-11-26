@@ -211,8 +211,8 @@ generate:  ## generate one pool (TASK, SCENE, SELECTION=official|ours, METHOD, G
 	@METHOD=$(strip $(METHOD)) OVERRIDES="$(OVERRIDES)" GENERATOR=$(GENERATOR) IMAGE=$(IMAGE) TASK=$(TASK) SCENE=$(strip $(SCENE)) CLUSTER=$(CLUSTER) scripts/ensure_coefficients.sh
 	$(PREP) && $(CONTAINER_RUN) generate $(GEN_ARGS)
 
-verify-baseline:  ## official generator vs adapter with method=none on one chunk; must be identical
-	$(ISAAC_GPU_CHECK)
+verify-baseline:  ## official generator vs adapter with method=none on one chunk; must be identical (MimicGen; refused for Isaac Lab)
+	$(if $(filter isaaclab-%,$(IMAGE)),@echo "verify-baseline: not for the Isaac Lab generators (GENERATOR=$(GENERATOR)): Isaac Sim is not byte-deterministic and the check reads MimicGen's important_stats.json (tmg/README.md)" >&2; exit 1,@true)
 	$(PREP) && $(CONTAINER_RUN) verify_baseline generator=$(GENERATOR) task=$(TASK) scene=$(SCENE) selection=$(SELECTION) generation=$(GENERATION) cluster=$(CLUSTER) $(OVERRIDES)
 
 fit-coefficients:  ## fit TASK's SkillMix rule on its randmix pool (skillmix_randmix/pool_randmix) and unmix pool (none/GENERATION), SELECTION=ours GENERATION=pool_unmix; writes coefficients/<task>.yaml

@@ -125,3 +125,12 @@ def test_verify_baseline_reports_differing_stats_and_datasets(baseline, tmp_path
     assert report["diffs"] == {"demo.hdf5": ["/data/demo_0/actions: values differ (max abs 0.25)"],
                                "important_stats": ["num_success: 2 vs 1", "num_failures: 0 vs 1"]}
     assert read_json(tmp_path / "verify" / "VERIFY.json")["identical"] is False
+
+
+def test_verify_baseline_refuses_an_isaac_lab_generator_before_any_chunk_runs(tmp_path, monkeypatch):
+    calls = []
+    fake = type("G", (), {"name": "dexmimicgen", "simulator": "isaaclab", "check_sources": lambda self: calls.append(1) or []})()
+    monkeypatch.setattr(verify, "make_generator", lambda plain: fake)
+    with pytest.raises(RuntimeError, match="Isaac Lab generator"):
+        verify.verify_baseline(_baseline_cfg(tmp_path))
+    assert calls == []

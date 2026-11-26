@@ -17,7 +17,7 @@ def dry_run(*args, isaac_gpu=None):
     return subprocess.run(["make", "-n", "-C", str(REPO), *args], env=env, capture_output=True, text=True, check=True).stdout
 
 
-@pytest.mark.parametrize("target", ["generate", "verify-baseline", "resets", "eval", "check-scene", "validate", "evaluate"])
+@pytest.mark.parametrize("target", ["generate", "resets", "eval", "check-scene", "validate", "evaluate"])
 @pytest.mark.parametrize("generator", ["softmimicgen", "dexmimicgen"])
 def test_isaac_sim_targets_on_the_isaac_server_need_isaac_gpu(target, generator):
     refused = dry_run(target, "CLUSTER=isaac", f"GENERATOR={generator}")
@@ -43,3 +43,10 @@ def test_the_isaac_host_is_recognised_by_its_data_root_whatever_the_cluster(tmp_
     assert "set ISAAC_GPU" not in dry_run("generate", "GENERATOR=softmimicgen", f"ISAAC_HOST_ROOT={tmp_path / 'absent'}")
     if not Path(root).exists():                                     # not on the Isaac server: the default run is allowed
         assert "set ISAAC_GPU" not in dry_run("generate", "GENERATOR=softmimicgen")
+
+
+def test_verify_baseline_is_refused_for_the_isaac_lab_generators():
+    for generator in ("softmimicgen", "dexmimicgen"):
+        out = dry_run("verify-baseline", f"GENERATOR={generator}", "CLUSTER=isaac", isaac_gpu="6")
+        assert "not for the Isaac Lab generators" in out.splitlines()[0] and "exit 1" in out.splitlines()[0]
+    assert "not for the Isaac Lab generators" not in dry_run("verify-baseline", "GENERATOR=mimicgen")
