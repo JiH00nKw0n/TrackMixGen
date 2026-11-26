@@ -391,8 +391,8 @@ def test_isaaclab_chunk_processes_are_capped_per_gpu():
     from tmg.core.workers import ISAACLAB_MAX_WORKERS, cap_simulator_workers
 
     assert ISAACLAB_MAX_WORKERS == 3
-    assert cap_simulator_workers(16, "auto -> 16", "isaaclab", {}) == (3, "auto -> 16, capped at 3 Isaac Sim processes "
-                                                                          "(cluster.isaaclab_max_workers)")
+    expected = "auto -> 16, capped at 3 Isaac Sim processes (cluster.isaaclab_max_workers)"
+    assert cap_simulator_workers(16, "auto -> 16", "isaaclab", {}) == (3, expected)
     assert cap_simulator_workers(16, "workers=16", "isaaclab", {"isaaclab_max_workers": 5})[0] == 5
     assert cap_simulator_workers(2, "workers=2", "isaaclab", {}) == (2, "workers=2")           # below the cap: unchanged
     assert cap_simulator_workers(16, "auto -> 16", "robosuite", {}) == (16, "auto -> 16")      # other simulators unchanged

@@ -14,7 +14,7 @@ def dry_run(*args, isaac_gpu=None):
     env = {k: v for k, v in os.environ.items() if k not in ("ISAAC_GPU", "CLUSTER", "MAKEFLAGS")}
     if isaac_gpu is not None:
         env["ISAAC_GPU"] = isaac_gpu
-    return subprocess.run(["make", "-n", "-C", str(REPO), *args], env=env, capture_output=True, text=True).stdout
+    return subprocess.run(["make", "-n", "-C", str(REPO), *args], env=env, capture_output=True, text=True, check=True).stdout
 
 
 @pytest.mark.parametrize("target", ["generate", "verify-baseline", "resets", "eval", "check-scene"])
