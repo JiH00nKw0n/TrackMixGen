@@ -13,7 +13,7 @@ params:
   chunk_size: 50                 # predicted action steps (openpi action_horizon); TODO confirm against pi0_libero
   n_action_steps: 50             # executed per prediction (openpi LIBERO replans every 5, not applied yet)
   dtype: bfloat16
-  gradient_checkpointing: true
+  gradient_checkpointing: false  # off (user, 2026-11-26): faster; enable only when memory is short
   freeze_vision_encoder: false
   train_expert_only: false
 by_observation:
