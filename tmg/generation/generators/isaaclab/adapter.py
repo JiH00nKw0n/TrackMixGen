@@ -173,8 +173,10 @@ class IsaacLabGenerator(SyntheticDataGenerator):
 
     def demo_layout(self) -> dict:
         """How ``tmg dataset`` reads this generator's chunk outputs (see ``tmg.data.dataset.DemoLayout``)."""
+        # The recorder keeps no flat state vector; its scene state is the nested initial_state/ and states/ groups
+        # (articulation, rigid_object, deformable_object or deformable / <asset> / <field>), copied whole for replay.
         return {"demo_glob": GENERATED, "image_key": "{cam}", "actions_key": "actions", "states_key": None,
-                "labels_from_records": True, "success_only_file": True}
+                "labels_from_records": True, "success_only_file": True, "replay_groups": ["initial_state", "states"]}
 
 
 class SoftMimicGenGenerator(IsaacLabGenerator):

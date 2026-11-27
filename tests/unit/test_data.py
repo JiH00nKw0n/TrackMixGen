@@ -331,3 +331,74 @@ def test_hub_generation_has_no_pool_to_generate(tmp_path, monkeypatch):
     monkeypatch.setenv("TMG_DATA_ROOT", str(tmp_path))
     with pytest.raises(runner.PoolError, match="no pool to generate"):
         runner.run_pool(compose("generate", ["task=square", "scene=ours", "selection=ours", "method=none", "generation=hub"]))
+
+
+def _add_isaaclab_replay_groups(pool, rng, skip=None):
+    """Nested initial_state/ and states/ groups as Isaac Lab's recorder writes them (rope: articulation + deformable
+    object), gzip-compressed, in every demo of the pool except ``skip`` = (chunk, demo key)."""
+    for demo_file in sorted(pool.glob(f"{CHUNKS_DIR}/*/*/demo.hdf5")):
+        with h5py.File(demo_file, "a") as f:
+            for key, g in f["data"].items():
+                n = g["actions"].shape[0]
+                del g["states"]                                   # Isaac Lab demos have no flat state vector
+                for name, steps in (("initial_state", 1), ("states", n)):
+                    if skip == (demo_file.parent.parent.name, key) and name == "states":
+                        continue
+                    robot = g.create_group(f"{name}/articulation/robot")
+                    robot.create_dataset("joint_position", data=rng.normal(size=(steps, 9)).astype(np.float32), compression="gzip")
+                    robot.create_dataset("root_pose", data=rng.normal(size=(steps, 7)).astype(np.float32), compression="gzip")
+                    rope = g.create_group(f"{name}/deformable_object/object")
+                    rope.create_dataset("nodal_position", data=rng.normal(size=(steps, 549, 3)).astype(np.float32),
+                                        compression="gzip", compression_opts=4)
+                    rope.attrs["note"] = "nodes"
+
+
+def _same_tree(a, b, path=""):
+    """Every key, shape, dtype, filter, attribute and value of group ``a`` equals ``b``'s."""
+    assert sorted(a.keys()) == sorted(b.keys()), path
+    assert dict(a.attrs) == dict(b.attrs), path
+    for k in a:
+        if isinstance(a[k], h5py.Group):
+            _same_tree(a[k], b[k], f"{path}/{k}")
+            continue
+        assert a[k].shape == b[k].shape and a[k].dtype == b[k].dtype and a[k].compression == b[k].compression, f"{path}/{k}"
+        assert np.array_equal(a[k][()], b[k][()]), f"{path}/{k}"
+
+
+def test_isaaclab_datasets_copy_the_replay_groups_of_the_same_demo(tmp_path, capsys):
+    """The Isaac Lab adapter's layout copies initial_state/ and states/ of each chosen demo unchanged; a demo without one
+    is warned about once per dataset; MimicGen's layout writes no such groups."""
+    from tmg.data.dataset import MIMICGEN_LAYOUT, DemoLayout
+    from tmg.generation.generators.isaaclab.adapter import IsaacLabGenerator
+
+    rng = np.random.default_rng(3)
+    pool = make_pool(tmp_path)
+    cands = candidates(pool)
+    _add_isaaclab_replay_groups(pool, rng, skip=(cands[3]["chunk"], cands[3]["demo_key"]))
+    mg_pool = make_pool(tmp_path / "mg")
+    official = IsaacLabGenerator.demo_layout(None)
+    assert official["replay_groups"] == ["initial_state", "states"] and official["states_key"] is None
+    layout = DemoLayout.from_mapping({**official, "demo_glob": "*/demo.hdf5", "image_key": "{cam}_image",
+                                      "labels_from_records": False})
+    assert layout.replay_groups == ("initial_state", "states")
+    out = tmp_path / "isaac.hdf5"
+    write_dataset(out, cands, pool=pool, observation=IMAGE, meta={"label": "pre_noise"}, layout=layout)
+    warned = capsys.readouterr().out
+    assert warned.count("WARNING") == 1 and "1 of 4 demos have no replay group 'states'" in warned
+    with h5py.File(out, "r") as f:
+        for j, c in enumerate(cands):
+            d = f["data"][f"demo_{j}"]
+            with h5py.File(c["demo_file"], "r") as src:
+                s = src["data"][c["demo_key"]]
+                for name in ("initial_state", "states"):
+                    if name in s:
+                        _same_tree(s[name], d[name], name)
+                    else:
+                        assert name not in d
+            assert d["initial_state/deformable_object/object/nodal_position"].shape == (1, 549, 3)
+    with pytest.raises(ValueError, match="same name"):
+        DemoLayout(demo_glob="x", image_key="{cam}", states_key="states", replay_groups=("states",))
+    mg = tmp_path / "mimicgen.hdf5"
+    write_dataset(mg, candidates(mg_pool)[:2], pool=mg_pool, observation=IMAGE, meta={"label": "pre_noise"}, layout=MIMICGEN_LAYOUT)
+    with h5py.File(mg, "r") as f:
+        assert "initial_state" not in f["data/demo_0"] and isinstance(f["data/demo_0/states"], h5py.Dataset)

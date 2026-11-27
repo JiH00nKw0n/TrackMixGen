@@ -27,6 +27,10 @@ Output layout (``<output>``, robomimic-compatible plus our extras)::
         subtask_of_step         (T,)   int16            subtask index of each step (from the segment table)
         src_demo_inds           (K,)   int64            source demonstration chosen for each subtask
         attrs: chunk, attempt, num_samples, pool, model_file (the scene XML, copied when the generator's demo has it)
+        initial_state/...       nested groups            Isaac Lab generators only (``DemoLayout.replay_groups``): the
+        states/...              (T, ...) per leaf        recorder's scene state at reset and per step (articulation,
+                                                         rigid_object, deformable_object or deformable / <asset> / <field>),
+                                                         copied unchanged (keys, dtypes, gzip filters) for replay
     mask/train                  (N,)   bytes            every demo key (one split; validation is by rollout)
 
 Selection is uniform without replacement among all successes of the pool (``seed``). The generator may then
@@ -67,6 +71,14 @@ class DemoLayout:
     labels_from_records: bool = False # pre-noise labels in ``records/labels_%06d.npz`` instead of the attempt npz
     images_from_records: bool = False # camera frames in ``records/images_%06d.npz`` (AutoData keeps no camera group)
     success_only_file: bool = True    # the file lists successes in attempt order
+    # nested state groups of the demo copied whole into the dataset demo for replay (Isaac Lab: initial_state, states);
+    # () for generators whose states are one flat dataset (``states_key``: MimicGen, CP-Gen)
+    replay_groups: tuple[str, ...] = ()
+
+    def __post_init__(self):
+        object.__setattr__(self, "replay_groups", tuple(str(g) for g in self.replay_groups))
+        if self.states_key and "states" in self.replay_groups:
+            raise ValueError("demo_layout(): a flat states_key and a replay group 'states' would write the same name")
 
     @classmethod
     def from_mapping(cls, m: dict) -> DemoLayout:
@@ -233,6 +245,18 @@ def _action_triplet(c: Candidate, demo, z, layout: DemoLayout, label: str | None
     return actions, a_exec, a_label
 
 
+def _copy_replay_groups(demo, g, names, missing: dict) -> None:
+    """Copy the demo's nested state groups ``names`` into the dataset demo ``g`` unchanged: h5py's group copy keeps every
+    key, shape, dtype, attribute and the source's gzip filter, so the per-step deformable states (Towel: 5,989 nodes,
+    about 12.8 MB per demo already compressed, 2026-11-27) are not recompressed. A group the demo lacks is counted in
+    ``missing`` (the caller warns once per dataset)."""
+    for name in names:
+        if isinstance(demo.get(name), h5py.Group):
+            demo.file.copy(demo[name], g, name=name)
+        else:
+            missing[name] = missing.get(name, 0) + 1
+
+
 def write_dataset(path: Path, chosen: list[Candidate], *, pool: Path, observation: dict, meta: dict,
                   layout: DemoLayout = MIMICGEN_LAYOUT) -> dict:
     """Write the common hdf5 (layout in the module docstring) atomically (``.part`` then rename).
@@ -256,6 +280,7 @@ def write_dataset(path: Path, chosen: list[Candidate], *, pool: Path, observatio
                            "would see only the robot state (low_dim needs task.object_state)")
     part = part_file(path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    missing_replay: dict[str, int] = {}
     total_steps = 0
     image_shape = None
     env_args = None
@@ -285,6 +310,7 @@ def write_dataset(path: Path, chosen: list[Candidate], *, pool: Path, observatio
                 g.create_dataset("actions_pre_noise", data=a_label)
                 if layout.states_key and layout.states_key in demo:
                     g.create_dataset("states", data=np.asarray(demo[layout.states_key], dtype=np.float64))
+                _copy_replay_groups(demo, g, layout.replay_groups, missing_replay)
                 g.create_dataset("subtask_of_step", data=_subtask_of_step(z))
                 g.create_dataset("src_demo_inds", data=np.asarray(c["src_demo_inds"] if c["src_demo_inds"] is not None
                                                                   else demo["src_demo_inds"], dtype=np.int64))
@@ -300,6 +326,9 @@ def write_dataset(path: Path, chosen: list[Candidate], *, pool: Path, observatio
         finally:
             for f in open_files.values():
                 f.close()
+        for name, count in missing_replay.items():          # once per dataset, not once per demo
+            print(f"[tmg] WARNING {count} of {len(chosen)} demos have no replay group {name!r} in the generator's demo "
+                  f"file; those demos cannot be replayed from the dataset", flush=True)
         data.attrs["env_args"] = env_args if env_args is not None else "{}"
         data.attrs["total"] = total_steps
         data.attrs["cameras"] = json.dumps(cameras)
