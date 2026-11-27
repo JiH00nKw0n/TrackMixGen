@@ -7,6 +7,7 @@ sif: null                     # singularity image path (runtime singularity); nu
 data_root: null               # host folder mounted at /data; null = $HOME/tmg_data
 workers: auto                 # chunk processes run at once; auto = cpu count capped at max_workers
 max_workers: 12
+max_workers_by_simulator: {isaaclab: 3}   # with workers: auto, per generator.simulator: an Isaac Sim chunk process takes about 15 GB of RAM
 threads_per_worker: 1         # OMP/MKL threads inside one chunk process
 min_free_disk_gib: 8          # refuse to start a pool when the data root has less free space
 render: egl                   # offscreen rendering of the robosuite images: EGL only (GPU, NVIDIA EGL; Mesa removed on main).

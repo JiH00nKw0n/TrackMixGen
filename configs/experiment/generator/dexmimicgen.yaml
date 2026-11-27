@@ -8,6 +8,8 @@
 # 2.x image (isaaclab_mimic directly) and the Arena tasks under a generator named autodata.
 name: dexmimicgen
 simulator: isaaclab
+byte_verify: false              # tmg verify_baseline (byte-for-byte rerun against the official generator) is not available
+gpu_variable: ISAAC_GPU          # make variable that names the one GPU the simulator container gets; required on a cluster with shared_gpus
 image: tmg/isaaclab-dex
 package: autodata_core                     # DataGenerator, MultiWaypoint (a rewrite of isaaclab_mimic.datagen, not that package)
 commit: 835f4aab0fff759a789586454d939f12a9a40997

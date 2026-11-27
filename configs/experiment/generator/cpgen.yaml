@@ -3,6 +3,7 @@
 # keypoint constraints of one source demonstration for the new object poses and motion-plans between them.
 name: cpgen
 simulator: robosuite
+byte_verify: false              # tmg verify_baseline (byte-for-byte rerun against the official generator) is not available
 image: tmg/cpgen
 package: demo_aug
 commit: 1e7c1fc4a467c7678c8542ca762e332d1757d8d5

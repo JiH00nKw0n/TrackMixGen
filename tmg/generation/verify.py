@@ -64,12 +64,6 @@ def compare_hdf5(a: Path, b: Path) -> list[str]:
     return diffs
 
 
-def supports_verify(generator) -> bool:
-    """The Isaac Lab generators have no ``experiment``/``important_stats.json`` and no byte-identical rerun (``tmg/README.md``:
-    the check is MimicGen's), so they are refused before any chunk runs."""
-    return getattr(generator, "simulator", "") != "isaaclab"
-
-
 def verify_baseline(cfg) -> dict:
     """Run the same chunk twice (official generator, adapter with ``method=none``) and compare the outputs.
 
@@ -78,10 +72,11 @@ def verify_baseline(cfg) -> dict:
     """
     plain = resolved(cfg)
     generator = make_generator(plain)
-    if not supports_verify(generator):
-        raise RuntimeError(f"verify_baseline compares two runs of MimicGen's official generator byte for byte and reads its "
-                           f"{IMPORTANT_STATS}; the Isaac Lab generator {generator.name!r} has neither, and Isaac Sim is not bit-deterministic from run to run (the same seed gave 16 and 14 "
-                           f"successes, 2026-11-27). Compare its unmixed pools by statistics instead.")
+    if not generator.supports_byte_verify:
+        raise RuntimeError(f"verify_baseline compares two runs of the official generator byte for byte and reads its "
+                           f"{IMPORTANT_STATS}; generator {generator.name!r} does not declare that (generator.byte_verify): "
+                           f"its reruns are not byte-identical (Isaac Sim: the same seed gave 16 and 14 successes, "
+                           f"2026-11-27) or it writes no such statistics. Compare its unmixed pools by statistics instead.")
     problems = generator.check_sources()
     if problems:
         raise RuntimeError("; ".join(problems))

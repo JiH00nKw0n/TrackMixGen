@@ -387,19 +387,25 @@ def test_run_pool_rejects_a_renderer_other_than_egl(pool, tmp_path, monkeypatch,
         pool(_cfg(tmp_path))
 
 
-def test_isaaclab_chunk_processes_are_capped_per_pool_unless_set_explicitly():
-    from tmg.core.workers import ISAACLAB_MAX_WORKERS, cap_simulator_workers
+def test_chunk_processes_are_capped_per_simulator_by_the_cluster_config_unless_set_explicitly():
+    """The cap is the machine's ``max_workers_by_simulator[generator.simulator]``: no simulator is named in the code and
+    no default hides in it."""
+    import tmg.core.workers as workers
+    from tmg.core.workers import cap_simulator_workers
 
-    assert ISAACLAB_MAX_WORKERS == 3
-    expected = "auto -> 16, capped at 3 Isaac Sim processes per pool (cluster.isaaclab_max_workers)"
-    assert cap_simulator_workers(16, "auto -> 16", "isaaclab", {}, requested="auto") == (3, expected)
-    assert cap_simulator_workers(16, "auto -> 16", "isaaclab", {"isaaclab_max_workers": 5})[0] == 5
-    assert cap_simulator_workers(2, "workers=2", "isaaclab", {}, requested=2) == (2, "workers=2")     # below the cap
-    n, why = cap_simulator_workers(8, "workers=8", "isaaclab", {}, requested=8)                       # explicit: kept, warned
+    assert not hasattr(workers, "ISAACLAB_MAX_WORKERS")
+    cluster = {"max_workers_by_simulator": {"isaaclab": 3, "bigsim": 1}}
+    expected = "auto -> 16, capped at 3 isaaclab processes per pool (cluster.max_workers_by_simulator)"
+    assert cap_simulator_workers(16, "auto -> 16", "isaaclab", cluster, requested="auto") == (3, expected)
+    assert cap_simulator_workers(16, "auto -> 16", "bigsim", cluster)[0] == 1                         # any simulator, by config
+    assert cap_simulator_workers(16, "auto -> 16", "isaaclab", {"max_workers_by_simulator": {"isaaclab": 5}})[0] == 5
+    assert cap_simulator_workers(16, "auto -> 16", "isaaclab", {}) == (16, "auto -> 16")              # a machine without a cap
+    assert cap_simulator_workers(2, "workers=2", "isaaclab", cluster, requested=2) == (2, "workers=2")     # below the cap
+    n, why = cap_simulator_workers(8, "workers=8", "isaaclab", cluster, requested=8)                  # explicit: kept, warned
     assert n == 8 and "WARNING" in why
-    assert cap_simulator_workers(16, "auto -> 16", "robosuite", {}) == (16, "auto -> 16")            # other simulators
-    with pytest.raises(ValueError, match="isaaclab_max_workers"):
-        cap_simulator_workers(4, "", "isaaclab", {"isaaclab_max_workers": 0})
+    assert cap_simulator_workers(16, "auto -> 16", "robosuite", cluster) == (16, "auto -> 16")        # not named: no cap
+    with pytest.raises(ValueError, match="max_workers_by_simulator.isaaclab"):
+        cap_simulator_workers(4, "", "isaaclab", {"max_workers_by_simulator": {"isaaclab": 0}})
 
 
 def test_run_pool_applies_the_isaac_sim_cap(pool, tmp_path, monkeypatch, capsys):
@@ -411,14 +417,16 @@ def test_run_pool_applies_the_isaac_sim_cap(pool, tmp_path, monkeypatch, capsys)
         return original(generator, pending, output, env, workers, retries)
 
     monkeypatch.setattr(runner, "_run_pending", spy)
-    monkeypatch.setattr(FakeGenerator, "simulator", "isaaclab", raising=False)
     cfg = _cfg(tmp_path)
-    cfg.cluster.workers, cfg.cluster.max_workers = "auto", 16
+    cfg.generator.simulator = "isaaclab"                      # the generator config names its simulator
+    cfg.cluster.workers, cfg.cluster.max_workers, cfg.cluster.max_workers_by_simulator = "auto", 16, {"isaaclab": 3}
     monkeypatch.setattr(runner, "resolve_workers", lambda value, cap: (16, "auto -> 16"))
     pool(cfg)
-    assert seen["workers"] == 3 and "capped at 3 Isaac Sim processes" in capsys.readouterr().out
-    monkeypatch.setattr(FakeGenerator, "simulator", "robosuite", raising=False)
-    pool(_cfg(tmp_path / "other"))
+    assert seen["workers"] == 3 and "capped at 3 isaaclab processes" in capsys.readouterr().out
+    other = _cfg(tmp_path / "other")
+    other.generator.simulator = "robosuite"
+    other.cluster.max_workers_by_simulator = {"isaaclab": 3}
+    pool(other)
     assert seen["workers"] == 16
 
 
@@ -441,5 +449,9 @@ def test_a_chunk_that_stops_the_pool_skips_the_chunks_not_started(monkeypatch, t
 def test_the_isaac_cluster_caps_isaac_sim_at_three_processes():
     import yaml
 
-    cluster = yaml.safe_load((Path(__file__).resolve().parents[2] / "configs/machine/cluster/isaac.yaml").read_text())
-    assert cluster["isaaclab_max_workers"] == 3 and cluster["max_workers"] == 16
+    root = Path(__file__).resolve().parents[2] / "configs"
+    cluster = yaml.safe_load((root / "machine/cluster/isaac.yaml").read_text())
+    assert cluster["max_workers_by_simulator"] == {"isaaclab": 3} and cluster["max_workers"] == 16 and "isaaclab_max_workers" not in cluster
+    # the key of the cap is the simulator the Isaac Lab generator configs name
+    for name in ("softmimicgen", "dexmimicgen"):
+        assert yaml.safe_load((root / f"experiment/generator/{name}.yaml").read_text())["simulator"] == "isaaclab"

@@ -65,23 +65,29 @@ comma  := ,
 # (/etc/vulkan/icd.d/nvidia_icd.json) into the container, which `--gpus all` alone did not on the Isaac server (2026-10-28).
 # ISAAC_GPU (a GPU index, e.g. exported by scripts/run_isaaclab_baseline.sh from its GPU variable) exposes only that GPU to
 # the container, where it is device 0; empty exposes all GPUs and Isaac Sim takes device 0 of the host.
-# On the shared Isaac server an empty ISAAC_GPU would put Isaac Sim on host GPU 0, which other users hold, so the targets that
-# start Isaac Sim (generate and with it coefficients, verify-baseline, resets, eval, validate, evaluate, check-scene) refuse
-# to run there without it (ISAAC_GPU_CHECK, the first line of their recipes; validate and evaluate stop before the policy
-# server starts). The server is CLUSTER=isaac, or any CLUSTER on a host where the isaac cluster's data_root exists (a run
-# that forgot CLUSTER=isaac and got the default, local).
-ISAAC_GPU_CHECK = @true
-ISAAC_HOST_ROOT := $(call config_value,machine/cluster/isaac,data_root)
-ON_ISAAC_HOST   := $(if $(filter isaac,$(strip $(CLUSTER))),1,$(if $(ISAAC_HOST_ROOT),$(if $(wildcard $(ISAAC_HOST_ROOT)),1,),))
+# On a machine whose GPUs are shared (cluster config `shared_gpus: true`: the Isaac server) an empty ISAAC_GPU would put Isaac
+# Sim on host GPU 0, which other users hold. A generator whose simulator container takes one GPU names the make variable that
+# chooses it (generator config `gpu_variable`: ISAAC_GPU for the Isaac Lab generators), and the targets that start the
+# simulator (generate and with it coefficients, resets, eval, validate, evaluate, check-scene) refuse to run on such a machine
+# without it (GPU_CHOICE_CHECK, the first line of their recipes; validate and evaluate stop before the policy server starts).
+# The machine is recognised by CLUSTER, or by the data_root of a shared_gpus cluster existing on this host (a run that forgot
+# CLUSTER and got the default, local).
+GPU_CHOICE_CHECK = @true
+GPU_VARIABLE         := $(call config_value,experiment/generator/$(GENERATOR),gpu_variable)
+SHARED_GPU_CLUSTERS  := $(basename $(notdir $(shell grep -lE '^shared_gpus:[[:space:]]*true' $(REPO)/configs/machine/cluster/*.yaml 2>/dev/null)))
+SHARED_GPU_HOST_ROOTS := $(foreach c,$(SHARED_GPU_CLUSTERS),$(call config_value,machine/cluster/$(c),data_root))
+ON_SHARED_GPU_HOST   := $(if $(filter $(SHARED_GPU_CLUSTERS),$(strip $(CLUSTER))),1,$(if $(strip $(foreach r,$(SHARED_GPU_HOST_ROOTS),$(wildcard $(r)))),1,))
+ifneq ($(GPU_VARIABLE),)
+ifeq ($(ON_SHARED_GPU_HOST),1)
+ifeq ($(strip $($(GPU_VARIABLE))),)
+GPU_CHOICE_CHECK = @echo "shared-GPU machine (CLUSTER=$(strip $(CLUSTER))) with GENERATOR=$(GENERATOR): set $(GPU_VARIABLE) to the GPU index its simulator may use (e.g. $(GPU_VARIABLE)=6); without it the container sees every GPU and the simulator takes host GPU 0" >&2; exit 1
+endif
+endif
+endif
 ifneq (,$(filter isaaclab-%,$(IMAGE)))
 DOCKER_GPU   = --runtime=nvidia --gpus $(if $(ISAAC_GPU),device=$(ISAAC_GPU),all) -e NVIDIA_VISIBLE_DEVICES=$(or $(ISAAC_GPU),all) -e NVIDIA_DRIVER_CAPABILITIES=all
 DOCKER_EXTRA = --shm-size 8g
 SING_NV      = --nv
-ifeq ($(ON_ISAAC_HOST),1)
-ifeq ($(strip $(ISAAC_GPU)),)
-ISAAC_GPU_CHECK = @echo "Isaac server (CLUSTER=$(strip $(CLUSTER))) with image $(IMAGE): set ISAAC_GPU to the GPU index Isaac Sim may use (e.g. ISAAC_GPU=6); without it the container sees every GPU and Isaac Sim takes host GPU 0" >&2; exit 1
-endif
-endif
 endif
 
 # -- CP-Gen image: the GPU also for generation and evaluation (cuRobo motion planning). CP-Gen writes into two folders of
@@ -207,12 +213,12 @@ sources:  ## download and prepare the source demonstrations of TASK
 	$(PREP) && $(CONTAINER_RUN) sources generator=$(GENERATOR) task=$(TASK)
 
 generate:  ## generate one pool (TASK, SCENE, SELECTION=official|ours, METHOD, GENERATION, OVERRIDES); builds the SkillMix rule file first when METHOD needs a missing one
-	$(ISAAC_GPU_CHECK)
+	$(GPU_CHOICE_CHECK)
 	@METHOD=$(strip $(METHOD)) OVERRIDES="$(OVERRIDES)" GENERATOR=$(GENERATOR) IMAGE=$(IMAGE) TASK=$(TASK) SCENE=$(strip $(SCENE)) CLUSTER=$(CLUSTER) scripts/ensure_coefficients.sh
 	$(PREP) && $(CONTAINER_RUN) generate $(GEN_ARGS)
 
-verify-baseline:  ## official generator vs adapter with method=none on one chunk; must be identical (MimicGen; refused for Isaac Lab)
-	$(if $(filter isaaclab-%,$(IMAGE)),@echo "verify-baseline: not for the Isaac Lab generators (GENERATOR=$(GENERATOR)): Isaac Sim is not byte-deterministic and the check reads MimicGen's important_stats.json (tmg/README.md)" >&2; exit 1,@true)
+verify-baseline:  ## official generator vs adapter with method=none on one chunk; must be identical (generators with byte_verify: true)
+	$(if $(filter true,$(call config_value,experiment/generator/$(GENERATOR),byte_verify)),@true,@echo "verify-baseline: GENERATOR=$(GENERATOR) does not declare byte_verify: true in its generator config (its reruns are not byte-identical, or it writes no important_stats.json; tmg/README.md)" >&2; exit 1)
 	$(PREP) && $(CONTAINER_RUN) verify_baseline generator=$(GENERATOR) task=$(TASK) scene=$(SCENE) selection=$(SELECTION) generation=$(GENERATION) cluster=$(CLUSTER) $(OVERRIDES)
 
 fit-coefficients:  ## fit TASK's SkillMix rule on its randmix pool (skillmix_randmix/pool_randmix) and unmix pool (none/GENERATION), SELECTION=ours GENERATION=pool_unmix; writes coefficients/<task>.yaml
@@ -225,7 +231,7 @@ dataset:  ## write a training dataset from the finished pool (TASK, SCENE, METHO
 	$(PREP) && $(CONTAINER_RUN) dataset $(GEN_ARGS) observation=$(OBSERVATION)
 
 resets:  ## draw the fixed evaluation scenes of (TASK, SCENE) in the simulator image
-	$(ISAAC_GPU_CHECK)
+	$(GPU_CHOICE_CHECK)
 	$(PREP) && $(CONTAINER_RUN) resets generator=$(GENERATOR) task=$(TASK) scene=$(SCENE) cluster=$(CLUSTER) $(OVERRIDES)
 
 train:  ## train POLICY on the dataset of (TASK, SCENE, METHOD, GENERATION, OBSERVATION) in the train image (GPU)
@@ -235,15 +241,15 @@ select-checkpoint:  ## choose the checkpoint of the run (TASK, SCENE, METHOD, GE
 	$(TRAIN_RUN) select_checkpoint $(GEN_ARGS) observation=$(OBSERVATION) policy=$(POLICY) seed=$(SEED)
 
 validate:  ## evaluate checkpoint CKPT of run RUN on the validation scenes: policy server (train image) + rollouts (simulator image)
-	$(ISAAC_GPU_CHECK)
+	$(GPU_CHOICE_CHECK)
 	RUN=$(RUN) CKPT=$(CKPT) TASK=$(TASK) SCENE=$(SCENE) OBSERVATION=$(OBSERVATION) CLUSTER=$(CLUSTER) SPLIT=val $(REPO)/scripts/evaluate_checkpoint.sh
 
 evaluate:  ## evaluate checkpoint CKPT on the test scenes (SPLIT=test)
-	$(ISAAC_GPU_CHECK)
+	$(GPU_CHOICE_CHECK)
 	RUN=$(RUN) CKPT=$(CKPT) TASK=$(TASK) SCENE=$(SCENE) OBSERVATION=$(OBSERVATION) CLUSTER=$(CLUSTER) SPLIT=$(SPLIT) $(REPO)/scripts/evaluate_checkpoint.sh
 
 eval:  ## play the fixed scenes against a running policy server (OBSERVATION as trained; OVERRIDES: checkpoint=... split=val|test ...)
-	$(ISAAC_GPU_CHECK)
+	$(GPU_CHOICE_CHECK)
 	$(PREP) && $(CONTAINER_RUN) eval generator=$(GENERATOR) task=$(TASK) scene=$(SCENE) observation=$(OBSERVATION) cluster=$(CLUSTER) $(OVERRIDES)
 
 PORT        ?= 8765
@@ -282,7 +288,7 @@ print-runtime-data-root:
 	@echo $(if $(filter native,$(RUNTIME)),$(DATA_ROOT),/data)
 
 check-scene:  ## reset the (TASK, SCENE) environment many times and report placement problems (OVERRIDES: resets=...)
-	$(ISAAC_GPU_CHECK)
+	$(GPU_CHOICE_CHECK)
 	$(PREP) && $(CONTAINER_RUN) check_scene generator=$(GENERATOR) task=$(TASK) scene=$(SCENE) $(OVERRIDES)
 
 show:  ## print the composed generate config

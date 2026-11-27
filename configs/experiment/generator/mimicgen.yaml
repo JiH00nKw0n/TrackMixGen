@@ -1,6 +1,7 @@
 # MimicGen (NVlabs/mimicgen@72bd767) on robosuite 1.4.1 / MuJoCo 2.3.2.
 name: mimicgen
 simulator: robosuite
+byte_verify: true               # tmg verify_baseline: a rerun with the same seed is byte-identical and writes important_stats.json
 image: tmg/robosuite
 package: mimicgen
 commit: 72bd767

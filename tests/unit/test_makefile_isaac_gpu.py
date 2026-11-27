@@ -1,4 +1,6 @@
-"""The Makefile refuses the Isaac Sim targets on the shared Isaac server without ISAAC_GPU (dry runs, nothing executes)."""
+"""The Makefile refuses the simulator targets of a generator that takes one GPU (generator config ``gpu_variable``) on a
+machine with shared GPUs (cluster config ``shared_gpus``) without that variable, and verify-baseline for a generator that
+does not declare ``byte_verify`` (dry runs, nothing executes)."""
 import os
 import shutil
 import subprocess
@@ -38,15 +40,30 @@ def test_the_isaac_host_is_recognised_by_its_data_root_whatever_the_cluster(tmp_
     import yaml
 
     root = yaml.safe_load((REPO / "configs/machine/cluster/isaac.yaml").read_text())["data_root"]
-    out = dry_run("generate", "GENERATOR=softmimicgen", f"ISAAC_HOST_ROOT={tmp_path}")       # stands in for that root
+    out = dry_run("generate", "GENERATOR=softmimicgen", f"SHARED_GPU_HOST_ROOTS={tmp_path}")       # stands in for that root
     assert "set ISAAC_GPU" in out and "CLUSTER=local" in out
-    assert "set ISAAC_GPU" not in dry_run("generate", "GENERATOR=softmimicgen", f"ISAAC_HOST_ROOT={tmp_path / 'absent'}")
+    assert "set ISAAC_GPU" not in dry_run("generate", "GENERATOR=softmimicgen", f"SHARED_GPU_HOST_ROOTS={tmp_path / 'absent'}")
     if not Path(root).exists():                                     # not on the Isaac server: the default run is allowed
         assert "set ISAAC_GPU" not in dry_run("generate", "GENERATOR=softmimicgen")
 
 
-def test_verify_baseline_is_refused_for_the_isaac_lab_generators():
-    for generator in ("softmimicgen", "dexmimicgen"):
+def test_verify_baseline_is_refused_for_generators_that_do_not_declare_byte_verify():
+    for generator in ("softmimicgen", "dexmimicgen", "cpgen"):
         out = dry_run("verify-baseline", f"GENERATOR={generator}", "CLUSTER=isaac", isaac_gpu="6")
-        assert "not for the Isaac Lab generators" in out.splitlines()[0] and "exit 1" in out.splitlines()[0]
-    assert "not for the Isaac Lab generators" not in dry_run("verify-baseline", "GENERATOR=mimicgen")
+        assert "does not declare byte_verify" in out.splitlines()[0] and "exit 1" in out.splitlines()[0]
+    assert "does not declare byte_verify" not in dry_run("verify-baseline", "GENERATOR=mimicgen")
+
+
+def test_the_guard_reads_the_configs_not_generator_cluster_or_image_names():
+    """Which generators need a GPU choice and which machines share their GPUs are config keys: the Makefile's guard names
+    no simulator, image or cluster."""
+    import yaml
+
+    text = (REPO / "Makefile").read_text()
+    guard = text[text.index("GPU_CHOICE_CHECK = @true"):text.index("ifneq (,$(filter isaaclab-%,$(IMAGE)))")]
+    assert "isaac" not in guard.lower().replace("isaac_gpu", "") and "gpu_variable" in guard and "shared_gpus" in guard
+    assert "ISAAC_GPU_CHECK" not in text and "ON_ISAAC_HOST" not in text
+    generators = {p.stem: yaml.safe_load(p.read_text()).get("gpu_variable") for p in (REPO / "configs/experiment/generator").glob("*.yaml")}
+    assert generators == {"softmimicgen": "ISAAC_GPU", "dexmimicgen": "ISAAC_GPU", "mimicgen": None, "cpgen": None}
+    clusters = {p.stem: yaml.safe_load(p.read_text()).get("shared_gpus", False) for p in (REPO / "configs/machine/cluster").glob("*.yaml")}
+    assert [name for name, shared in clusters.items() if shared] == ["isaac"]

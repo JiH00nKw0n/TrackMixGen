@@ -12,7 +12,7 @@ from tests.unit.test_runner import FakeGenerator, FakeLaunch
 from tmg.core.chunks import CHUNK_SPEC, Chunk, read_json
 from tmg.generation import runner, verify
 
-CFG = {"generator": {"name": "fake"}, "task": {"name": "square"}, "scene": {"name": "ours"}, "method": {"name": "none"},
+CFG = {"generator": {"name": "fake", "byte_verify": True}, "task": {"name": "square"}, "scene": {"name": "ours"}, "method": {"name": "none"},
        "generation": {"name": "quick", "attempts": 2, "seed_offset": 4}}
 
 
@@ -127,10 +127,24 @@ def test_verify_baseline_reports_differing_stats_and_datasets(baseline, tmp_path
     assert read_json(tmp_path / "verify" / "VERIFY.json")["identical"] is False
 
 
-def test_verify_baseline_refuses_an_isaac_lab_generator_before_any_chunk_runs(tmp_path, monkeypatch):
+def test_verify_baseline_refuses_a_generator_that_does_not_declare_byte_verify_before_any_chunk_runs(tmp_path, monkeypatch):
+    """The capability is the generator config's ``byte_verify`` (read by the adapter and by the Makefile), not the name of
+    its simulator: only MimicGen declares it."""
+    import yaml
+
     calls = []
-    fake = type("G", (), {"name": "dexmimicgen", "simulator": "isaaclab", "check_sources": lambda self: calls.append(1) or []})()
-    monkeypatch.setattr(verify, "make_generator", lambda plain: fake)
-    with pytest.raises(RuntimeError, match="Isaac Lab generator"):
-        verify.verify_baseline(_baseline_cfg(tmp_path))
-    assert calls == []
+
+    class Unverifiable(FakeGenerator):
+        def check_sources(self):
+            calls.append(1)
+            return []
+
+    monkeypatch.setattr(verify, "make_generator", lambda plain: Unverifiable(plain))
+    cfg = _baseline_cfg(tmp_path)
+    cfg.generator = {"name": "fake", "simulator": "robosuite"}             # whatever the simulator: not declared, refused
+    with pytest.raises(RuntimeError, match="generator.byte_verify"):
+        verify.verify_baseline(cfg)
+    assert calls == [] and not hasattr(verify, "supports_verify")
+    root = Path(__file__).resolve().parents[2] / "configs/experiment/generator"
+    declared = {p.stem: yaml.safe_load(p.read_text()).get("byte_verify") for p in root.glob("*.yaml")}
+    assert declared == {"mimicgen": True, "cpgen": False, "softmimicgen": False, "dexmimicgen": False}
