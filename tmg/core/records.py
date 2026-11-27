@@ -5,6 +5,10 @@ Layout under ``<chunk>/records/``::
     attempts.jsonl        one line per attempt: scalars and per-subtask metadata (keys below)
     attempt_000012.npz    per-step arrays of attempt 12 (arrays below)
 
+Every attempt line carries ``record_version`` (``RECORD_VERSION``); a line without it is version 1 (written before
+2026-11-27). Version 2 added the field and, for the runtimes that test whether a hand holds an object, the hold rule and
+its verdicts (``tmg/generation/method/fit_records.py`` reads both versions).
+
 The recorder is fed by the generator adapters; it never imports a simulator. Everything is written when the
 attempt ends (``flush``), so a process that dies mid-attempt leaves the previous attempts intact. A rerun of
 the same chunk starts from attempt 0 again, so ``configure`` wipes stale partial records of that chunk.
@@ -40,6 +44,7 @@ from tmg.core.io_json import read_jsonl
 from tmg.core.layout import ATTEMPTS_JSONL, RECORDS_DIR  # noqa: F401  re-exported: callers import them from here
 from tmg.core.poses import pose_to_list
 
+RECORD_VERSION = 2                    # schema version of an attempts.jsonl line (module docstring)
 NPZ_FORMAT = "attempt_%06d.npz"
 NPZ_GLOB = "attempt_*.npz"
 # Written by the Isaac Lab runtimes next to the attempt npz (tmg/generation/generators/isaaclab/runtime.py writes the
@@ -260,6 +265,7 @@ class AttemptRecorder:
             n_failure_so_far=self.n_failure,
             npz=NPZ_FORMAT % self.attempt,
             eef_names=list(self.eef_names),
+            record_version=RECORD_VERSION,
         )
         line.update(self.extra)
         if self.dir is None:
