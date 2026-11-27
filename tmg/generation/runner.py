@@ -312,7 +312,7 @@ def run_pool(cfg) -> dict:
     pending = [c for c in chunks if states[c.index] != "done" and (own is None or c.index in own)]
     workers, explained = resolve_workers(cluster.get("workers", "auto"), int(cluster.get("max_workers", 16)))
     workers, explained = cap_simulator_workers(workers, explained, generator.simulator, cluster,
-                                               requested=cluster.get("workers", "auto"))
+                                               requested=cluster.get("workers", "auto"), default_cap=generator.default_max_workers)
     done = sum(1 for c in chunks if states[c.index] == "done")
     mine = f" (shard {shard[0]}/{shard[1]}: {len(own)} chunks)" if own is not None else ""
     print(f"[tmg] pool {output}: {len(chunks)} chunks, {done} done, {len(pending)} to run here{mine}; "

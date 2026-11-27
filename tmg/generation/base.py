@@ -102,8 +102,10 @@ class SyntheticDataGenerator(ABC):
 
     What shared code needs to know about a generator is asked here, never derived from its name or its simulator's:
     :meth:`fit_layout` (how ``tmg fit_coefficients`` reads its records), :attr:`simulator` (``generator.simulator``, the key
-    of per-simulator machine settings such as ``cluster.max_workers_by_simulator``) and :attr:`supports_byte_verify`
-    (``generator.byte_verify``: ``tmg verify_baseline`` can compare its output with the official generator's byte for byte).
+    of per-simulator machine settings such as ``cluster.max_workers_by_simulator``), :attr:`default_max_workers`
+    (``generator.default_max_workers``: how many of its chunk processes a machine runs at once unless the machine says
+    otherwise) and :attr:`supports_byte_verify` (``generator.byte_verify``: ``tmg verify_baseline`` can compare its output
+    with the official generator's byte for byte).
     """
 
     name: str = "abstract"
@@ -125,6 +127,15 @@ class SyntheticDataGenerator(ABC):
     def simulator(self) -> str:
         """``generator.simulator`` of the generator config (empty when it names none)."""
         return str(self.generator_cfg.get("simulator") or "")
+
+    @property
+    def default_max_workers(self) -> int | None:
+        """``generator.default_max_workers``: the most chunk processes of this generator one pool runs at once with
+        ``workers: auto`` on a machine that names no cap of its own for the simulator (None: the machine's
+        ``max_workers`` alone). A generator whose chunk process is heavy (an Isaac Sim instance) declares it, so no
+        machine starts dozens of them for lack of a setting."""
+        value = self.generator_cfg.get("default_max_workers")
+        return None if value is None else int(value)
 
     @property
     def supports_byte_verify(self) -> bool:

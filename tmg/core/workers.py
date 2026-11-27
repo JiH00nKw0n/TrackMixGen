@@ -23,24 +23,28 @@ def resolve_workers(value, max_workers: int) -> tuple[int, str]:
     return n, f"workers={n}"
 
 
-def cap_simulator_workers(n: int, explained: str, simulator: str, cluster: dict, requested=None) -> tuple[int, str]:
-    """The chunk processes a pool runs at once, capped per simulator by the machine's config.
+def cap_simulator_workers(n: int, explained: str, simulator: str, cluster: dict, requested=None,
+                          default_cap: int | None = None) -> tuple[int, str]:
+    """The chunk processes a pool runs at once, capped for the generator's simulator.
 
-    ``cluster.max_workers_by_simulator`` maps a generator's simulator (``generator.simulator``) to the most chunk
-    processes of that simulator one ``run_pool`` call (one ``make generate``) runs at once; a simulator it does not name
-    keeps ``n``. The Isaac server caps Isaac Lab there: every chunk is one Isaac Sim process of about 15 GB of host memory
-    and 12 at once ran it out of memory (2026-11). The cap is per pool runner, not per GPU, so two pools started at once
-    (two GPUs, or two shards) run up to twice as many. ``workers: auto`` is capped; an explicit ``workers: N`` above the
-    cap is a deliberate choice (a machine with more memory) and is kept, with a warning in the explanation the runner
-    prints."""
-    caps = dict(cluster.get("max_workers_by_simulator") or {})
-    if simulator not in caps or caps[simulator] is None:
+    The cap is the machine's ``cluster.max_workers_by_simulator[simulator]`` when it names one, else the generator's own
+    ``default_cap`` (``generator.default_max_workers``; the Isaac Lab generators declare it: every chunk is one Isaac Sim
+    process of about 15 GB of host memory, and 12 at once ran the Isaac server out of memory, 2026-11). A machine with
+    more memory raises it in its cluster file; a generator that declares none and a machine that names none leave ``n``.
+    The cap bounds the chunk processes of one ``run_pool`` call (one ``make generate``): it is per pool runner, not per
+    GPU, so two pools started at once (two GPUs, or two shards) run up to twice as many. ``workers: auto`` is capped; an
+    explicit ``workers: N`` above the cap is a deliberate choice and is kept, with a warning in the explanation the
+    runner prints."""
+    by_machine = dict(cluster.get("max_workers_by_simulator") or {}).get(simulator)
+    cap, source = ((by_machine, f"cluster.max_workers_by_simulator.{simulator}") if by_machine is not None
+                   else (default_cap, "generator.default_max_workers"))
+    if cap is None:
         return n, explained
-    cap = int(caps[simulator])
+    cap = int(cap)
     if cap < 1:
-        raise ValueError(f"cluster.max_workers_by_simulator.{simulator} must be >= 1, got {cap}")
+        raise ValueError(f"{source} must be >= 1, got {cap}")
     if n <= cap:
         return n, explained
     if requested not in (None, "auto"):
-        return n, f"{explained} (WARNING: above cluster.max_workers_by_simulator.{simulator}={cap})"
-    return cap, f"{explained}, capped at {cap} {simulator} processes per pool (cluster.max_workers_by_simulator)"
+        return n, f"{explained} (WARNING: above {source}={cap})"
+    return cap, f"{explained}, capped at {cap} {simulator or 'chunk'} processes per pool ({source})"

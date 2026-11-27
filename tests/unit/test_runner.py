@@ -387,25 +387,28 @@ def test_run_pool_rejects_a_renderer_other_than_egl(pool, tmp_path, monkeypatch,
         pool(_cfg(tmp_path))
 
 
-def test_chunk_processes_are_capped_per_simulator_by_the_cluster_config_unless_set_explicitly():
-    """The cap is the machine's ``max_workers_by_simulator[generator.simulator]``: no simulator is named in the code and
-    no default hides in it."""
+def test_chunk_processes_are_capped_by_the_generators_default_or_the_clusters_override():
+    """The cap is the generator's own ``default_max_workers`` unless the machine names one for the simulator
+    (``max_workers_by_simulator``); no simulator is named in the code and no default hides in it."""
     import tmg.core.workers as workers
     from tmg.core.workers import cap_simulator_workers
 
     assert not hasattr(workers, "ISAACLAB_MAX_WORKERS")
-    cluster = {"max_workers_by_simulator": {"isaaclab": 3, "bigsim": 1}}
-    expected = "auto -> 16, capped at 3 isaaclab processes per pool (cluster.max_workers_by_simulator)"
-    assert cap_simulator_workers(16, "auto -> 16", "isaaclab", cluster, requested="auto") == (3, expected)
+    by_default = "auto -> 48, capped at 3 isaaclab processes per pool (generator.default_max_workers)"
+    assert cap_simulator_workers(48, "auto -> 48", "isaaclab", {}, requested="auto", default_cap=3) == (3, by_default)
+    cluster = {"max_workers_by_simulator": {"isaaclab": 6, "bigsim": 1}}
+    by_machine = "auto -> 16, capped at 6 isaaclab processes per pool (cluster.max_workers_by_simulator.isaaclab)"
+    assert cap_simulator_workers(16, "auto -> 16", "isaaclab", cluster, requested="auto", default_cap=3) == (6, by_machine)
     assert cap_simulator_workers(16, "auto -> 16", "bigsim", cluster)[0] == 1                         # any simulator, by config
-    assert cap_simulator_workers(16, "auto -> 16", "isaaclab", {"max_workers_by_simulator": {"isaaclab": 5}})[0] == 5
-    assert cap_simulator_workers(16, "auto -> 16", "isaaclab", {}) == (16, "auto -> 16")              # a machine without a cap
-    assert cap_simulator_workers(2, "workers=2", "isaaclab", cluster, requested=2) == (2, "workers=2")     # below the cap
-    n, why = cap_simulator_workers(8, "workers=8", "isaaclab", cluster, requested=8)                  # explicit: kept, warned
+    assert cap_simulator_workers(16, "auto -> 16", "isaaclab", {}) == (16, "auto -> 16")              # no cap declared anywhere
+    assert cap_simulator_workers(16, "auto -> 16", "robosuite", cluster) == (16, "auto -> 16")        # not named, no default
+    assert cap_simulator_workers(2, "workers=2", "isaaclab", {}, requested=2, default_cap=3) == (2, "workers=2")   # below the cap
+    n, why = cap_simulator_workers(8, "workers=8", "isaaclab", {}, requested=8, default_cap=3)        # explicit: kept, warned
     assert n == 8 and "WARNING" in why
-    assert cap_simulator_workers(16, "auto -> 16", "robosuite", cluster) == (16, "auto -> 16")        # not named: no cap
     with pytest.raises(ValueError, match="max_workers_by_simulator.isaaclab"):
         cap_simulator_workers(4, "", "isaaclab", {"max_workers_by_simulator": {"isaaclab": 0}})
+    with pytest.raises(ValueError, match="default_max_workers"):
+        cap_simulator_workers(4, "", "isaaclab", {}, default_cap=0)
 
 
 def test_run_pool_applies_the_isaac_sim_cap(pool, tmp_path, monkeypatch, capsys):
@@ -418,14 +421,13 @@ def test_run_pool_applies_the_isaac_sim_cap(pool, tmp_path, monkeypatch, capsys)
 
     monkeypatch.setattr(runner, "_run_pending", spy)
     cfg = _cfg(tmp_path)
-    cfg.generator.simulator = "isaaclab"                      # the generator config names its simulator
-    cfg.cluster.workers, cfg.cluster.max_workers, cfg.cluster.max_workers_by_simulator = "auto", 16, {"isaaclab": 3}
+    cfg.generator.simulator, cfg.generator.default_max_workers = "isaaclab", 3      # the generator config declares both
+    cfg.cluster.workers, cfg.cluster.max_workers = "auto", 16
     monkeypatch.setattr(runner, "resolve_workers", lambda value, cap: (16, "auto -> 16"))
     pool(cfg)
     assert seen["workers"] == 3 and "capped at 3 isaaclab processes" in capsys.readouterr().out
     other = _cfg(tmp_path / "other")
     other.generator.simulator = "robosuite"
-    other.cluster.max_workers_by_simulator = {"isaaclab": 3}
     pool(other)
     assert seen["workers"] == 16
 
@@ -446,12 +448,31 @@ def test_a_chunk_that_stops_the_pool_skips_the_chunks_not_started(monkeypatch, t
     assert len(calls) == 1 and [r.get("skipped", False) for r in results] == [False, True, True, True]
 
 
-def test_the_isaac_cluster_caps_isaac_sim_at_three_processes():
+def test_no_cluster_file_repeats_the_isaac_lab_cap():
+    """The cap of three Isaac Sim processes is written once, in the Isaac Lab generators' shared defaults."""
     import yaml
 
     root = Path(__file__).resolve().parents[2] / "configs"
-    cluster = yaml.safe_load((root / "machine/cluster/isaac.yaml").read_text())
-    assert cluster["max_workers_by_simulator"] == {"isaaclab": 3} and cluster["max_workers"] == 16 and "isaaclab_max_workers" not in cluster
-    # the key of the cap is the simulator the Isaac Lab generator configs name
-    for name in ("softmimicgen", "dexmimicgen"):
-        assert yaml.safe_load((root / f"experiment/generator/{name}.yaml").read_text())["simulator"] == "isaaclab"
+    for path in sorted((root / "machine/cluster").glob("*.yaml")):
+        assert "max_workers_by_simulator" not in yaml.safe_load(path.read_text()), path.name
+    assert yaml.safe_load((root / "experiment/generator/isaaclab_common.yaml").read_text())["default_max_workers"] == 3
+
+
+def test_the_isaac_lab_generators_cap_their_own_chunk_processes(tmp_path, monkeypatch):
+    """default_max_workers is the generator's (the shared Isaac Lab defaults file), so a cluster file that says nothing
+    about the simulator (a100: max_workers 48) still runs three Isaac Sim processes with workers: auto."""
+    from tmg.config import compose, resolved
+    from tmg.core.workers import cap_simulator_workers
+    from tmg.generation.generators import make_generator
+
+    monkeypatch.setenv("TMG_DATA_ROOT", str(tmp_path))
+    for generator, task in (("softmimicgen", "rope"), ("dexmimicgen", "bottle_door")):
+        cfg = resolved(compose("generate", [f"generator={generator}", f"task={task}", "scene=official", "method=none",
+                                            "generation=test/pilot20", "cluster=a100"]))
+        gen = make_generator(cfg)
+        assert gen.default_max_workers == 3 and gen.simulator == "isaaclab" and "max_workers_by_simulator" not in cfg["cluster"]
+        n, why = cap_simulator_workers(48, "auto -> 48", gen.simulator, cfg["cluster"], requested=cfg["cluster"]["workers"],
+                                       default_cap=gen.default_max_workers)
+        assert n == 3 and "generator.default_max_workers" in why
+    mimicgen = make_generator(resolved(compose("generate", ["generator=mimicgen", "task=square", "cluster=a100"])))
+    assert mimicgen.default_max_workers is None
