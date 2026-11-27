@@ -51,6 +51,28 @@ def test_the_shared_gpu_machine_is_recognised_by_its_declared_hostname_whatever_
     assert "data_root" not in text[text.index("GPU_CHOICE_CHECK = @true"):text.index("ifneq ($(GPU_VARIABLE),)")]
 
 
+def test_the_host_name_is_asked_of_the_machine_and_cut_at_the_first_dot():
+    """A HOSTNAME in the environment (often fully qualified, or simply wrong) is not used: the Makefile asks the machine
+    (`hostname -s`, assigned with `:=`). A name given on the command line is cut at its first dot, so a fully qualified
+    name still matches the short name the cluster config declares and cannot switch the guard off."""
+    import socket
+    import yaml
+
+    name = yaml.safe_load((REPO / "configs/machine/cluster/isaac.yaml").read_text())["hostname"]
+    assert "set ISAAC_GPU" in dry_run("generate", "GENERATOR=softmimicgen", f"HOSTNAME={name}.example.org")
+    assert "set ISAAC_GPU" in dry_run("generate", "GENERATOR=softmimicgen", f"HOSTNAME={name}")
+    text = (REPO / "Makefile").read_text()
+    assert "HOSTNAME             := $(shell hostname -s" in text and "HOSTNAME ?=" not in text and "HOSTNAME             ?=" not in text
+
+    def with_environment(value):
+        env = {k: v for k, v in os.environ.items() if k not in ("ISAAC_GPU", "CLUSTER", "MAKEFLAGS")}
+        return subprocess.run(["make", "-n", "-C", str(REPO), "generate", "GENERATOR=softmimicgen"], env={**env, "HOSTNAME": value},
+                              capture_output=True, text=True, check=True).stdout
+
+    if socket.gethostname().split(".")[0] != name:                  # not on that machine: the environment cannot claim to be it
+        assert "set ISAAC_GPU" not in with_environment(name) and "set ISAAC_GPU" not in with_environment(f"{name}.example.org")
+
+
 def test_verify_baseline_is_refused_for_generators_that_do_not_declare_byte_verify():
     for generator in ("softmimicgen", "dexmimicgen", "cpgen"):
         out = dry_run("verify-baseline", f"GENERATOR={generator}", "CLUSTER=isaac", isaac_gpu="6")

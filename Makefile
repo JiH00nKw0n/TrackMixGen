@@ -75,8 +75,11 @@ comma  := ,
 GPU_CHOICE_CHECK = @true
 GPU_VARIABLE         := $(call config_value,experiment/generator/$(GENERATOR),gpu_variable)
 SHARED_GPU_CLUSTERS  := $(basename $(notdir $(shell grep -lE '^shared_gpus:[[:space:]]*true' $(REPO)/configs/machine/cluster/*.yaml 2>/dev/null)))
-HOSTNAME             ?= $(shell hostname -s 2>/dev/null)
-HOST_CLUSTERS        := $(foreach c,$(SHARED_GPU_CLUSTERS),$(if $(filter $(HOSTNAME),$(call config_value,machine/cluster/$(c),hostname)),$(c),))
+# The host's short name, always asked of the machine (`:=`, so a HOSTNAME in the environment, which may be a fully qualified
+# name, is not used) and cut at the first dot wherever it comes from (a command-line HOSTNAME=..., as the tests pass).
+HOSTNAME             := $(shell hostname -s 2>/dev/null)
+HOST_SHORT           := $(firstword $(subst ., ,$(HOSTNAME)))
+HOST_CLUSTERS        := $(foreach c,$(SHARED_GPU_CLUSTERS),$(if $(filter $(HOST_SHORT),$(firstword $(subst ., ,$(call config_value,machine/cluster/$(c),hostname)))),$(c),))
 ON_SHARED_GPU_HOST   := $(if $(or $(filter $(SHARED_GPU_CLUSTERS),$(strip $(CLUSTER))),$(strip $(HOST_CLUSTERS))),1,)
 ifneq ($(GPU_VARIABLE),)
 ifeq ($(ON_SHARED_GPU_HOST),1)
