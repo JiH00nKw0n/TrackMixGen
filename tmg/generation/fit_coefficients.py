@@ -37,8 +37,8 @@ loud warning.
 
 Output: ``<output>/coefficients.yaml`` and ``<output>/FIT_COEFFICIENTS.json`` (summary), and when ``write_config`` is true
 ``configs/experiment/generator/<generator>/coefficients/<task>.yaml``, the file ``method.mixing.coefficients`` names. The
-rule file records what its records were measured with (``features``, ``object_frame``, ``held_rule``); the mixer refuses a
-scene measured otherwise.
+rule file records what its records were measured with (``features``, ``object_frame``, ``held_rule``,
+``donor_registration``); the mixer refuses a scene measured otherwise.
 """
 from __future__ import annotations
 
@@ -325,7 +325,8 @@ def print_block(key, block: Mapping, about: Mapping) -> None:
 
 # rule file ------------------------------------------------------------------------------------------------------------
 def write_rule(path: Path, *, generator: str, task: str, basis: str, num_sources: int, blocks: Mapping,
-               features: Sequence[str] = FEATURES, object_frame: Mapping | None = None, held_rule: HeldRule | None = None) -> Path:
+               features: Sequence[str] = FEATURES, object_frame: Mapping | None = None, held_rule: HeldRule | None = None,
+               donor_registration: Mapping | None = None) -> Path:
     """Write a SkillMix softmax rule file (read by ``tmg.generation.method.skillmix.load_rule``); ``blocks`` are keyed by
     ``SubtaskId``."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -348,6 +349,8 @@ def write_rule(path: Path, *, generator: str, task: str, basis: str, num_sources
         data["object_frame"] = dict(object_frame)
     if held_rule is not None:             # the mixer checks the hold rule of the scene against it
         data["held_rule"] = held_rule.as_dict()
+    if donor_registration is not None:    # the mixer checks how the scene's donors were registered against it
+        data["donor_registration"] = dict(donor_registration)
     path.write_text(head + yaml.safe_dump(data, sort_keys=False, width=120))
     return path
 
@@ -383,7 +386,10 @@ def fit_coefficients(cfg) -> dict:
         if about["unversioned_upgraded"]:
             print(f"[tmg] WARNING {kind} pools: {about['unversioned_upgraded']} attempt records carry no record_version "
                   f"(written before 2026-11-27): read as version 1 with the hold rule declared for unversioned records, "
-                  f"{layout.unversioned_held_rule}, checked against their recorded hold distances", flush=True)
+                  f"{layout.unversioned_held_rule}, checked against their recorded hold distances"
+                  + (f", and with the donor registration declared for them, {dict(layout.unversioned_donor_registration)} (not "
+                     f"recorded in version 1: the constants of the code that made them)" if layout.unversioned_donor_registration else ""),
+                  flush=True)
     holds = complete_source_holds(attempts["randmix"].records + attempts["unmix"].records)
     if holds["filled"] or holds["unknown"]:
         print(f"[tmg] WARNING {holds['filled'] + holds['unknown']} mix records do not say which sources hold the carried object "
@@ -400,7 +406,7 @@ def fit_coefficients(cfg) -> dict:
         problems += [f"{kind} pools: {text}" for text in errors]
     if problems:
         raise ValueError("the records fail the sanity check of the fit: " + "; ".join(problems))
-    frame, held_rule = measured_with(attempts["randmix"].records + attempts["unmix"].records)
+    measured = measured_with(attempts["randmix"].records + attempts["unmix"].records)
     blocks, about = fit_blocks(attempts["randmix"], attempts["unmix"], layout=layout, task=task, num_sources=num_sources,
                                source=plain.get("source"))
     for key, b in blocks.items():
@@ -409,7 +415,8 @@ def fit_coefficients(cfg) -> dict:
              f"attempts) and the unmix pools {pools['unmix']} ({len(attempts['unmix'])} attempts); rows of "
              f"subtask k: the attempts that reached it, label = the attempt's task success.")
     kwargs = dict(generator=generator["name"], task=task["name"], basis=basis, num_sources=num_sources, blocks=blocks,
-                  features=layout.features, object_frame=frame, held_rule=held_rule)
+                  features=layout.features, object_frame=measured.object_frame, held_rule=measured.held_rule,
+                  donor_registration=measured.donor_registration)
     written = [str(write_rule(output / COEFFICIENT_FILE, **kwargs))]
     if plain.get("write_config", True):
         written.append(str(write_rule(rule_path(name), **kwargs)))

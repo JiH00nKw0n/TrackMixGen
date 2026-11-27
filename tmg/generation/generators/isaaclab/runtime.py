@@ -251,9 +251,10 @@ class IsaacLabRuntime:
         """What ``bind_official`` read, for the graft log (nothing here)."""
         return {}
 
-    def mix_settings(self, soft: bool) -> dict:
-        """Mix-record fields about what the runtime did to the sources before the mixer saw them (nothing here)."""
-        return {}
+    def donor_registration(self, soft: bool) -> dict | None:
+        """The settings with which the donors of a subtask are registered into the selected source's geometry before the
+        mixer sees them (``SubtaskScene.donor_registration``); None: no registration (rigid objects)."""
+        return None
 
     def measured_poses(self, owner, env_id: int, eefs) -> dict:
         """Measured end-effector poses: the configured links (``measure_links``) or the environment's observed eef poses."""
@@ -318,7 +319,7 @@ class IsaacLabRuntime:
                              current_object_pose=current, source_object_poses=sources,
                              eef_pose=self.current_eef_pose(generator, env_id, eef),
                              source_eef_poses=[_np(info.eef_pose[eef][t]) for info, t in zip(infos, starts)],
-                             object_frame=frame, held_rule=self.held_rule)
+                             object_frame=frame, held_rule=self.held_rule, donor_registration=self.donor_registration(soft))
         carried, carried_soft = self._carried.get(eef, (None, False))
         if carried is not None:
             scene.carried_object = carried
@@ -461,7 +462,6 @@ class IsaacLabRuntime:
                              src_segments=segments, num_sources=len(infos), has_reference_object=object_name is not None,
                              scene=read.scene)
         mixed = self.method.mixer.mix(context)
-        mixed.record.update(self.mix_settings(soft))       # what the runtime itself did to the sources, next to the mixer's record
         self._mixes[eef_name] = mixed.record
         if not mixed.record.get("mixed"):
             return eef, targets, unchanged
@@ -557,9 +557,10 @@ class SoftMimicGenRuntime(IsaacLabRuntime):
     def official_settings(self) -> dict:
         return {} if self.registration_kwargs is None else {self.registration_function: dict(self.registration_kwargs)}
 
-    def mix_settings(self, soft: bool) -> dict:
-        """A deformable subtask's donors went through the official registration: with which settings."""
-        return {"registration": dict(self.registration_kwargs)} if soft else {}
+    def donor_registration(self, soft: bool) -> dict | None:
+        """A deformable subtask's donors go through the official registration with the official call's settings (None
+        before they were read: an unmixed run registers no donor)."""
+        return dict(self.registration_kwargs) if soft and self.registration_kwargs is not None else None
 
     def soft_object_poses(self, generator, local_vars: dict, infos, object_name: str, starts: list) -> tuple:
         from tmg.generation.method.soft_frame import (

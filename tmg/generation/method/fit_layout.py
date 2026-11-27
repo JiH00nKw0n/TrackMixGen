@@ -16,6 +16,8 @@ declaring its layout, not by adding a branch to the fit:
   the record itself (``records``) or the source file's ``datagen_info`` (MimicGen).
 - ``features``: the features of the rule file (``success_model.FEATURES``, or ``HELD_FEATURES`` with a hold test).
 - ``unversioned_held_rule``: the hold rule of records without a ``record_version`` (made before the rule was recorded).
+- ``unversioned_donor_registration``: the settings the donors of a deformable subtask were registered with in such
+  records (made when they were constants of the runtime and not recorded).
 - ``sanity``: the limits of the records checks (``SanityLimits``, judged by ``fit_records.judge_sanity``).
 """
 from __future__ import annotations
@@ -94,6 +96,7 @@ class FitLayout:
     source_poses: str
     features: tuple = FEATURES
     unversioned_held_rule: HeldRule | None = None
+    unversioned_donor_registration: Mapping | None = None
     sanity: SanityLimits = field(default_factory=SanityLimits)
 
     def __post_init__(self):

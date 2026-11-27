@@ -16,10 +16,15 @@ default_max_workers: 3
 #   rule file fitted with another one. Change the values only together with `version`.
 # unversioned_held_rule: the rule of records without a record_version (made by the code up to commit 2fcfc0d, 2026-11-27,
 #   where these two distances were constants and were not recorded); tmg fit_coefficients reads such records with it.
+# unversioned_donor_registration: the settings with which those same records registered the donors of a deformable
+#   subtask (constants of the code up to 2fcfc0d, not recorded); they equal the literals of the official builder's own
+#   call at SoftMimicGen c9d146ba, which the runtime now reads and records (mix record `registration`, rule file
+#   `donor_registration`).
 # Not part of a chunk's identity (ChunkSpec.scene_reading): it changes no unmixed demonstration.
 scene_reading:
   held_rule: {version: 1, rigid_m: 0.20, nodes_m: 0.10}
   unversioned_held_rule: {version: 1, rigid_m: 0.20, nodes_m: 0.10}
+  unversioned_donor_registration: {use_rotation_transform: true, bend_coef: 0.1, rot_coef: 0.001}
 
 # Limits of the records checks of tmg fit_coefficients and of every chunk result (tmg/generation/method/fit_records.py,
 # fit_layout.py). A rate is an error only when the counts of everything read so far (the whole pool in the fit, the pool's

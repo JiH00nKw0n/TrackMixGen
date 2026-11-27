@@ -65,8 +65,8 @@ without per-arm blocks, nor a one-armed generator a per-arm file.
 What a runtime hands the mixer is a ``SubtaskScene`` (``MixContext.scene``; CP-Gen passes it to ``decide``). Its features
 are computed by ``success_model.source_features``, the function the fit uses on the records. A rule file also records
 what its records were measured with, and the mixer refuses a scene measured otherwise: the deformable object frame
-(``object_frame``) and the hold rule (``held_rule``: the distances within which a hand counts as holding the carried
-object).
+(``object_frame``), the hold rule (``held_rule``: the distances within which a hand counts as holding the carried
+object) and the settings with which a deformable object's donors were registered (``donor_registration``).
 
 The record of every call keeps the rule, the scores, the spread effect, the features, the hold flags and the weights
 (``SkillMixer.decide``). CP-Gen re-solves constraints instead of replaying segments: it blends solved poses in its own
@@ -141,6 +141,7 @@ class SkillMixRule:
     object_frame: dict | None = None        # deformable reference object: the frame the fit's records used (soft_frame)
     features: tuple = FEATURES              # the features of ``SubtaskRule.g``, in order
     held_rule: HeldRule | None = None       # the hold rule of the fit's records (generators with a hold test)
+    donor_registration: dict | None = None  # deformable reference object: how the donors of the fit's records were registered
 
     @property
     def per_arm(self) -> bool:
@@ -176,7 +177,8 @@ class SkillMixRule:
         return cls(name=name or f"{data.get('generator', '')}/{data.get('task', '')}", num_sources=n, subtasks=subtasks,
                    path=path, object_frame=None if frame is None else {"version": str(frame["version"]),
                                                                        "reference_sha256": str(frame["reference_sha256"])},
-                   features=features, held_rule=HeldRule.from_mapping(data.get("held_rule")))
+                   features=features, held_rule=HeldRule.from_mapping(data.get("held_rule")),
+                   donor_registration=None if data.get("donor_registration") is None else dict(data["donor_registration"]))
 
     def describe(self) -> dict:
         return {"name": self.name, "path": self.path, "num_sources": self.num_sources,
@@ -481,12 +483,15 @@ class SkillMixer:
         if scene.held is not None:
             now, sources = held_flags(scene)
             record["held"] = {"now": now, "sources": sources}
+        if scene.donor_registration is not None:
+            record["registration"] = dict(scene.donor_registration)
         return w, record
 
     def check_scene(self, scene: SubtaskScene) -> None:
         """The scene's features are only comparable with the fit's when both were measured the same way: the nodal frame
-        of a deformable object (definition and reference cloud, ``soft_frame``) and the hold rule. The rule file records
-        both; a scene measured otherwise is refused."""
+        of a deformable object (definition and reference cloud, ``soft_frame``) and the hold rule; and the mixed segments
+        are only what the fit saw when the donors were registered with the same settings. The rule file records all
+        three; a scene measured or prepared otherwise is refused."""
         fitted = self.coefficients
         if fitted is None:
             return
@@ -496,6 +501,10 @@ class SkillMixer:
         if scene.held_rule != fitted.held_rule:
             raise ValueError(f"SkillMix rule {fitted.name}: hold rule of the scene {scene.held_rule} differs from the rule "
                              f"file's {fitted.held_rule}; refit the rule on records of this hold rule")
+        if scene.donor_registration is not None and dict(scene.donor_registration) != fitted.donor_registration:
+            raise ValueError(f"SkillMix rule {fitted.name}: the donors of the scene were registered with "
+                             f"{scene.donor_registration}, those of the rule file's records with {fitted.donor_registration}; "
+                             f"refit the rule on records of this registration")
 
     # events ------------------------------------------------------------------------------------------
     def _scalar_commands(self, commands: np.ndarray) -> bool:

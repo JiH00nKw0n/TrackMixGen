@@ -148,7 +148,7 @@ def _spec_of(folder):
 
 
 def rope_line(success=True, grasp_step=5, held=True, scene_error=None, invalid=None, mixed=None):
-    """One Rope attempt record of record version 2: grasp (signal grasp, fired at ``grasp_step``), then shaping from step 10."""
+    """One Rope attempt record of the current record version: grasp (signal grasp, fired at ``grasp_step``), then shaping from step 10."""
     def sub(k):
         s = {"eef": "robot0", "subtask_ind": k, "object_name": "object", "src_demo_ind": 0, "start_step": 10 * k,
              "term_signal": "grasp" if k == 0 else None, "held_rule": RULE, "mix": None}
@@ -163,7 +163,7 @@ def rope_line(success=True, grasp_step=5, held=True, scene_error=None, invalid=N
     if scene_error:
         subs[1] = {"eef": "robot0", "subtask_ind": 1, "object_name": "object", "start_step": 10, "scene_error": scene_error,
                    "mix": subs[1]["mix"]}
-    line = {"success": success, "subtasks": subs, "n_steps": 30, "term_first": {"grasp": grasp_step}, "record_version": 2,
+    line = {"success": success, "subtasks": subs, "n_steps": 30, "term_first": {"grasp": grasp_step}, "record_version": 3,
             "scene_errors": int(bool(scene_error))}
     return dict(line, invalid=invalid) if invalid else line
 

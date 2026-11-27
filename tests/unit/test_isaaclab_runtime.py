@@ -265,7 +265,7 @@ def test_mix_segment_registers_donor_segments_into_the_primary_rope(torch, monke
     rt.registration_kwargs = {"use_rotation_transform": True, "bend_coef": 0.2, "rot_coef": 5e-3}    # as read from the official call
     rt.mix_segment(soft_generator(infos), soft_locals(infos, primary=1, soft=True))
     ctx = mixer.contexts[0]
-    assert rt.last_mix("robot0")["registration"] == rt.registration_kwargs      # recorded with the mix, for the chunk result
+    assert ctx.scene.donor_registration == rt.registration_kwargs    # handed to the mixer, which checks and records it
     unbound = make_runtime(Method0(RecordingMixer()))
     unbound.registration_kwargs = None                               # the official call was never read: no donor is registered
     with pytest.raises(RuntimeError, match="were not read"):
@@ -314,7 +314,8 @@ def test_the_registration_settings_are_read_from_the_official_builders_own_call(
     assert runtime.registration_kwargs is None and runtime.official_settings() == {}
     runtime.bind_official(official)
     assert runtime.registration_kwargs == OFFICIAL_REGISTRATION and runtime.official_settings() == {REGISTER: OFFICIAL_REGISTRATION}
-    assert runtime.mix_settings(soft=True) == {"registration": OFFICIAL_REGISTRATION} and runtime.mix_settings(soft=False) == {}
+    assert runtime.donor_registration(soft=True) == OFFICIAL_REGISTRATION and runtime.donor_registration(soft=False) is None
+    assert rt.SoftMimicGenRuntime(Method0(None), soft_layout(), None).donor_registration(soft=True) is None    # not read: unmixed
     # literals in other spellings are read: a signed number, `not`, a tuple
     spelled = official_builder(f"{REGISTER}({DATA}, use_rotation_transform=not False, bend_coef=-0.5, rot_coef=+1e-3, shape=(1, 2))")
     assert rt.literal_call_keywords(spelled.generate_trajectory, REGISTER, passed) == {
@@ -549,7 +550,7 @@ def test_rope_records_the_nodal_frames_and_in_hand_poses_the_fit_needs(torch, tm
     assert s0["carried_object"] is None and s1["carried_object"] == "rope" and s1["carried_candidate"] == "rope"
     assert s1["held_distance"]["now"] <= 0.03 and s1["held_distance"]["source"] < 1e-3
     assert s1["held_distance"]["deformable"] is True and "held_distance" not in s0 and "held" not in s1   # tested on the nearest node; no stored verdict
-    assert s0["held_rule"] == s1["held_rule"] == HELD_RULE and line["record_version"] == 2 and "invalid" not in line
+    assert s0["held_rule"] == s1["held_rule"] == HELD_RULE and line["record_version"] == 3 and "invalid" not in line
     np.testing.assert_allclose(P(s1["objects"]["rope"]), nodal_frame(now1, ref), atol=1e-6)
     np.testing.assert_allclose(P(s1["src_objects"]["rope"]), P(s1["src_obj_pose"]))
     # the in-hand features the fit computes from these fields are non-zero for this scene
@@ -616,7 +617,7 @@ def test_a_scene_that_cannot_be_read_fails_the_attempt_only_never_the_chunk(torc
     if mixing:
         mix = bad["subtasks"][0]["mix"]
         assert bad["invalid"] == "scene_error" and mix["mixed"] is False and mix["identity_reason"].startswith("scene_error: scene: KeyError")
-        assert len(mixer.contexts) == 1 and good["subtasks"][0]["mix"] == {"mixed": True, "donor": 1, "registration": OFFICIAL_REGISTRATION}   # only the good attempt was mixed
+        assert len(mixer.contexts) == 1 and good["subtasks"][0]["mix"] == {"mixed": True, "donor": 1}     # only the good attempt was mixed
     else:
         assert "invalid" not in bad and bad["subtasks"][0]["mix"] is None
 
@@ -923,6 +924,7 @@ def test_mixer_features_at_generation_equal_the_fits_design_rows(torch, tmp_path
         np.testing.assert_allclose(fit_features, mixer_features, atol=2e-4, err_msg=str(HELD_FEATURES))
         if k == 1:
             assert np.abs(mixer_features[3:5]).sum() > 0 and np.abs(mixer_features[:3]).sum() > 0   # not a trivial match
+            assert mix.get("registration") == (OFFICIAL_REGISTRATION if soft else None)     # deformable: how the donors were registered
             assert mix["held"] == {"now": True, "sources": [True, True, True]} and mixer_features[5] == 0
 
 

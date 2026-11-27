@@ -4,9 +4,12 @@ which subtasks an attempt reached, and the sanity report.
 Record versions (``record_version`` of an attempt line, ``tmg.core.records.RECORD_VERSION``). A line without the field is
 version 1: written before 2026-11-27 (commit 2fcfc0d and earlier). Version 2 adds, for a runtime with a hold test, the
 hold rule of every subtask record (``held_rule``), whether the tested object is deformable (``held_distance.deformable``)
-and, in the mix record, who holds the carried object (``held``: now, every source). ``prepare`` brings version-1 records
-of such a generator to that shape with the hold rule the fit layout declares for them
-(``FitLayout.unversioned_held_rule``), says so loudly, and checks the rule against what the records do carry: the hold
+and, in the mix record, who holds the carried object (``held``: now, every source) and, for a deformable subtask, the
+settings its donors were registered with (``registration``). (This is version 3; version 2 was an interim format with
+which no pool was made, and is refused.) ``prepare`` brings version-1 records of such a generator to that shape with the
+hold rule and the donor registration the fit layout declares for them (``FitLayout.unversioned_held_rule``,
+``unversioned_donor_registration``: the values the code of 2fcfc0d had as constants), says so loudly, and checks the rule
+against what the records do carry: the hold
 test of a subtask record is rebuilt from its recorded distances (``success_model.held_test_of_record``), exactly as for a
 version-2 record, and must agree with the in-hand poses the record kept. A version-1 mix record has no per-source hold
 flags. Where the hand held the object, a source whose two recorded in-hand features are exactly 0 next to in-hand
@@ -60,6 +63,7 @@ from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import NamedTuple
 
 import numpy as np
 
@@ -71,6 +75,7 @@ from tmg.generation.method.interfaces import HELD_DISTANCE_DECIMALS, HeldRule
 from tmg.generation.method.success_model import eef_subtasks, held_test_of_record
 
 UNVERSIONED = 1          # the version of an attempt line without ``record_version``
+READABLE_VERSIONS = (UNVERSIONED, RECORD_VERSION)
 
 
 # pools ----------------------------------------------------------------------------------------------------------------
@@ -156,13 +161,16 @@ def check_arms(records: Sequence[Mapping], layout: FitLayout) -> None:
                                              f": no subtask of {missing} was recorded"))
 
 
-def _upgrade_unversioned(attempt: Mapping, rule: HeldRule) -> None:
-    """Give a version-1 attempt record the hold fields of version 2 (module docstring), in place."""
+def _upgrade_unversioned(attempt: Mapping, rule: HeldRule, donor_registration: Mapping | None = None) -> None:
+    """Give a version-1 attempt record the fields of the current version (module docstring), in place: the hold rule and
+    test, and in the mix record of a deformable subtask the settings its donors were registered with."""
     step = 10.0 ** -HELD_DISTANCE_DECIMALS        # version 1 tested the unrounded distance and recorded it rounded
     for s in attempt.get("subtasks") or []:
         if s.get("scene_error"):
             continue
         s["held_rule"] = rule.as_dict()
+        if donor_registration is not None and s.get("object_frame") is not None and (s.get("mix") or {}).get("weights"):
+            s["mix"].setdefault("registration", dict(donor_registration))
         candidate = s.get("carried_candidate")
         distance = s.get("held_distance")
         if candidate is None or distance is None:
@@ -187,12 +195,14 @@ def _upgrade_unversioned(attempt: Mapping, rule: HeldRule) -> None:
 
 def prepare(attempts: Attempts, layout: FitLayout) -> tuple[Attempts, dict]:
     """The attempts the fit may use, and what was done to get them: attempts whose scene could not be read are left out
-    (counted), the end effectors are checked against the layout, and version-1 records get the hold fields of version 2
-    when the layout has a hold rule for them (module docstring)."""
+    (counted), the end effectors are checked against the layout, and version-1 records get the fields of the current
+    version when the layout has a hold rule for them (module docstring). Only versions 1 and the current one are read."""
     versions = Counter(record_version(a) for a in attempts.records)
-    newer = sorted(v for v in versions if v > RECORD_VERSION)
-    if newer:
-        raise ValueError(f"attempt records of version {newer}, this code reads up to {RECORD_VERSION}")
+    unreadable = sorted(v for v in versions if v not in READABLE_VERSIONS)
+    if unreadable:
+        raise ValueError(f"attempt records of version {unreadable}: this code reads version {UNVERSIONED} (lines without "
+                         f"record_version) and version {RECORD_VERSION}; any other format, the interim version 2 included, "
+                         f"has no reader")
     usable = [i for i, a in enumerate(attempts.records) if not has_scene_error(a)]
     kept = attempts.keep(usable)
     check_arms(kept.records, layout)
@@ -200,7 +210,7 @@ def prepare(attempts: Attempts, layout: FitLayout) -> tuple[Attempts, dict]:
     if layout.unversioned_held_rule is not None:
         for a in kept.records:
             if record_version(a) == UNVERSIONED:
-                _upgrade_unversioned(a, layout.unversioned_held_rule)
+                _upgrade_unversioned(a, layout.unversioned_held_rule, layout.unversioned_donor_registration)
                 upgraded += 1
     return kept, {"attempts": len(attempts), "without_scene": len(attempts) - len(usable),
                   "versions": {str(v): n for v, n in sorted(versions.items())}, "unversioned_upgraded": upgraded,
@@ -245,10 +255,18 @@ def complete_source_holds(records: Sequence[Mapping]) -> dict:
             "evidence": {f"{eef}/{k}/{j}": counts for (eef, k, j), counts in sorted(seen.items(), key=str)}}
 
 
-def measured_with(records: Sequence[Mapping]) -> tuple[dict | None, HeldRule | None]:
-    """``(object frame, hold rule)`` the records' scenes were measured with (None where they have none); records of
-    different frames or rules are refused, since their features are not comparable."""
-    frames, rules, with_rule, subtasks = set(), set(), 0, 0
+class Measured(NamedTuple):
+    """What the records' scenes were measured with, and their donors prepared with (None where they have none); the rule
+    file records all three and the mixer refuses a scene that differs."""
+    object_frame: dict | None
+    held_rule: HeldRule | None
+    donor_registration: dict | None
+
+
+def measured_with(records: Sequence[Mapping]) -> Measured:
+    """The ``Measured`` of ``records``; records of different frames, hold rules or donor registrations are refused, since
+    their features and mixed segments are not comparable."""
+    frames, rules, registrations, with_rule, subtasks = set(), set(), [], 0, 0
     for a in records:
         for s in a.get("subtasks") or []:
             subtasks += 1
@@ -257,16 +275,21 @@ def measured_with(records: Sequence[Mapping]) -> tuple[dict | None, HeldRule | N
             if s.get("held_rule"):
                 rules.add(HeldRule.from_mapping(s["held_rule"]))
                 with_rule += 1
+            registration = (s.get("mix") or {}).get("registration")
+            if registration is not None and registration not in registrations:
+                registrations.append(dict(registration))
     if len(frames) > 1:
         raise ValueError(f"the records use different deformable-object frames {sorted(frames)}")
     if len(rules) > 1 or (rules and with_rule != subtasks):
         raise ValueError(f"the records use different hold rules ({sorted(rules, key=str)}; {subtasks - with_rule} of "
                          f"{subtasks} subtask records carry none)")
+    if len(registrations) > 1:
+        raise ValueError(f"the records' donors were registered with different settings {registrations}")
     frame = None
     if frames:
         version, sha = next(iter(frames))
         frame = {"version": version, "reference_sha256": sha}
-    return frame, (next(iter(rules)) if rules else None)
+    return Measured(frame, next(iter(rules)) if rules else None, registrations[0] if registrations else None)
 
 
 # which subtasks an attempt reached ----------------------------------------------------------------------------------

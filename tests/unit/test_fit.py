@@ -187,10 +187,10 @@ def test_fit_reads_the_pools_of_a_generator_that_stops_at_the_first_failed_subta
 
 
 # Isaac Lab records: arms, term window, declared task_success -------------------------------------------------------
-def isaac_attempt(rng, *, success, grasped, mix=None, eefs=("right", "left"), held=True, version=2):
+def isaac_attempt(rng, *, success, grasped, mix=None, eefs=("right", "left"), held=True, version=3):
     """One DexMimicGen-like attempt record: right subtasks 0 (grasp the bottle, term signal grasp_bottle) and 1 (place it in
     the fridge, carried: the bottle, held or not), left subtask 0 (hold the fridge); the scene fields the Isaac Lab runtime
-    records (record version 2, or the unversioned shape of commit 2fcfc0d)."""
+    records (the current record version, 3, or the unversioned shape of commit 2fcfc0d)."""
     def sub(eef, k, obj, carried=None, signal=None):
         j = int(rng.integers(2))
         eef_now = pose(rng.normal(0, 0.02), 0.1)
@@ -225,7 +225,7 @@ def isaac_attempt(rng, *, success, grasped, mix=None, eefs=("right", "left"), he
     if "left" in eefs:
         subs.insert(1, sub("left", 0, "fridge"))
     out = {"success": bool(success), "subtasks": subs, "n_steps": 30, "term_first": {"grasp_bottle": 3 if grasped else -1}}
-    return {**out, "record_version": 2} if version >= 2 else out
+    return {**out, "record_version": version} if version >= 2 else out
 
 
 def test_fit_reads_isaaclab_records_per_end_effector_and_subtask(tmp_path):
@@ -245,7 +245,7 @@ def test_fit_reads_isaaclab_records_per_end_effector_and_subtask(tmp_path):
     assert blocks[S(1, "right")]["rows"]["unmix"] == 48               # the 12 attempts whose grasp never fired did not reach it
     assert "by signal" in reached[S(1, "right")]["reached"] and "first subtask" in reached[S(0, "right")]["reached"]
     assert sorted(blocks[S(1, "right")]["g"]) == sorted(HELD_FEATURES)
-    frame, held_rule = measured_with(randmix.records + unmix.records)
+    frame, held_rule, _registration = measured_with(randmix.records + unmix.records)
     path = write_rule(tmp_path / "rule.yaml", generator="dexmimicgen", task="bottle_door", basis="test", num_sources=2, blocks=blocks,
                       features=layout.features, object_frame=frame, held_rule=held_rule)
     assert "<eef>/<k>" in path.read_text()
@@ -381,13 +381,13 @@ def test_attempts_without_their_scene_are_left_out_and_counted():
     invalid = dict(isaac_attempt(rng, success=True, grasped=True), invalid="scene_error")
     kept, about = prepare(attempts_of([*good, broken, invalid]), isaac_layout(["left", "right"]))
     assert len(kept) == 3 and about["without_scene"] == 2 and about["attempts"] == 5
-    assert "no yaw" in about["scene_error_examples"][0] and about["versions"] == {"2": 5}
+    assert "no yaw" in about["scene_error_examples"][0] and about["versions"] == {"3": 5}
 
 
 def test_records_of_different_frames_or_hold_rules_are_refused():
     rng = np.random.default_rng(7)
     a, b = (isaac_attempt(rng, success=True, grasped=True) for _ in range(2))
-    assert measured_with([a, b]) == (None, RULE)
+    assert measured_with([a, b]) == (None, RULE, None)
     a["subtasks"][0]["object_frame"] = {"version": "nodal_yaw_v1", "reference_sha256": "x"}
     assert measured_with([a, b])[0] == {"version": "nodal_yaw_v1", "reference_sha256": "x"}
     b["subtasks"][0]["object_frame"] = {"version": "nodal_yaw_v1", "reference_sha256": "y"}
@@ -400,7 +400,13 @@ def test_records_of_different_frames_or_hold_rules_are_refused():
     del d["subtasks"][0]["held_rule"]
     with pytest.raises(ValueError, match="carry none"):
         measured_with([c, d])
-    assert measured_with([{"subtasks": [{"subtask_ind": 0}]}]) == (None, None)       # MimicGen, CP-Gen: neither
+    assert measured_with([{"subtasks": [{"subtask_ind": 0}]}]) == (None, None, None)     # MimicGen, CP-Gen: none of them
+    e, f = (isaac_attempt(rng, success=True, grasped=True, mix=True) for _ in range(2))
+    e["subtasks"][0]["mix"]["registration"] = {"use_rotation_transform": True, "bend_coef": 0.1, "rot_coef": 1e-3}
+    assert measured_with([e, f]).donor_registration == {"use_rotation_transform": True, "bend_coef": 0.1, "rot_coef": 0.001}
+    f["subtasks"][0]["mix"]["registration"] = {"use_rotation_transform": True, "bend_coef": 0.2, "rot_coef": 1e-3}
+    with pytest.raises(ValueError, match="registered with different settings"):
+        measured_with([e, f])
     old = isaac_attempt(rng, success=True, grasped=True)
     del old["subtasks"][0]["src_obj_pose"]
     with pytest.raises(ValueError, match="regenerate"):
@@ -416,10 +422,13 @@ def test_the_recorder_writes_the_record_version_and_newer_records_are_refused(tm
     rec.begin_attempt()
     rec.flush(success=True, src_demo_inds=[0])
     line = read_attempts(tmp_path)[0]
-    assert RECORD_VERSION == 2 and line["record_version"] == 2 and record_version(line) == 2
+    assert RECORD_VERSION == 3 and line["record_version"] == 3 and record_version(line) == 3
     assert record_version({"attempt": 0}) == 1                        # no field: written before 2026-11-27
-    with pytest.raises(ValueError, match="version"):
-        prepare(attempts_of([{"record_version": 3, "subtasks": []}]), CPGEN)
+    for version in (2, 4):                # the interim format of this branch (no pool was made with it), and a later one
+        with pytest.raises(ValueError, match=rf"version \[{version}\]: this code reads version 1 .* and version 3"):
+            prepare(attempts_of([{"record_version": version, "subtasks": []}]), CPGEN)
+    kept, about = prepare(attempts_of([{"subtasks": [], "success": True}, {"record_version": 3, "subtasks": [], "success": True}]), CPGEN)
+    assert len(kept) == 2 and about["versions"] == {"1": 1, "3": 1}
 
 
 def test_unversioned_records_get_the_declared_hold_rule_checked_against_their_distances():
@@ -445,8 +454,8 @@ def test_unversioned_records_get_the_declared_hold_rule_checked_against_their_di
     with pytest.raises(FeatureUnknown):
         mix_record_features(s_loose["mix"], HELD_FEATURES, 2)
     assert mix_record_features(s_loose["mix"], FEATURES, 2).shape == (2, 5)        # the five features do not need it
-    assert measured_with(kept.records) == (None, RULE)
-    # a second pass changes nothing; version-2 records are left as they are
+    assert measured_with(kept.records) == (None, RULE, None)
+    # a second pass changes nothing; current-version records are left as they are
     again = copy.deepcopy(kept.records)
     prepare(attempts_of(again), layout)
     assert again == kept.records
@@ -553,8 +562,11 @@ def test_real_rope_records_of_2fcfc0d_are_read_as_version_1_with_the_declared_ho
         assert all(record_version(a) == 1 and "record_version" not in a for a in records)
         kept, about = prepare(attempts_of(records), layout)
         assert len(kept) == 2 and about["unversioned_upgraded"] == 2 and about["without_scene"] == 0
-        frame, held_rule = measured_with(kept.records)
+        frame, held_rule, registration = measured_with(kept.records)
         assert held_rule == HeldRule(1, 0.20, 0.10) and frame["version"] == "nodal_yaw_v1" and len(frame["reference_sha256"]) == 64
+        # version 1 did not record how it registered the donors: the constants of 2fcfc0d, declared in the config, are attached
+        # to its mix records (the unmix pool mixes nothing and has none)
+        assert registration == ({"use_rotation_transform": True, "bend_coef": 0.1, "rot_coef": 0.001} if kind == "randmix" else None)
         for a in kept.records:
             grasp, shape = a["subtasks"]
             assert held_test_of_record(grasp) is None and grasp["held_rule"] == held_rule.as_dict()
@@ -584,6 +596,48 @@ def test_the_features_of_real_rope_records_are_the_ones_the_new_mixer_computes()
             assert computed[5] == 0.0
         assert shape["mix"]["held"] == {"now": True, "sources": [True, True, True]}
         assert np.all(mix_record_features(grasp["mix"], HELD_FEATURES, 3)[:, 3:] == 0)       # first subtask: no in-hand terms
+
+
+def test_real_records_of_a_dropped_rope_get_the_features_the_new_mixer_computes():
+    """Two real attempts of the 2fcfc0d pools in which the rope was dropped before the second subtask (0.25 and 0.35 m from
+    the hand; the selected source holds it at 2 mm). Version 1 kept no in-hand pose and, in the mix record, no in-hand
+    features. Read with the declared hold rule, the hand holds nothing and the source does, so the fit's row of the
+    selected source has in-hand features 0 and mismatch 1: what the new mixer computes for a scene with those hold
+    distances. The randmix record's per-source flags come from the hold tests of the same pools."""
+    from tmg.generation.method.interfaces import HeldTest
+
+    layout, _generator, task = rope_layout()
+    dropped = {kind: copy.deepcopy(ROPE["dropped"][kind]) for kind in ("unmix", "randmix")}
+    assert all(record_version(a) == 1 and a["subtasks"][1]["carried_object"] is None and a["subtasks"][1]["objects"] == {}
+               for a in dropped.values())
+    assert [a["subtasks"][1]["held_distance"] for a in dropped.values()] == [{"now": 0.2454, "source": 0.0025}, {"now": 0.3475, "source": 0.0022}]
+    assert "inhand_features" not in dropped["randmix"]["subtasks"][1]["mix"]
+    held, _ = prepare(attempts_of(copy.deepcopy(ROPE["unmix"] + ROPE["randmix"])), layout)      # the pools' attempts that hold the rope
+    kept, about = prepare(attempts_of(list(dropped.values())), layout)
+    assert len(kept) == 2 and about["unversioned_upgraded"] == 2
+    for a in kept.records:
+        shape = a["subtasks"][1]
+        test = held_test_of_record(shape)
+        assert (test.now, test.sources, test.deformable) == (False, [True], True)
+        row = source_features(scene_of_record(shape, "object"), HELD_FEATURES)[0]
+        assert row[3:].tolist() == [0.0, 0.0, 1.0]
+        # the scene the new runtime builds for the same distances: the mixer's features of the selected source are the same
+        scene = scene_of_record(shape, "object")
+        scene.held = HeldTest(rule=test.rule, deformable=True, now_m=shape["held_distance"]["now"], sources_m=[shape["held_distance"]["source"]])
+        scene.carried_pose, scene.source_carried_poses = None, [scene.source_object_poses[0]]       # the runtime keeps the holder's pose
+        np.testing.assert_array_equal(source_features(scene, HELD_FEATURES)[0], row)
+    # the mix record of the dropped randmix attempt: hand empty, sources unknown until the pools' own hold tests fill them
+    mix = kept.records[1]["subtasks"][1]["mix"]
+    assert mix["held"] == {"now": False, "sources": None}
+    assert mix["registration"] == {"use_rotation_transform": True, "bend_coef": 0.1, "rot_coef": 0.001}    # the declared v1 value
+    filled = complete_source_holds(held.records + kept.records)
+    assert filled["filled"] == 1 and filled["unknown"] == 0 and mix["held"] == {"now": False, "sources": [True, True, True]}
+    assert mix_record_features(mix, HELD_FEATURES, 3)[:, 3:].tolist() == [[0.0, 0.0, 1.0]] * 3
+    # the grasp signal never fired in these two attempts (term_first -1): they do not reach the second subtask's rows, and
+    # count as a hand that holds nothing in the sanity report
+    outcomes, _ = reached_rule(layout.reached).outcomes(kept, "robot0", 2, task)
+    assert [row[0] for row in outcomes] == [False, False]
+    assert sanity_report(kept, layout, task)["blocks"]["1"]["held"] == {"tested": 2, "now": 0, "sources": {"0": [2, 2], "1": [1, 1], "2": [1, 1]}}
 
 
 def rope_pool(rng, kind, n, dropped=0.0):
@@ -648,6 +702,8 @@ def test_a_rope_rule_fitted_on_2fcfc0d_shaped_pools_is_accepted_by_the_new_mixer
     assert sorted(summary["subtasks"]) == [0, 1] and summary["subtasks"][1]["rows"]["unmix"] < summary["subtasks"][0]["rows"]["unmix"]
     assert "by signal" in summary["reached_from"]["1"] and summary["sanity"]["unmix"]["errors"] == []
     assert data["held_rule"] == {"version": 1, "rigid_m": 0.2, "nodes_m": 0.1} and data["features"] == list(HELD_FEATURES)
+    assert data["donor_registration"] == {"use_rotation_transform": True, "bend_coef": 0.1, "rot_coef": 0.001}
+    assert "with the donor registration declared for them, {'use_rotation_transform': True, 'bend_coef': 0.1, 'rot_coef': 0.001}" in said
     assert data["object_frame"] == ROPE["unmix"][0]["subtasks"][0]["object_frame"] and sorted(data["subtasks"]) == [0, 1]
     # the rope is held in every attempt of these pools: the mismatch column is constant 0, its slope 0, and the fit says so
     assert data["subtasks"][1]["g"]["inhand_mismatch"] == 0.0 and summary["constant_features"]["1"]["inhand_mismatch"] == 0.0
@@ -663,9 +719,17 @@ def test_a_rope_rule_fitted_on_2fcfc0d_shaped_pools_is_accepted_by_the_new_mixer
         scene.source_object_poses, scene.source_eef_poses, scene.source_carried_poses))
     scene.held.sources_m = scene.held.sources_m * 3
     scene.held_rule = held_rule
+    # the donors of the new runtime: registered with what it reads from the official builder's call (SoftMimicGen c9d146ba)
+    scene.donor_registration = {"use_rotation_transform": True, "bend_coef": 0.1, "rot_coef": 1e-3}
     mixer = SkillMixer(coefficients=rule, arms=Arms.of(generator["eefs"]))
+    assert rule.donor_registration == scene.donor_registration
     w, record = mixer.decide(scene, 0, [np.full(4, -1.0)] * 3)
     assert w.sum() == pytest.approx(1.0) and len(record["scores"]) == 3 and record["held"] == {"now": True, "sources": [True] * 3}
+    assert record["registration"] == scene.donor_registration
+    scene.donor_registration = {"use_rotation_transform": True, "bend_coef": 0.2, "rot_coef": 1e-3}      # the official call changed
+    with pytest.raises(ValueError, match="donors of the scene were registered with"):
+        mixer.decide(scene, 0, [np.full(4, -1.0)] * 3)
+    scene.donor_registration = dict(rule.donor_registration)
     scene.held_rule = HeldRule(2, 0.3, 0.1)                             # a later change of the rule: the rule file is refused
     with pytest.raises(ValueError, match="hold rule"):
         mixer.decide(scene, 0, [np.full(4, -1.0)] * 3)

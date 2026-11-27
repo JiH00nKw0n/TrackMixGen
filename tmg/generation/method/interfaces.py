@@ -170,6 +170,9 @@ class SubtaskScene:
     held: HeldTest | None = None                      # the hold test, when the runtime makes one and something is carried
     held_rule: HeldRule | None = None                 # the runtime's hold rule (also when nothing is carried)
     object_frame: dict | None = None                  # deformable reference object: frame definition and reference hash
+    # deformable reference object: the settings with which the runtime registered the other sources (the donors) into the
+    # selected source's geometry before handing them to the mixer; None when it registered none
+    donor_registration: dict | None = None
 
     @property
     def num_sources(self) -> int:

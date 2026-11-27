@@ -67,8 +67,8 @@ class IsaacLabGenerator(SyntheticDataGenerator):
 
     # scene reading and the fit layout -------------------------------------------------------------------
     def scene_reading(self) -> dict:
-        """``generator.scene_reading``: ``held_rule`` (the hold test of the runtime) and ``unversioned_held_rule`` (the rule
-        of records without a record version)."""
+        """``generator.scene_reading``: ``held_rule`` (the hold test of the runtime), and what records without a record
+        version were made with: ``unversioned_held_rule`` and ``unversioned_donor_registration``."""
         return dict(self.generator_cfg.get("scene_reading") or {})
 
     def held_rule(self) -> HeldRule | None:
@@ -84,6 +84,7 @@ class IsaacLabGenerator(SyntheticDataGenerator):
         return FitLayout(arms=Arms.of(self.generator_cfg["eefs"]), reached=str(fit.get("reached") or self.default_reached),
                          source_poses="records", features=HELD_FEATURES if self.held_rule() is not None else FEATURES,
                          unversioned_held_rule=HeldRule.from_mapping(reading.get("unversioned_held_rule")),
+                         unversioned_donor_registration=reading.get("unversioned_donor_registration"),
                          sanity=SanityLimits.from_mapping(self.generator_cfg.get("record_checks")))
 
     def scene_dict(self) -> dict:

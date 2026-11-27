@@ -295,6 +295,34 @@ def test_the_mixer_checks_the_hold_rule_against_the_rule_file():
     assert "weights" in SkillMixer(rule="randmix").decide(held_scene(0.01, [0.01] * 3), 0, series)[1]   # nothing fitted yet
 
 
+def test_the_mixer_checks_how_the_donors_were_registered_against_the_rule_file(tmp_path):
+    """A deformable subtask's donors are registered into the selected source's geometry before they are mixed. The rule
+    file records the settings its records were made with (``donor_registration``), the scene carries the runtime's, and
+    the mixer refuses a difference, as for the object frame and the hold rule."""
+    from tmg.generation.fit_coefficients import write_rule
+
+    official = {"use_rotation_transform": True, "bend_coef": 0.1, "rot_coef": 1e-3}
+    block = {"a": [0.0, 0.0], "g": dict.fromkeys(FEATURES, 0.0), "d": 1.0, "c0": 0.0}
+    path = write_rule(tmp_path / "rope.yaml", generator="softmimicgen", task="rope", basis="t", num_sources=2,
+                      blocks={S(0): block}, donor_registration=official)
+    assert yaml.safe_load(path.read_text())["donor_registration"] == {"use_rotation_transform": True, "bend_coef": 0.1, "rot_coef": 0.001}
+    rule = load_rule(str(path))
+    assert rule.donor_registration == official
+    series = [np.full(4, -1.0)] * 2
+    w, record = SkillMixer(coefficients=rule).decide(scene(2, donor_registration=dict(official)), 0, series)
+    assert record["registration"] == official and w.sum() == pytest.approx(1.0)
+    for other in ({**official, "bend_coef": 0.2}, {**official, "use_rotation_transform": False}, {"bend_coef": 0.1}):
+        with pytest.raises(ValueError, match="donors of the scene were registered with"):
+            SkillMixer(coefficients=rule).decide(scene(2, donor_registration=other), 0, series)
+    with pytest.raises(ValueError, match="donors of the scene were registered with"):            # a rule fitted without any
+        SkillMixer(coefficients=_rule(2)).decide(scene(2, donor_registration=dict(official)), 0, series)
+    plain = SkillMixer(coefficients=rule).decide(scene(2), 0, series)[1]                       # a rigid subtask registers nothing
+    assert "registration" not in plain
+    randmix = SkillMixer(rule="randmix").decide(scene(2, donor_registration=dict(official)), 0, series)[1]
+    assert randmix["registration"] == official                           # recorded for the fit, nothing to check yet
+    assert _rule(2).donor_registration is None and load_rule("mimicgen/square").donor_registration is None
+
+
 def test_a_rule_file_lists_its_features_and_hold_rule(tmp_path):
     from tmg.generation.fit_coefficients import write_rule
 
