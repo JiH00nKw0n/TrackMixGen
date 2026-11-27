@@ -138,4 +138,4 @@ class CPGenGenerator(RobosuiteGenerator):
 
     def demo_layout(self) -> dict:
         return {"demo_glob": GENERATED_OBS, "image_key": "{cam}_image", "actions_key": "actions", "states_key": "states",
-                "labels_from_records": False, "success_only_file": True}
+                "labels_from_records": False, "success_only_file": True, "replay_attrs": ["model_file"]}

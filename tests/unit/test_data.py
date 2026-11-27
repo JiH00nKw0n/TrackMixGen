@@ -402,3 +402,74 @@ def test_isaaclab_datasets_copy_the_replay_groups_of_the_same_demo(tmp_path, cap
     write_dataset(mg, candidates(mg_pool)[:2], pool=mg_pool, observation=IMAGE, meta={"label": "pre_noise"}, layout=MIMICGEN_LAYOUT)
     with h5py.File(mg, "r") as f:
         assert "initial_state" not in f["data/demo_0"] and isinstance(f["data/demo_0/states"], h5py.Dataset)
+
+
+def test_per_step_replay_groups_must_have_one_entry_per_step(tmp_path):
+    """The layout declares which replay groups are per step (Isaac Lab: states); a leaf of another length is a
+    DatasetError naming it, since a replay would index it by step. initial_state (one entry) is not per step."""
+    from tmg.data.dataset import DemoLayout
+    from tmg.generation.generators.isaaclab.adapter import IsaacLabGenerator
+
+    official = IsaacLabGenerator.demo_layout(None)
+    assert official["per_step_groups"] == ["states"]
+    layout = DemoLayout.from_mapping({**official, "demo_glob": "*/demo.hdf5", "image_key": "{cam}_image", "labels_from_records": False})
+    assert layout.per_step_groups == ("states",)
+    pool = make_pool(tmp_path)
+    _add_isaaclab_replay_groups(pool, np.random.default_rng(5))
+    cands = candidates(pool)
+    write_dataset(tmp_path / "ok.hdf5", cands, pool=pool, observation=IMAGE, meta={"label": "pre_noise"}, layout=layout)
+    with h5py.File(cands[1]["demo_file"], "a") as f:                  # one leaf of one demo is a step short
+        g = f["data"][cands[1]["demo_key"]]["states/articulation/robot"]
+        short = g["root_pose"][:-1]
+        del g["root_pose"]
+        g.create_dataset("root_pose", data=short)
+    with pytest.raises(DatasetError, match=rf"{cands[1]['demo_key']}: replay group 'states' has 1 per-step datasets.*"
+                                           rf"states/articulation/robot/root_pose: {cands[1]['n_steps'] - 1}"):
+        write_dataset(tmp_path / "short.hdf5", cands, pool=pool, observation=IMAGE, meta={"label": "pre_noise"}, layout=layout)
+    assert not (tmp_path / "short.hdf5").exists()
+    with pytest.raises(ValueError, match="per_step_groups"):
+        DemoLayout(demo_glob="x", image_key="{cam}", states_key=None, replay_groups=("initial_state",), per_step_groups=("states",))
+
+
+def test_replay_attributes_are_declared_by_the_layout_and_a_missing_one_is_warned_about_once(tmp_path, capsys):
+    """model_file is copied because MimicGen's and CP-Gen's layouts declare it (``replay_attrs``), not by a special case of
+    the writer; a layout that declares none copies none; a demo that lacks a declared one is reported once per dataset."""
+    from tmg.data.dataset import MIMICGEN_LAYOUT, DemoLayout
+    from tmg.generation.generators.cpgen.adapter import CPGenGenerator
+    from tmg.generation.generators.isaaclab.adapter import IsaacLabGenerator
+    from tmg.generation.generators.mimicgen.adapter import MimicGenGenerator
+
+    assert MimicGenGenerator.demo_layout(None)["replay_attrs"] == ["model_file"] == CPGenGenerator.demo_layout(None)["replay_attrs"]
+    assert MIMICGEN_LAYOUT.replay_attrs == ("model_file",) and "replay_attrs" not in IsaacLabGenerator.demo_layout(None)
+    pool = make_pool(tmp_path)
+    cands = candidates(pool)
+    with h5py.File(cands[2]["demo_file"], "a") as f:
+        del f["data"][cands[2]["demo_key"]].attrs["model_file"]
+    write_dataset(tmp_path / "mg.hdf5", cands, pool=pool, observation=IMAGE, meta={"label": "pre_noise"})
+    out = capsys.readouterr().out
+    assert out.count("WARNING") == 1 and "1 of 4 demos have no replay attribute 'model_file'" in out
+    with h5py.File(tmp_path / "mg.hdf5", "r") as f:
+        assert ["model_file" in f["data"][f"demo_{j}"].attrs for j in range(4)] == [True, True, False, True]
+    plain = DemoLayout(demo_glob="*/demo.hdf5", image_key="{cam}_image")           # declares no replay attribute
+    write_dataset(tmp_path / "plain.hdf5", cands, pool=pool, observation=IMAGE, meta={"label": "pre_noise"}, layout=plain)
+    with h5py.File(tmp_path / "plain.hdf5", "r") as f:
+        assert all("model_file" not in f["data"][k].attrs for k in f["data"]) and "WARNING" not in capsys.readouterr().out
+    other = DemoLayout(demo_glob="*/demo.hdf5", image_key="{cam}_image", replay_attrs=("model_file", "scene_usd"))
+    write_dataset(tmp_path / "other.hdf5", cands, pool=pool, observation=IMAGE, meta={"label": "pre_noise"}, layout=other)
+    assert "4 of 4 demos have no replay attribute 'scene_usd'" in capsys.readouterr().out
+
+
+def test_invalid_successes_keep_their_place_in_the_demo_file_and_are_left_out_of_the_dataset(tmp_path, capsys):
+    """An Isaac Lab attempt of a mixing method whose subtask scene could not be read is exported by the official recorder
+    (it succeeded) but is not a demonstration of the method: the k-th demo stays the k-th success, the invalid one is not a
+    candidate."""
+    pool = make_pool(tmp_path, chunks=1, attempts=6)                   # successes: attempts 0, 2, 4 = demo_0, demo_1, demo_2
+    before = candidates(pool)
+    records = pool / CHUNKS_DIR / "seed1" / RECORDS_DIR / ATTEMPTS_JSONL
+    lines = [json.loads(text) for text in records.read_text().splitlines()]
+    lines[2]["invalid"] = "scene_error"
+    records.write_text("".join(json.dumps(line) + "\n" for line in lines))
+    after = candidates(pool)
+    assert [(c["attempt"], c["demo_key"]) for c in before] == [(0, "demo_0"), (2, "demo_1"), (4, "demo_2")]
+    assert [(c["attempt"], c["demo_key"]) for c in after] == [(0, "demo_0"), (4, "demo_2")]
+    assert "1 successful attempts" in capsys.readouterr().out and "scene_error" not in str(after)

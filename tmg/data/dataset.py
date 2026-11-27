@@ -26,11 +26,14 @@ Output layout (``<output>``, robomimic-compatible plus our extras)::
         states                  (T, S) float64          simulator states (for replay and for the first-state reset)
         subtask_of_step         (T,)   int16            subtask index of each step (from the segment table)
         src_demo_inds           (K,)   int64            source demonstration chosen for each subtask
-        attrs: chunk, attempt, num_samples, pool, model_file (the scene XML, copied when the generator's demo has it)
+        attrs: chunk, attempt, num_samples, pool, and the demo attributes the generator's layout declares for replay
+               (``DemoLayout.replay_attrs``; MimicGen and CP-Gen: model_file, the scene XML)
         initial_state/...       nested groups            Isaac Lab generators only (``DemoLayout.replay_groups``): the
         states/...              (T, ...) per leaf        recorder's scene state at reset and per step (articulation,
                                                          rigid_object, deformable_object or deformable / <asset> / <field>),
-                                                         copied unchanged (keys, dtypes, gzip filters) for replay
+                                                         copied unchanged (keys, dtypes, gzip filters) for replay; every
+                                                         leaf of a per-step group (``DemoLayout.per_step_groups``: states)
+                                                         must have T entries
     mask/train                  (N,)   bytes            every demo key (one split; validation is by rollout)
 
 Selection is uniform without replacement among all successes of the pool (``seed``). The generator may then
@@ -74,11 +77,19 @@ class DemoLayout:
     # nested state groups of the demo copied whole into the dataset demo for replay (Isaac Lab: initial_state, states);
     # () for generators whose states are one flat dataset (``states_key``: MimicGen, CP-Gen)
     replay_groups: tuple[str, ...] = ()
+    # the replay groups that hold one entry per step: every leaf dataset must have as many entries as the demo has steps
+    per_step_groups: tuple[str, ...] = ()
+    # attributes of the generator's demo that a replay needs, copied to the dataset demo (MimicGen and CP-Gen: model_file,
+    # the scene XML with the fixtures placed at reset); a demo without one is reported once per dataset
+    replay_attrs: tuple[str, ...] = ()
 
     def __post_init__(self):
-        object.__setattr__(self, "replay_groups", tuple(str(g) for g in self.replay_groups))
+        for name in ("replay_groups", "per_step_groups", "replay_attrs"):
+            object.__setattr__(self, name, tuple(str(g) for g in getattr(self, name)))
         if self.states_key and "states" in self.replay_groups:
             raise ValueError("demo_layout(): a flat states_key and a replay group 'states' would write the same name")
+        if set(self.per_step_groups) - set(self.replay_groups):
+            raise ValueError(f"demo_layout(): per_step_groups {self.per_step_groups} must be among replay_groups {self.replay_groups}")
 
     @classmethod
     def from_mapping(cls, m: dict) -> DemoLayout:
@@ -91,7 +102,7 @@ class DemoLayout:
         return cls(**{k: m[k] for k in known if k in m})
 
 
-MIMICGEN_LAYOUT = DemoLayout(demo_glob="*/demo.hdf5", image_key="{cam}_image")
+MIMICGEN_LAYOUT = DemoLayout(demo_glob="*/demo.hdf5", image_key="{cam}_image", replay_attrs=("model_file",))
 
 
 class Candidate(TypedDict):
@@ -122,12 +133,14 @@ def successes_of_chunk(chunk: Path) -> list[dict]:
 
 
 def candidates(pool: Path, layout: DemoLayout = MIMICGEN_LAYOUT) -> list[Candidate]:
-    """Every success of the pool as ``{chunk, demo_key, attempt, n_steps}``; demo order checked against the records.
+    """Every success of the pool as ``{chunk, demo_key, attempt, n_steps}``; demo order checked against the records. A
+    successful attempt whose record says ``invalid`` (an Isaac Lab attempt of a mixing method with a subtask whose scene
+    could not be read, so it was not mixed as the method says) keeps its place in the demo order and is left out.
 
     Raises:
         DatasetError: a chunk's demonstration count or step counts disagree with its attempt records.
     """
-    out = []
+    out, invalid = [], {}
     for chunk in sorted(p for p in (pool / CHUNKS_DIR).glob("seed*") if chunk_is_done(p)):
         records = successes_of_chunk(chunk)
         demo_file = chunk_demo_file(chunk, layout)
@@ -140,12 +153,18 @@ def candidates(pool: Path, layout: DemoLayout = MIMICGEN_LAYOUT) -> list[Candida
             if len(keys) != len(records):
                 raise DatasetError(f"{chunk.name}: {demo_file.name} has {len(keys)} demos, records list {len(records)} successes")
             for key, rec in zip(keys, records):
+                if rec.get("invalid"):          # exported by the generator, but not a demonstration of the pool's method
+                    invalid[str(rec["invalid"])] = invalid.get(str(rec["invalid"]), 0) + 1
+                    continue
                 n = int(f["data"][key][layout.actions_key].shape[0])
                 if n != int(rec["n_steps"]):
                     raise DatasetError(f"{chunk.name}/{key}: {n} steps in {demo_file.name}, {rec['n_steps']} in the records "
                                        f"(attempt {rec['attempt']})")
                 out.append({"chunk": chunk.name, "demo_file": str(demo_file), "demo_key": key,
                             "attempt": int(rec["attempt"]), "n_steps": n, "src_demo_inds": rec.get("src_demo_inds")})
+    for reason, count in invalid.items():
+        print(f"[tmg] WARNING {count} successful attempts of {pool} are marked invalid ({reason}) and left out of the dataset",
+              flush=True)
     return out
 
 
@@ -245,16 +264,43 @@ def _action_triplet(c: Candidate, demo, z, layout: DemoLayout, label: str | None
     return actions, a_exec, a_label
 
 
-def _copy_replay_groups(demo, g, names, missing: dict) -> None:
-    """Copy the demo's nested state groups ``names`` into the dataset demo ``g`` unchanged: h5py's group copy keeps every
-    key, shape, dtype, attribute and the source's gzip filter, so the per-step deformable states (Towel: 5,989 nodes,
-    about 12.8 MB per demo already compressed, 2026-11-27) are not recompressed. A group the demo lacks is counted in
-    ``missing`` (the caller warns once per dataset)."""
-    for name in names:
-        if isinstance(demo.get(name), h5py.Group):
-            demo.file.copy(demo[name], g, name=name)
+def _leaf_lengths(group, prefix: str = "") -> dict:
+    """``{path: first-axis length}`` of every dataset under an hdf5 group."""
+    out = {}
+    for key, item in group.items():
+        path = f"{prefix}/{key}" if prefix else key
+        if isinstance(item, h5py.Dataset):
+            out[path] = int(item.shape[0]) if item.ndim else 0
         else:
-            missing[name] = missing.get(name, 0) + 1
+            out.update(_leaf_lengths(item, path))
+    return out
+
+
+def _copy_replay(c: Candidate, demo, g, layout: DemoLayout, missing: dict) -> None:
+    """Copy what a replay of the demo needs, as the layout declares it.
+
+    The nested state groups ``layout.replay_groups`` go into the dataset demo ``g`` unchanged: h5py's group copy keeps every
+    key, shape, dtype, attribute and the source's gzip filter, so the per-step deformable states (Towel: 5,989 nodes,
+    about 12.8 MB per demo already compressed, 2026-11-27) are not recompressed. Every leaf of a per-step group
+    (``layout.per_step_groups``) must have one entry per step of the demo (``DatasetError``): a replay indexes it by step.
+    The attributes ``layout.replay_attrs`` are copied as they are. A group or attribute the demo lacks is counted in
+    ``missing`` (the caller warns once per dataset)."""
+    for name in layout.replay_groups:
+        if not isinstance(demo.get(name), h5py.Group):
+            missing[f"group {name!r}"] = missing.get(f"group {name!r}", 0) + 1
+            continue
+        if name in layout.per_step_groups:
+            wrong = {path: n for path, n in _leaf_lengths(demo[name]).items() if n != int(c["n_steps"])}
+            if wrong:
+                path, n = next(iter(wrong.items()))
+                raise DatasetError(f"{c['chunk']}/{c['demo_key']}: replay group {name!r} has {len(wrong)} per-step datasets "
+                                   f"whose length is not the demo's {c['n_steps']} steps, e.g. {name}/{path}: {n}")
+        demo.file.copy(demo[name], g, name=name)
+    for name in layout.replay_attrs:
+        if name in demo.attrs:
+            g.attrs[name] = demo.attrs[name]
+        else:
+            missing[f"attribute {name!r}"] = missing.get(f"attribute {name!r}", 0) + 1
 
 
 def write_dataset(path: Path, chosen: list[Candidate], *, pool: Path, observation: dict, meta: dict,
@@ -310,25 +356,23 @@ def write_dataset(path: Path, chosen: list[Candidate], *, pool: Path, observatio
                 g.create_dataset("actions_pre_noise", data=a_label)
                 if layout.states_key and layout.states_key in demo:
                     g.create_dataset("states", data=np.asarray(demo[layout.states_key], dtype=np.float64))
-                _copy_replay_groups(demo, g, layout.replay_groups, missing_replay)
                 g.create_dataset("subtask_of_step", data=_subtask_of_step(z))
                 g.create_dataset("src_demo_inds", data=np.asarray(c["src_demo_inds"] if c["src_demo_inds"] is not None
                                                                   else demo["src_demo_inds"], dtype=np.int64))
                 g.attrs["chunk"], g.attrs["attempt"] = c["chunk"], int(c["attempt"])
                 g.attrs["num_samples"], g.attrs["pool"] = int(c["n_steps"]), str(pool)
-                # the demo's scene XML (MimicGen and CP-Gen store it per demo): fixtures placed at reset (Square's peg,
-                # the Cleanup tasks' drawer) live only in the XML, not in `states`, so without it a demo cannot be
-                # replayed or re-rendered faithfully (2026-11-27: the 11-23 Stack Three re-render drew 94 demos with
-                # the default camera because the dataset had no model_file)
-                if "model_file" in demo.attrs:
-                    g.attrs["model_file"] = demo.attrs["model_file"]
+                # e.g. the demo's scene XML (MimicGen and CP-Gen: model_file): fixtures placed at reset (Square's peg, the
+                # Cleanup tasks' drawer) live only in the XML, not in `states`, so without it a demo cannot be replayed or
+                # re-rendered faithfully (2026-11-27: the 11-23 Stack Three re-render drew 94 demos with the default
+                # camera because the dataset had no model_file)
+                _copy_replay(c, demo, g, layout, missing_replay)
                 total_steps += int(c["n_steps"])
         finally:
             for f in open_files.values():
                 f.close()
-        for name, count in missing_replay.items():          # once per dataset, not once per demo
-            print(f"[tmg] WARNING {count} of {len(chosen)} demos have no replay group {name!r} in the generator's demo "
-                  f"file; those demos cannot be replayed from the dataset", flush=True)
+        for what, count in missing_replay.items():          # once per dataset, not once per demo
+            print(f"[tmg] WARNING {count} of {len(chosen)} demos have no replay {what} in the generator's demo file; "
+                  f"those demos cannot be replayed faithfully from the dataset", flush=True)
         data.attrs["env_args"] = env_args if env_args is not None else "{}"
         data.attrs["total"] = total_steps
         data.attrs["cameras"] = json.dumps(cameras)

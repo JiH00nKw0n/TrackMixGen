@@ -89,7 +89,7 @@ class MimicGenGenerator(RobosuiteGenerator):
     def demo_layout(self) -> dict:
         """How ``tmg dataset`` reads MimicGen chunk outputs (``<experiment>/demo.hdf5``, robomimic layout)."""
         return {"demo_glob": "*/demo.hdf5", "image_key": "{cam}_image", "actions_key": "actions", "states_key": "states",
-                "labels_from_records": False, "success_only_file": True}
+                "labels_from_records": False, "success_only_file": True, "replay_attrs": ["model_file"]}
 
     def chunk_result(self, spec: ChunkSpec) -> dict | None:
         """Summary of a finished chunk, an ``error`` entry when MimicGen's outputs and our records disagree,
