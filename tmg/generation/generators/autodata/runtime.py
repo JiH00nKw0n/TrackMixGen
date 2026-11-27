@@ -188,8 +188,9 @@ class AutoDataRuntime(IsaacLabRuntime):
             obs = {"subtask_terms": terms} if terms else None
             if not terms and not self._said_no_terms:
                 self._said_no_terms = True
-                print("[tmg] the environment publishes no subtask_terms observation group: the records carry no per-step "
-                      "subtask signals (task.fit.reached)", flush=True)
+                print("[tmg] the environment publishes no per-step subtask signals (no subtask_terms observation group, "
+                      "and get_subtask_term_signals is absent or not implemented): the records carry none, so the task's "
+                      "fit must be declared with fit.reached: task_success", flush=True)
         super().record_step(multi_waypoint, env, env_id, obs, success)
 
     def record_command(self, multi_waypoint, datastream, env_id: int, play_action) -> None:
@@ -198,13 +199,17 @@ class AutoDataRuntime(IsaacLabRuntime):
 
 
 def subtask_terms(env, env_id: int) -> dict:
-    """The subtask termination signals of the environment's current state, ``{name: value}`` (empty when it has none)."""
+    """The subtask termination signals of the environment's current state, ``{name: value}``; empty when it has none: no
+    ``subtask_terms`` observation group and a ``get_subtask_term_signals`` that is absent or raises NotImplementedError."""
     groups = getattr(env, "obs_buf", None)
     if isinstance(groups, dict) and isinstance(groups.get("subtask_terms"), dict) and groups["subtask_terms"]:
         return dict(groups["subtask_terms"])
     getter = getattr(env, "get_subtask_term_signals", None)
     if callable(getter):
-        signals = getter(env_ids=[env_id])
+        try:
+            signals = getter(env_ids=[env_id])
+        except NotImplementedError:       # the Mimic base class declares the method; an env without signals leaves it so
+            return {}
         return {k: (v[0] if hasattr(v, "__getitem__") and getattr(v, "ndim", 0) > 0 else v) for k, v in dict(signals or {}).items()}
     return {}
 

@@ -408,3 +408,33 @@ def test_autodata_records_the_subtask_term_signals_from_the_environment(torch, t
     assert line["term_first"] == {"grasp_bottle": 2} and [s["start_step"] for s in line["subtasks"]] == [0, 3]
     env = types.SimpleNamespace(obs_buf={}, get_subtask_term_signals=lambda env_ids: {"done": T([1.0])})
     assert list(subtask_terms(env, 0)) == ["done"] and subtask_terms(types.SimpleNamespace(), 0) == {}
+
+
+def test_an_environment_whose_signal_getter_is_not_implemented_has_no_signals_and_says_so_once(torch, tmp_path, capsys):
+    """Isaac Lab Mimic's base environment declares ``get_subtask_term_signals`` and raises NotImplementedError (GR1T2 Pick
+    Place): that is "no signals", logged once, not a crash at the first step; any other error still surfaces."""
+    from tmg.generation.generators.autodata.runtime import subtask_terms
+
+    def not_implemented(env_ids):
+        raise NotImplementedError
+
+    def broken(env_ids):
+        raise RuntimeError("simulation lost")
+
+    assert subtask_terms(types.SimpleNamespace(obs_buf={}, get_subtask_term_signals=not_implemented), 0) == {}
+    with pytest.raises(RuntimeError, match="simulation lost"):
+        subtask_terms(types.SimpleNamespace(obs_buf={}, get_subtask_term_signals=broken), 0)
+    rt = make_runtime(Method0(), records_dir=tmp_path)
+    ds = FakeDatastream(torch)
+    ds.env.get_subtask_term_signals = not_implemented
+    gen = types.SimpleNamespace(datastream=ds)
+    rt.begin_attempt(gen, 0)
+    mw = types.SimpleNamespace(waypoints={"right": types.SimpleNamespace(pose=T(pose(2.0)), passthrough_action={"right": T([0.0, 1.0])}, noise=0.0)})
+    for _ in range(3):
+        rt.record_command(mw, ds, 0, ds.target_eef_pose_to_action({"right": T(pose(2.0))}, {}, None, 0))
+        rt.record_step(mw, ds.get_env(), 0, None, False)
+    rt.end_attempt(gen, 0, {"success": False})
+    line = json.loads((tmp_path / "attempts.jsonl").read_text().splitlines()[0])
+    out = capsys.readouterr().out
+    assert line["term_first"] == {} and line["n_steps"] == 3 and out.count("publishes no per-step subtask signals") == 1
+    assert "fit.reached: task_success" in out
