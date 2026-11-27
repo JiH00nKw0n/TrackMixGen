@@ -47,6 +47,7 @@ def make_pool(root, *, chunks=2, attempts=4, h=8, w=8, seed=0):
                     g.create_dataset("actions", data=rng.normal(size=(n, 7)))
                     g.create_dataset("states", data=rng.normal(size=(n, 11)))
                     g.create_dataset("src_demo_inds", data=np.array([a % 3, (a + 1) % 3]))
+                    g.attrs["model_file"] = f"<mujoco model='chunk{c}_attempt{a}'/>"
         (rec / ATTEMPTS_JSONL).write_text("\n".join(lines) + "\n")
         write_json(chunk / CHUNK_DONE, {"ok": True})
     write_json(pool / POOL_DONE, {"attempts": chunks * attempts})
@@ -83,8 +84,13 @@ def test_candidates_select_and_write(tmp_path):
         assert f["data"].attrs["total"] == sum(f["data"][k].attrs["num_samples"] for k in f["data"]) == sum(c["n_steps"] for c in chosen)
         assert sorted(d) == ["actions", "actions_executed", "actions_pre_noise", "obs", "src_demo_inds", "states", "subtask_of_step"]
         assert sorted(d["obs"]) == ["agentview_image", "robot0_eef_pos", "robot0_gripper_qpos", "robot_state"]
-        assert sorted(d.attrs) == ["attempt", "chunk", "num_samples", "pool"]
+        assert sorted(d.attrs) == ["attempt", "chunk", "model_file", "num_samples", "pool"]
         assert d.attrs["chunk"] == chosen[0]["chunk"] and d.attrs["attempt"] == chosen[0]["attempt"] and d.attrs["pool"] == str(pool)
+        # every written demo carries the scene XML of the very demo it was read from (not the first chunk's, not shifted)
+        for j, c in enumerate(chosen):
+            chunk_index = int(c["chunk"][len("seed"):]) - 1      # make_pool names chunk c "seed{c + 1}"
+            expected = f"<mujoco model='chunk{chunk_index}_attempt{c['attempt']}'/>"
+            assert f["data"][f"demo_{j}"].attrs["model_file"] == expected
         dtypes = {k: str(d[k].dtype) for k in ("actions", "actions_executed", "actions_pre_noise", "states", "subtask_of_step", "src_demo_inds")}
         assert dtypes == {"actions": "float32", "actions_executed": "float32", "actions_pre_noise": "float32", "states": "float64",
                           "subtask_of_step": "int16", "src_demo_inds": "int64"}

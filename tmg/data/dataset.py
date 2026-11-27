@@ -26,7 +26,7 @@ Output layout (``<output>``, robomimic-compatible plus our extras)::
         states                  (T, S) float64          simulator states (for replay and for the first-state reset)
         subtask_of_step         (T,)   int16            subtask index of each step (from the segment table)
         src_demo_inds           (K,)   int64            source demonstration chosen for each subtask
-        attrs: chunk, attempt, num_samples, pool
+        attrs: chunk, attempt, num_samples, pool, model_file (the scene XML, copied when the generator's demo has it)
     mask/train                  (N,)   bytes            every demo key (one split; validation is by rollout)
 
 Selection is uniform without replacement among all successes of the pool (``seed``). The generator may then
@@ -290,6 +290,12 @@ def write_dataset(path: Path, chosen: list[Candidate], *, pool: Path, observatio
                                                                   else demo["src_demo_inds"], dtype=np.int64))
                 g.attrs["chunk"], g.attrs["attempt"] = c["chunk"], int(c["attempt"])
                 g.attrs["num_samples"], g.attrs["pool"] = int(c["n_steps"]), str(pool)
+                # the demo's scene XML (MimicGen and CP-Gen store it per demo): fixtures placed at reset (Square's peg,
+                # the Cleanup tasks' drawer) live only in the XML, not in `states`, so without it a demo cannot be
+                # replayed or re-rendered faithfully (2026-11-27: the 11-23 Stack Three re-render drew 94 demos with
+                # the default camera because the dataset had no model_file)
+                if "model_file" in demo.attrs:
+                    g.attrs["model_file"] = demo.attrs["model_file"]
                 total_steps += int(c["n_steps"])
         finally:
             for f in open_files.values():
