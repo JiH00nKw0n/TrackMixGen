@@ -248,7 +248,8 @@ class IsaacLabRuntime:
         raise NotImplementedError(f"{type(self).__name__}: no deformable objects")
 
     def bind_official(self, DataGenerator) -> None:
-        """Read what the runtime takes from the official generator class itself (nothing here)."""
+        """Read what the mixing takes from the official generator class itself (nothing here). ``install`` calls it only
+        for a method with a mixer, so an unmixed run never depends on it."""
 
     def measured_poses(self, owner, env_id: int, eefs) -> dict:
         """Measured end-effector poses: the configured links (``measure_links``) or the environment's observed eef poses."""
@@ -623,7 +624,8 @@ def install(package: str, runtime: IsaacLabRuntime, graft_hashes: dict) -> dict:
     dg = importlib.import_module(f"{package}.data_generator")
     wp = importlib.import_module(f"{package}.waypoint")
     DataGenerator, MultiWaypoint = dg.DataGenerator, wp.MultiWaypoint
-    runtime.bind_official(DataGenerator)               # before the builder is replaced by its grafted copy
+    if runtime.method.mixer is not None:               # only mixing reads the official class; before the builder is grafted
+        runtime.bind_official(DataGenerator)
     gen = Graft(DataGenerator.generate, expected_hash=graft_hashes.get("generate"), label="DataGenerator.generate")
     gen.insert_after_assign("new_initial_state", "_tmg.begin_attempt(self, env_id)")
     gen.insert_before_final_return("_tmg.end_attempt(self, env_id, results)")

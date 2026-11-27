@@ -744,7 +744,16 @@ def test_install_grafts_the_soft_builder_at_its_class_level_anchors(tmp_path, mo
     assert info["execute"] == ["after 'play_action = ...': _tmg.record_command(self, env, env_id, state, play_action)",
                                "after 'success = ...': _tmg.record_step(self, env, env_id, obs, success)"]
     assert dg.DataGenerator.generate_trajectory.__globals__["_tmg"] is runtime and dg.DataGenerator.generate.__tmg_graft__["edits"] == info["generate"]
-    assert runtime.registration_kwargs == {"use_rotation_transform": True, "bend_coef": 0.1, "rot_coef": 1e-3}   # the official call's
+    assert runtime.registration_kwargs == {}                       # an unmixed run reads nothing from the official builder
+    mixing = rt.SoftMimicGenRuntime(Method0(RecordingMixer()), soft_layout(), records_dir=None)
+    fake_package(tmp_path, monkeypatch, "fakesoft2", SOFT_PACKAGE, WAYPOINT_MODULE)
+    rt.install("fakesoft2", mixing, {})
+    assert mixing.registration_kwargs == {"use_rotation_transform": True, "bend_coef": 0.1, "rot_coef": 1e-3}   # the official call's
+    fake_package(tmp_path, monkeypatch, "fakemimic", MIMIC_PACKAGE.replace("generate_eef_subtask_trajectory", "generate_trajectory")
+                 .replace("src_subtask_object_pose = 4", "src_subtask_nodal_positions = 4"), WAYPOINT_MODULE)
+    rt.install("fakemimic", rt.SoftMimicGenRuntime(Method0(None), soft_layout(), records_dir=None), {})   # no such call: unmixed is unaffected
+    with pytest.raises(RuntimeError, match="expected one call"):
+        rt.install("fakemimic", rt.SoftMimicGenRuntime(Method0(RecordingMixer()), soft_layout(), records_dir=None), {})
     assert inspect.iscoroutinefunction(wp.MultiWaypoint.execute)
     with pytest.raises(Exception):      # noqa: B017  Isaac Lab Mimic's builder name does not exist in the Soft-shaped package
         rt.install("fakesoft", rt.IsaacLabRuntime(Method0(), soft_layout(), records_dir=None), {})
