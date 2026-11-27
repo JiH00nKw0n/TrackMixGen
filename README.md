@@ -11,6 +11,8 @@ Generators: MimicGen (robosuite), SoftMimicGen (Isaac Lab fork), DexMimicGen (NV
 baseline runs end to end on one GPU machine with `scripts/run_isaaclab_baseline.sh`, and `docs/ISAACLAB_BASELINE_RUNBOOK.md` is the hand-off guide.
 The MimicGen baseline (seven tasks, Diffusion Policy and BC-RNN on images) runs with `scripts/run_mimicgen_baseline.sh`, and
 `docs/MIMICGEN_BASELINE_RUNBOOK.md` is its hand-off guide (Korean).
+The SkillMix factor experiment (one method config per condition, low-dim pools, Diffusion Policy) runs with
+`scripts/run_factor_experiment.sh`; `docs/SKILLMIX_FACTOR_EXPERIMENT.md` describes the conditions and the commands (Korean).
 Pipeline: source demonstrations, generation pools, SkillMix rule files, datasets, policies (BC-RNN, Diffusion
 Policy, π0 through LeRobot 0.6.1), fixed-scene evaluation through a policy server. Every command composes one
 config and writes one output folder with the resolved config and a provenance record.

@@ -1,0 +1,9 @@
+# Factor experiment, condition C2 "select only" (docs/SKILLMIX_FACTOR_EXPERIMENT.md): SkillMix's choice of sources without
+# any blending. The derived rule file `select_only` has d = -1 in every subtask, so each subtask takes one source, drawn
+# with probability softmax(score) over the compatible sources (single_source: sample, from skillmix_sample).
+defaults:
+  - skillmix_sample
+  - _self_
+name: skillmix_select
+mixing:
+  derived: select_only              # coefficients/derived/select_only/<task>.yaml (scripts/derive_coefficients.py)

@@ -47,3 +47,11 @@ method_overrides:
   skillmix_sparsemax: {labels: pre_noise}
   skillmix_sample: {labels: pre_noise}
   skillmix_randmix: {labels: pre_noise}   # the randmix pools of the SkillMix fit (method skillmix, rule randmix)
+  # the conditions of the factor experiment (docs/SKILLMIX_FACTOR_EXPERIMENT.md)
+  skillmix_select: {labels: pre_noise}
+  skillmix_top1: {labels: pre_noise}
+  skillmix_uniform: {labels: pre_noise}
+  skillmix_distcap: {labels: pre_noise}
+  skillmix_neff3: {labels: pre_noise}
+  skillmix_mix_grasp: {labels: pre_noise}
+  skillmix_mix_place: {labels: pre_noise}

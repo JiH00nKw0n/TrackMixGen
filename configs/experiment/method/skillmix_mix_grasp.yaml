@@ -1,0 +1,9 @@
+# Factor experiment, condition G "mix only the grasp subtasks" (docs/SKILLMIX_FACTOR_EXPERIMENT.md). The derived rule file
+# `mix_grasp` keeps the fitted d of the subtasks of kind grasp (blended where the fit gives d > 0) and sets d = -1 in every
+# other subtask, which then takes one source drawn with probability softmax(score) (single_source: sample).
+defaults:
+  - skillmix_sample
+  - _self_
+name: skillmix_mix_grasp
+mixing:
+  derived: mix_grasp                # coefficients/derived/mix_grasp/<task>.yaml (scripts/derive_coefficients.py)

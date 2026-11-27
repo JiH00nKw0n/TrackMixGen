@@ -1,0 +1,7 @@
+defaults:
+  - pool_robosuite_lowdim
+  - _self_
+# The low-dim pools of the SkillMix factor experiment (docs/SKILLMIX_FACTOR_EXPERIMENT.md, scripts/run_factor_experiment.sh):
+# the protocol, chunking and chunk seeds of `pool_robosuite_lowdim` under a name of its own, so every condition's pool is
+# made by the same code in a new folder and none continues a `pool_robosuite_lowdim` folder left by older code.
+name: pool_factor_lowdim

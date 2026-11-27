@@ -1,0 +1,9 @@
+# Factor experiment, condition C4 "uniform" (docs/SKILLMIX_FACTOR_EXPERIMENT.md): blending without SkillMix's choice of
+# sources. The derived rule file `uniform` has d = 1000 in every subtask, so the weights softmax(s / 1000) are nearly
+# equal over the compatible sources.
+defaults:
+  - skillmix
+  - _self_
+name: skillmix_uniform
+mixing:
+  derived: uniform                  # coefficients/derived/uniform/<task>.yaml (scripts/derive_coefficients.py)

@@ -1,0 +1,10 @@
+defaults:
+  - /generation/pool_factor_lowdim@_here_
+  - _self_
+# The 50-attempt check of a factor-experiment condition (scripts/run_factor_experiment.sh with CHECK=1): one chunk of the
+# `pool_factor_lowdim` protocol in a folder of its own, whose attempt records scripts/mix_report.py summarizes (weights,
+# effective sources and dropped sources per subtask) before the full pool is generated.
+name: factor_check50
+attempts: 50
+chunk: 50
+seed_offset: 9500

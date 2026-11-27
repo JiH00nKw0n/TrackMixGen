@@ -19,6 +19,10 @@
 #   with that method, writes under <...>/<selection>/<method>/ and logs to logs/<generator>_<method>; the evaluation scenes are
 #   shared with the baseline; `make generate` first builds the task's SkillMix rule file if it is missing),
 #   GENERATION (pool_robosuite_image; hub: download the published SkillMix datasets instead of generating, see README 3.10),
+#   OBSERVATION (image; low_dim: the low-dim dataset and policies of the same pool, with a generation config without images
+#   such as pool_robosuite_lowdim), RUN_NAME (<generator>_baseline or <generator>_<method>: the log folder logs/<RUN_NAME> with
+#   the driver's FAILURES and DONE files, and the default bundle name; two drivers that share a generator and method, for
+#   example an image run and a low-dim run, need different names),
 #   ONLY_GENERATION (1: stop after the datasets), BUNDLE_NAME, PORT_BASE (8800: first policy-server port; run k uses
 #   PORT_BASE + 40 k ... + 40 k + 39, so two drivers on one machine need bases at least 40 x their runs apart),
 #   MINI (1: an end-to-end check at toy scale: a 200-attempt pool in the folder pilot50, 10-demonstration datasets, 200 training
@@ -33,7 +37,7 @@ else DEFAULT_TASKS="three_piece_assembly square stack_three mug_cleanup hammer_c
 TASKS=${TASKS:-$DEFAULT_TASKS}   # longest pools first
 POLICIES=${POLICIES:-"diffusion_policy bc_rnn"}; SEEDS=${SEEDS:-"202601 202602 202603"}; SIZE=${SIZE:-1000}
 POOL_LANES=${POOL_LANES:-2}; POLICY_PARALLEL=${POLICY_PARALLEL:-2}; VAL_PARALLEL=${VAL_PARALLEL:-4}; TEST_SHARDS=${TEST_SHARDS:-6}
-SCENE=ours; METHOD=${METHOD:-none}; OBSERVATION=image; SELECTION=${SELECTION:-official}
+SCENE=ours; METHOD=${METHOD:-none}; OBSERVATION=${OBSERVATION:-image}; SELECTION=${SELECTION:-official}
 GENERATION=${GENERATION:-pool_robosuite_image}; GEN_OVERRIDES=${GEN_OVERRIDES:-}; TRAIN_OVERRIDES=${TRAIN_OVERRIDES:-}; EVAL_EXTRA=${EVAL_EXTRA:-}
 # first attempt counts per task: about 1.1x the attempts that gave 1,000 successes in the 2026-10 low-dim pools (per-subtask random
 # selection); the pool is extended by 25 % steps until it holds SIZE successes, so a lower success rate only costs time
@@ -57,7 +61,8 @@ GEN_NAME=${GENERATION##*/}
 FROM_HUB=0; grep -q '^hub:' "$REPO/configs/experiment/generation/$GENERATION.yaml" 2>/dev/null && FROM_HUB=1
 export SINGULARITYENV_CUDA_VISIBLE_DEVICES=$GPU CUDA_VISIBLE_DEVICES=$GPU
 DATA_ROOT=$(make -s -C "$REPO" print-data-root CLUSTER="$CLUSTER")
-if [ "$METHOD" = none ]; then RUN_NAME=${GENERATOR}_baseline; else RUN_NAME=${GENERATOR}_${METHOD}; fi
+if [ "$METHOD" = none ]; then DEFAULT_RUN_NAME=${GENERATOR}_baseline; else DEFAULT_RUN_NAME=${GENERATOR}_${METHOD}; fi
+RUN_NAME=${RUN_NAME:-$DEFAULT_RUN_NAME}
 LOG=$DATA_ROOT/logs/$RUN_NAME; mkdir -p "$LOG"
 BUNDLE_NAME=${BUNDLE_NAME:-${RUN_NAME}_$(date +%Y%m%d)}
 log() { echo "[driver $(date '+%F %T')] $*" | tee -a "$LOG/driver.log"; }
@@ -154,7 +159,7 @@ collect_bundles() {
   done
 }
 
-log "start: cluster $CLUSTER, GPU $GPU, method $METHOD, tasks: $TASKS, policies: $POLICIES, seeds: $SEEDS, selection $SELECTION, generation $GENERATION, size $SIZE${MINI:+, MINI mode}"
+log "start: cluster $CLUSTER, GPU $GPU, method $METHOD, tasks: $TASKS, policies: $POLICIES, seeds: $SEEDS, selection $SELECTION, generation $GENERATION, observation $OBSERVATION, size $SIZE${MINI:+, MINI mode}"
 if [ -f "$LOG/FAILURES" ]; then mv "$LOG/FAILURES" "$LOG/FAILURES.$(date +%Y%m%d_%H%M%S)"; fi
 if [ -f "$LOG/DONE" ]; then mv "$LOG/DONE" "$LOG/DONE.$(date +%Y%m%d_%H%M%S)"; fi
 generation_lane &

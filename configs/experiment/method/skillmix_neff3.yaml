@@ -1,0 +1,10 @@
+# Factor experiment, condition C8 "effective sources >= 3" (docs/SKILLMIX_FACTOR_EXPERIMENT.md): SkillMix with the fitted
+# rule, but where the weights have fewer than 3 effective sources (1 / sum w^2) the softmax temperature is raised until
+# they have 3, or all the compatible sources share the weight equally when fewer than 3 are compatible
+# (tmg/generation/method/skillmix.py, mixing.min_effective_sources). A subtask whose fit gives d <= 0 is blended too.
+defaults:
+  - skillmix
+  - _self_
+name: skillmix_neff3
+mixing:
+  min_effective_sources: 3

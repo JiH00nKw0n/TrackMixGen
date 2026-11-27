@@ -1,0 +1,9 @@
+# Factor experiment, condition C3 "top-1" (docs/SKILLMIX_FACTOR_EXPERIMENT.md): no blending, and every subtask takes the
+# compatible source with the largest score (single_source: best, from skillmix). The derived rule file `select_only`
+# has d = -1 in every subtask.
+defaults:
+  - skillmix
+  - _self_
+name: skillmix_top1
+mixing:
+  derived: select_only              # coefficients/derived/select_only/<task>.yaml (scripts/derive_coefficients.py)

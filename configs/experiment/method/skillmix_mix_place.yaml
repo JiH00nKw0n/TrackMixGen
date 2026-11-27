@@ -1,0 +1,9 @@
+# Factor experiment, condition P "mix only the place and insert subtasks" (docs/SKILLMIX_FACTOR_EXPERIMENT.md). The derived
+# rule file `mix_place` keeps the fitted d of the subtasks of kind place (blended where the fit gives d > 0) and sets
+# d = -1 in every other subtask, which then takes one source drawn with probability softmax(score) (single_source: sample).
+defaults:
+  - skillmix_sample
+  - _self_
+name: skillmix_mix_place
+mixing:
+  derived: mix_place                # coefficients/derived/mix_place/<task>.yaml (scripts/derive_coefficients.py)

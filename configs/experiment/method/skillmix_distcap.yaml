@@ -1,0 +1,9 @@
+# Factor experiment, condition C7 "distance cap" (docs/SKILLMIX_FACTOR_EXPERIMENT.md): SkillMix with the fitted rule, but a
+# source whose pose after the symmetry alignment is farther from the selected source's than the cap is left out of the
+# blend and the remaining weights are renormalized (tmg/generation/method/skillmix.py, mixing.max_source_distance).
+defaults:
+  - skillmix
+  - _self_
+name: skillmix_distcap
+mixing:
+  max_source_distance: {rot_deg: 30, pos_cm: 3}   # either limit may be null (no limit on that quantity)
