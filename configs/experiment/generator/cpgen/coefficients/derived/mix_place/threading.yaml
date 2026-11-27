@@ -1,0 +1,95 @@
+# DERIVED rule file, condition 'mix_place': not a fit. Written by scripts/derive_coefficients.py from
+# configs/experiment/generator/cpgen/coefficients/softmax/threading.yaml with the transforms below; do not edit, derive it again after a refit.
+#   {'type': 'set_d', 'subtasks': {'except_kind': 'place'}, 'value': -1}
+# Everything else (a, g, c0 and the fit's statistics) is the fitted file's.
+# SkillMix softmax rule of cpgen threading (tmg fit_coefficients). Per subtask k, with phi_j = (|dx|, |dy|,
+# rotation, inhand_position, inhand_rotation) of source j against the current scene (in-hand terms 0 for k = 0):
+#   P(task succeeds | reached k, weights w) = sigmoid(c0 + sum_j w_j s_j + d spread(w)),
+#   s_j = a[j] + g . phi_j,  spread(w) = -sum_j w_j log w_j
+#   weights: softmax(s / d) over the sources compatible with the selected one when d > 0, the best one when d <= 0
+# Units: {'dx': 'm', 'dy': 'm', 'rotation': 'rad', 'inhand_position': 'm', 'inhand_rotation': 'rad'}.
+generator: cpgen
+task: threading
+rule: softmax
+basis: 'Fit (tmg fit_coefficients) on the randmix pools [''/data/pools/cpgen/threading/ours/ours/skillmix_randmix/pool_randmix_wt'']
+  (2000 attempts) and the unmix pools [''/data/scratch_calib/ctrl_records/threading''] (2000 attempts); rows of subtask k:
+  the attempts that reached it, label = the attempt''s task success.'
+num_sources: 10
+features:
+- dx
+- dy
+- rotation
+- inhand_position
+- inhand_rotation
+units:
+  dx: m
+  dy: m
+  rotation: rad
+  inhand_position: m
+  inhand_rotation: rad
+subtasks:
+  0:
+    a:
+    - 0.20590111853887932
+    - 0.1596715620634476
+    - 0.024307425382505365
+    - 0.18430715854469615
+    - -0.017658393654292778
+    - 0.044225776405241855
+    - 0.015433163741532937
+    - -0.1605866596336093
+    - -0.5720286849986996
+    - 0.08537507191192704
+    g:
+      dx: -0.5242030820661472
+      dy: 1.9873763517562144
+      rotation: -0.044757948212880136
+      inhand_position: 0.0
+      inhand_rotation: 0.0
+    d: -1.0
+    c0: -0.33693687257722216
+    penalty: 10.0
+    rows:
+      randmix: 2000
+      unmix: 1859
+    successes: 1117
+    cv_log_loss_gain_percent:
+      all_rows: 7.5
+      randmix_rows: 8.9
+  1:
+    a:
+    - 1.3595418835841897
+    - 5.027933896446494
+    - -33.826554433294476
+    - 4.305526662281856
+    - 5.565787381969865
+    - 5.057777364073142
+    - 4.653092425116589
+    - 3.875944551830897
+    - 4.706598773132242
+    - 3.555298477865465
+    g:
+      dx: -5.334609273943619
+      dy: 4.871362328739758
+      rotation: -0.4526822752880843
+      inhand_position: -16.156168533357853
+      inhand_rotation: 0.599224062602402
+    d: -0.06873113937561977
+    c0: -3.6618506356242495
+    penalty: 0.1
+    rows:
+      randmix: 1976
+      unmix: 1842
+    successes: 1117
+    cv_log_loss_gain_percent:
+      all_rows: 34.5
+      randmix_rows: 42.9
+derived:
+  condition: mix_place
+  from: experiment/generator/cpgen/coefficients/softmax/threading.yaml
+  from_sha256: 48fef977f25ffd47a8b13d746c965f5fdc75b5f49f2ca4d2cd4fa6c303fc25a3
+  transforms:
+  - type: set_d
+    subtasks:
+      except_kind: place
+    value: -1

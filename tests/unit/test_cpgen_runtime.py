@@ -236,12 +236,13 @@ def _pose(x=0.0, z=0.8):
     return out
 
 
-def _constraint(name, kind, objects, carries, x, steps=3):
-    """One annotated CP-Gen constraint as far as the runtime and the mixing read it."""
+def _constraint(name, kind, objects, carries, x, steps=3, hand=0.0):
+    """One annotated CP-Gen constraint as far as the runtime and the mixing read it: the objects at ``x`` and the hand
+    ``hand`` metres beside them."""
     return SimpleNamespace(name=name, constraint_type=kind, obj_names=list(objects), attached_object_names=list(carries),
                            duplicate_actions=False, timesteps=list(range(steps)), src_gripper_action=np.full(steps, 1.0),
                            src_obj_pose={o: np.stack([_pose(x)] * steps) for o in objects},
-                           src_obs={"robot0_eef_pos": np.tile([x, 0.0, 1.0], (steps, 1)),
+                           src_obs={"robot0_eef_pos": np.tile([x + hand, 0.0, 1.0], (steps, 1)),
                                     "robot0_eef_quat_site": np.tile([0, 0, 0, 1.0], (steps, 1))})
 
 
@@ -268,10 +269,12 @@ class GraspThenPlacePolicy:
     robot_configuration = eef_configuration = None
     ignore_scaling = True
 
-    def __init__(self, runtime, resolve=None):
+    def __init__(self, runtime, resolve=None, hands=(0.0, 0.0)):
+        """``hands``: per source, how far beside the pod its hand grasps (equal: the same grasp in every source)."""
         self.runtime, self.resolve = runtime, {"steps": self.STEPS, "success": True, **(resolve or {})}
-        self.constraint_sequences = [[_constraint("grasp", "robot-object", ["pod"], [], x),
-                                      _constraint("place", "object-object", ["pod", "machine"], ["pod"], x)] for x in (0.0, 0.3)]
+        self.constraint_sequences = [[_constraint("grasp", "robot-object", ["pod"], [], x, hand=hand),
+                                      _constraint("place", "object-object", ["pod", "machine"], ["pod"], x)]
+                                     for x, hand in zip((0.0, 0.3), hands)]
         self.current_constraint_sequence_idx, self.current_constraint_idx = 0, 0
         self.action_queue, self.new_constraint, self.solves = [], False, {0: 0, 1: 0}
         self.curr_motion_plan_steps = self.curr_constraint_steps = 0
@@ -304,21 +307,25 @@ class GraspThenPlacePolicy:
         return {"action": self.action_queue.pop(0)}
 
 
-def _grasp_then_place(tmp_path, method="none", resolve=None, resolve_after_bridge=True, drawn=0):
+def _grasp_then_place(tmp_path, method="none", resolve=None, resolve_after_bridge=True, drawn=0, a=(5.0, 0.0), d=-1.0,
+                      options=None, hands=(0.0, 0.0)):
     """Run one attempt of the two-constraint task through the grafted callbacks: ``(executed actions, attempt record,
-    policy)``. The pod sits 2 cm from where the hand left it when the placement starts."""
+    policy)``. The pod sits 2 cm from where the hand left it when the placement starts. With ``method="skillmix"`` the
+    rule has the source effects ``a`` and the spread effect ``d`` in both constraints (the defaults: source 0 alone, so no
+    other source is solved), ``options`` are further ``mixing`` keys and ``hands`` the sources' grasp offsets
+    (``GraspThenPlacePolicy``)."""
     cfg = {"name": method, "mixing": {"enabled": False}}
-    if method == "skillmix":                     # source 0 alone in both constraints (d <= 0), so no other source is solved
+    if method == "skillmix":
         from tmg.generation.fit_coefficients import write_rule
 
-        block = {"a": [5.0, 0.0], "g": dict.fromkeys(("dx", "dy", "rotation", "inhand_position", "inhand_rotation"), 0.0),
-                 "d": -1.0, "c0": 0.0}
+        block = {"a": list(a), "g": dict.fromkeys(("dx", "dy", "rotation", "inhand_position", "inhand_rotation"), 0.0),
+                 "d": d, "c0": 0.0}
         path = write_rule(tmp_path / "rule.yaml", rule="softmax", generator="cpgen", task="t", basis="test", num_sources=2, blocks={0: block, 1: block})
-        cfg["mixing"] = {"enabled": True, "type": "skillmix", "rule": "softmax", "coefficients": str(path)}
+        cfg["mixing"] = {"enabled": True, "type": "skillmix", "rule": "softmax", "coefficients": str(path), **(options or {})}
     runtime = rt.CPGenRuntime(build_method(cfg, chunk_seed=3), chunk_seed=3, records_dir=tmp_path / "records", all_sources=True,
                               resolve_after_bridge=resolve_after_bridge)
     runtime.official = FakeOfficial                                           # aligns a retained source to the drawn one
-    policy = GraspThenPlacePolicy(runtime, resolve)
+    policy = GraspThenPlacePolicy(runtime, resolve, hands)
     generator = SimpleNamespace(policy=policy, env=SimpleNamespace(env=None))
     runtime.begin_attempt(generator)
     policy.current_constraint_sequence_idx = drawn                            # the attempt's source, whatever was drawn
@@ -376,3 +383,26 @@ def test_one_retained_source_other_than_the_drawn_one_runs_on_its_own_window(tmp
     grasp = record["subtasks"][0]
     assert grasp["src_demo_ind"] == 0 and grasp["mix"]["source_a"] == 1 and grasp["mix"]["anchor"] == 0
     assert grasp["mix"]["mixed"] is True and "alignment" not in grasp["mix"]
+
+
+def test_distance_cap_drops_the_far_source_before_it_is_solved(tmp_path):
+    # equal scores and d > 0: both sources are blended; source 1 grasps 8 cm beside where source 0 does
+    blend = {"method": "skillmix", "resolve_after_bridge": False, "a": (0.0, 0.0), "d": 1.0, "hands": (0.0, 0.08)}
+    _, record, policy = _grasp_then_place(tmp_path, **blend)
+    grasp = record["subtasks"][0]["mix"]
+    assert grasp["weights"] == [0.5, 0.5] and grasp["mixed"] and "distance_cap" not in grasp
+    assert grasp["symmetry"]["1"]["pos_cm"] == pytest.approx(8.0, abs=0.01) and grasp["alignment"]["samples"] == 3
+    # with the cap the far source is dropped: the drawn source alone, CP-Gen's own solve of its own constraint
+    _, record, policy = _grasp_then_place(tmp_path / "cap", options={"max_source_distance": {"rot_deg": 30, "pos_cm": 3}}, **blend)
+    grasp = record["subtasks"][0]["mix"]
+    assert grasp["weights"] == [1.0, 0.0] and grasp["mixed"] is False and grasp["anchor"] == 0
+    assert grasp["distance_cap"] == {"rot_deg": 30.0, "pos_cm": 3.0, "dropped": [1], "n_dropped": 1, "weights_before": [0.5, 0.5]}
+    assert grasp["identity_reason"] == "only the drawn source is within the distance cap" and "alignment" not in grasp
+    assert policy.solved_constraints[0] is policy.constraint_sequences[0][0] and record["subtasks"][0]["src_demo_ind"] == 0
+    # the drawn source is the far one for the other: the cap keeps the drawn source, whichever it is
+    _, record, _ = _grasp_then_place(tmp_path / "drawn1", drawn=1, options={"max_source_distance": {"pos_cm": 3}}, **blend)
+    assert record["subtasks"][0]["mix"]["weights"] == [0.0, 1.0] and record["subtasks"][0]["mix"]["distance_cap"]["dropped"] == [0]
+    # a cap that drops nothing leaves the blend as it is without a cap
+    _, record, _ = _grasp_then_place(tmp_path / "loose", options={"max_source_distance": {"pos_cm": 50}}, **blend)
+    grasp = record["subtasks"][0]["mix"]
+    assert grasp["weights"] == [0.5, 0.5] and grasp["mixed"] and grasp["distance_cap"]["n_dropped"] == 0

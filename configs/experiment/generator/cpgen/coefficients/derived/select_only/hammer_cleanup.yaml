@@ -1,0 +1,150 @@
+# DERIVED rule file, condition 'select_only': not a fit. Written by scripts/derive_coefficients.py from
+# configs/experiment/generator/cpgen/coefficients/softmax/hammer_cleanup.yaml with the transforms below; do not edit, derive it again after a refit.
+#   {'type': 'set_d', 'subtasks': 'all', 'value': -1}
+# Everything else (a, g, c0 and the fit's statistics) is the fitted file's.
+# SkillMix softmax rule of cpgen hammer_cleanup (tmg fit_coefficients). Per subtask k, with phi_j = (|dx|, |dy|,
+# rotation, inhand_position, inhand_rotation) of source j against the current scene (in-hand terms 0 for k = 0):
+#   P(task succeeds | reached k, weights w) = sigmoid(c0 + sum_j w_j s_j + d spread(w)),
+#   s_j = a[j] + g . phi_j,  spread(w) = -sum_j w_j log w_j
+#   weights: softmax(s / d) over the sources compatible with the selected one when d > 0, the best one when d <= 0
+# Units: {'dx': 'm', 'dy': 'm', 'rotation': 'rad', 'inhand_position': 'm', 'inhand_rotation': 'rad'}.
+generator: cpgen
+task: hammer_cleanup
+rule: softmax
+basis: 'Fit (tmg fit_coefficients) on the randmix pools [''/data/pools/cpgen/hammer_cleanup/ours/ours/skillmix_randmix/pool_randmix_wt'']
+  (2000 attempts) and the unmix pools [''/data/scratch_calib/ctrl_records/hammer_cleanup''] (2000 attempts); rows of subtask
+  k: the attempts that reached it, label = the attempt''s task success.'
+num_sources: 10
+features:
+- dx
+- dy
+- rotation
+- inhand_position
+- inhand_rotation
+units:
+  dx: m
+  dy: m
+  rotation: rad
+  inhand_position: m
+  inhand_rotation: rad
+subtasks:
+  0:
+    a:
+    - 0.3062702747733239
+    - 0.4401960074736172
+    - -3.0473438055777025
+    - 0.5036747156298816
+    - 0.41737880547891193
+    - 0.46066294958981197
+    - 0.30162644338526545
+    - 0.10752942370805497
+    - 0.1665504134712372
+    - 0.4261845265061802
+    g:
+      dx: -2.069677434184591
+      dy: -4.14293975352762
+      rotation: -0.5537781208012376
+      inhand_position: 0.0
+      inhand_rotation: 0.0
+    d: -1.0
+    c0: -0.027394640222395905
+    penalty: 10.0
+    rows:
+      randmix: 2000
+      unmix: 1956
+    successes: 1601
+    cv_log_loss_gain_percent:
+      all_rows: 5.0
+      randmix_rows: 1.6
+  1:
+    a:
+    - 0.08004029275556168
+    - 0.542787747675876
+    - -0.10569358147958677
+    - -0.9451588432058686
+    - 0.25675056168076704
+    - 0.3905003861751342
+    - 0.3154562708552091
+    - -1.1582174837313717
+    - 0.4116878484291176
+    - 0.48882680769564646
+    g:
+      dx: -0.8688295589129011
+      dy: -0.08155910354695493
+      rotation: -0.04704143393305353
+      inhand_position: 0.0
+      inhand_rotation: 0.0
+    d: -1.0
+    c0: -0.048188165249213155
+    penalty: 100.0
+    rows:
+      randmix: 1955
+      unmix: 1617
+    successes: 1601
+    cv_log_loss_gain_percent:
+      all_rows: 3.3
+      randmix_rows: 4.3
+  2:
+    a:
+    - -0.07562893182771742
+    - 1.1124941031342914
+    - -0.051715164197814134
+    - 0.4933216973192108
+    - -0.28128480049831317
+    - -0.4307356655560104
+    - -0.11924651087423001
+    - -0.21362924671434827
+    - 0.4142824868803677
+    - -0.2201050444470927
+    g:
+      dx: -2.62452789728185
+      dy: -1.5599517355744965
+      rotation: -0.878725919989038
+      inhand_position: -72.6660106080654
+      inhand_rotation: -0.007960642702300076
+    d: -1.0
+    c0: 2.121900061326954
+    penalty: 0.1
+    rows:
+      randmix: 1442
+      unmix: 1153
+    successes: 1601
+    cv_log_loss_gain_percent:
+      all_rows: 7.3
+      randmix_rows: 11.0
+  3:
+    a:
+    - 0.5978471004523392
+    - 0.4181332834260882
+    - -0.15162387715311748
+    - -0.8023448585640587
+    - -0.43540925225711535
+    - -0.9932388286281549
+    - 0.5757893095478811
+    - -0.7750105969006115
+    - 0.753957135423481
+    - 0.6387378644137547
+    g:
+      dx: -3.734579831184837
+      dy: 0.7004422893753386
+      rotation: -1.345831529072814
+      inhand_position: -11.195518553761032
+      inhand_rotation: 0.858696404177626
+    d: -1.0
+    c0: 3.4678859271022953
+    penalty: 1.0
+    rows:
+      randmix: 1105
+      unmix: 1030
+    successes: 1601
+    cv_log_loss_gain_percent:
+      all_rows: 12.4
+      randmix_rows: 13.4
+derived:
+  condition: select_only
+  from: experiment/generator/cpgen/coefficients/softmax/hammer_cleanup.yaml
+  from_sha256: 2e3fc26605387523f2442ce5491ebe4208be78de7baf9b231ba708f61348571f
+  transforms:
+  - type: set_d
+    subtasks: all
+    value: -1

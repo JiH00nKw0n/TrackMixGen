@@ -58,10 +58,27 @@ The blend itself (both rules), for subtask k of one attempt:
    mean event steps, weighted mean positions, weighted rotation mean) and the result is expressed in the frame of the
    source the generator selected, so the generator's own transform moves it to the current scene unchanged.
 
+Three options change which rule file is read or how its weights are used. All are off unless the method config sets
+them, and a method that sets one runs under its own name (``configs/experiment/method``; docs/SKILLMIX_FACTOR_EXPERIMENT.md):
+
+- ``mixing.derived: <condition>``: read ``coefficients/derived/<condition>/<task>.yaml`` instead of the fitted file, a
+  copy of it changed by named transforms (``tmg.generation.derive_coefficients``, ``scripts/derive_coefficients.py``):
+  for example every ``d`` set to -1 (one source per subtask, no blending) or to 1000 (nearly uniform weights).
+- ``mixing.min_effective_sources: k``: a floor on the effective number of blended sources ``1 / sum_j w_j^2``. Where the
+  fitted weights have fewer, the temperature (``d`` in ``softmax(s / d)``) is raised to the smallest value that reaches
+  ``k`` (``effective_floor``); with fewer than ``k`` compatible sources the weights are uniform over them. This also blends
+  a subtask whose fit gives ``d <= 0``.
+- ``mixing.max_source_distance: {rot_deg, pos_cm}`` (either may be null): after the symmetry alignment of step 1 below,
+  a retained source whose aligned pose is farther from the selected source's than either limit is dropped and the
+  remaining weights are renormalized (``cap_weights``). The distances are the ``pos_cm`` and ``rot_deg`` the alignment
+  records per source. The selected source is the reference whether or not it has weight; when every retained source is
+  beyond the cap, the one with the largest weight is kept alone (one source is not a blend). The record lists the
+  dropped sources under ``distance_cap``.
+
 The record of every call keeps the rule, the scores, the spread effect, the features and the weights
 (``SkillMixer.decide``). CP-Gen re-solves constraints instead of replaying segments: it blends solved poses in its own
-module (``tmg.generation.generators.cpgen.mixing``) but takes the weights, the record and the symmetry score from here,
-so both generators apply one rule.
+module (``tmg.generation.generators.cpgen.mixing``) but takes the weights, the record, the symmetry score and the distance cap
+(``SkillMixer.cap``) from here, so both generators apply one rule.
 """
 from __future__ import annotations
 
@@ -81,6 +98,7 @@ from tmg.generation.method.success_model import FEATURES, inhand_features, scene
 from tmg.generation.simulators.scenes import generator_config_dir
 
 COEFFICIENTS_DIR = "coefficients"
+DERIVED_DIR = "derived"                  # coefficients/derived/<condition>/<task>.yaml: rule files derived from a fitted one
 MIN_WEIGHT = 1e-3                        # softmax and randmix weights below it are dropped and the rest renormalized
 RANDMIX_SEED = 727272                    # second seed word of the randmix draws (the chunk seed is the first)
 SOURCE_SEED = 737373                     # second seed word of the single-source draws of mixing.single_source=sample
@@ -100,6 +118,12 @@ def gini(w) -> float:
     """``1 - sum_j w_j^2`` (the sparsemax rule's spread)."""
     w = np.asarray(w, dtype=float)
     return float(1.0 - (w * w).sum())
+
+
+def effective_sources(w) -> float:
+    """``1 / sum_j w_j^2``: the effective number of sources of the weights (1 for one source, n for n equal weights)."""
+    w = np.asarray(w, dtype=float)
+    return float(1.0 / (w * w).sum())
 
 
 def _softmax(z: np.ndarray) -> np.ndarray:
@@ -194,19 +218,27 @@ class SkillMixRule:
                 "subtasks": sorted(self.subtasks)}
 
 
-def rule_path(name: str, rule: str, root: Path | None = None) -> Path:
-    """``configs/experiment/generator/<generator>/coefficients/<rule>/<task>.yaml`` for a ``<generator>/<task>`` name."""
+def rule_path(name: str, rule: str, root: Path | None = None, derived: str | None = None) -> Path:
+    """The rule file of a ``<generator>/<task>`` name: the fitted
+    ``configs/experiment/generator/<generator>/coefficients/<rule>/<task>.yaml``, or with ``derived`` (a condition name)
+    ``.../coefficients/derived/<condition>/<task>.yaml`` (it holds its rule; ``load_rule`` checks it)."""
     generator, _, task = str(name).partition("/")
     if not task:
         raise ValueError(f"rule name must be <generator>/<task>, got {name!r}")
     if rule not in FITTED_RULES:
         raise ValueError(f"rule must be one of {FITTED_RULES}, got {rule!r}")
-    return generator_config_dir(generator, root) / COEFFICIENTS_DIR / rule / f"{task}.yaml"
+    folder = Path(DERIVED_DIR) / str(derived) if derived else Path(rule)
+    return generator_config_dir(generator, root) / COEFFICIENTS_DIR / folder / f"{task}.yaml"
 
 
-def load_rule(name: str, rule: str, root: Path | None = None) -> SkillMixRule:
-    """Read the ``rule`` file of a ``<generator>/<task>`` name (or a path ending in .yaml, which must hold that rule)."""
-    path = Path(name) if str(name).endswith(".yaml") else rule_path(name, rule, root)
+def load_rule(name: str, rule: str, root: Path | None = None, derived: str | None = None) -> SkillMixRule:
+    """Read the ``rule`` file of a ``<generator>/<task>`` name (``rule_path``), or of a path ending in .yaml, which must
+    hold that rule."""
+    path = Path(name) if str(name).endswith(".yaml") else rule_path(name, rule, root, derived)
+    if not path.exists() and derived:
+        raise FileNotFoundError(
+            f"derived SkillMix rule file {path} not found. Write it from the task's fitted {rule} rule with "
+            f"`python3 scripts/derive_coefficients.py --generator <gen> --task <task> --condition {derived}`.")
     if not path.exists():
         raise FileNotFoundError(
             f"SkillMix rule file {path} not found. Build it with `make coefficients GENERATOR=<gen> TASK=<task>` (a "
@@ -241,16 +273,104 @@ def single_source(scores, compatible: list[int], u: float | None = None) -> int:
 def fitted_weights(rule: str, scores, d: float, compatible: list[int], u: float | None = None) -> np.ndarray:
     """The weights of a fitted rule (module docstring): ``softmax(s / d)`` or ``sparsemax(s / (2 d))`` over
     ``compatible`` when ``d > 0``, else one source (``single_source``; ``u`` None: the best one, else drawn)."""
-    fitted = FITTED[rule]
     s = np.asarray(scores, dtype=float)
-    w = np.zeros(len(s))
     if not compatible:
         raise ValueError("no compatible source")
     if d <= 0:
+        w = np.zeros(len(s))
         w[single_source(s, compatible, u)] = 1.0
         return w
-    w[compatible] = fitted.project(s[compatible] / (fitted.scale * float(d)))
+    return weights_at(rule, s, float(d), compatible)
+
+
+def weights_at(rule: str, scores, temperature: float, compatible: list[int]) -> np.ndarray:
+    """The weights of a fitted rule at a positive ``temperature`` (the fitted ``d``, or one raised by
+    ``effective_floor``): ``project(s / (scale * temperature))`` over ``compatible``, small weights dropped."""
+    fitted = FITTED[rule]
+    s = np.asarray(scores, dtype=float)
+    w = np.zeros(len(s))
+    w[compatible] = fitted.project(s[compatible] / (fitted.scale * float(temperature)))
     return _drop_below(w, fitted.min_weight)
+
+
+def uniform_weights(num_sources: int, compatible: list[int]) -> np.ndarray:
+    """Equal weights over ``compatible`` (the limit of every fitted rule at an infinite temperature)."""
+    w = np.zeros(int(num_sources))
+    w[compatible] = 1.0 / len(compatible)
+    return w
+
+
+FLOOR_BISECTIONS = 60                    # halvings of the temperature bracket of effective_floor
+
+
+def effective_floor(rule: str, scores, d: float, compatible: list[int], k: float) -> tuple[np.ndarray, float | None] | None:
+    """``mixing.min_effective_sources: k`` (module docstring). None when the floor does not bind: the fitted weights
+    already have ``min(k, compatible sources)`` effective sources, or that target is 1 (one source needs no blend).
+    Otherwise ``(weights, temperature)``: the weights at the smallest temperature above the fitted one (above 0 when
+    ``d <= 0``) that reaches the target, found by bisection (the effective number grows with the temperature); with a
+    target of all the compatible sources, the uniform weights and temperature None (infinite)."""
+    s = np.asarray(scores, dtype=float)
+    target = min(float(k), float(len(compatible)))
+    if target <= 1:
+        return None
+
+    def reached(temperature: float) -> bool:
+        return effective_sources(weights_at(rule, s, temperature, compatible)) >= target
+
+    if d > 0 and reached(d):
+        return None
+    if target >= len(compatible):
+        return uniform_weights(len(s), compatible), None
+    low = max(float(d), 0.0)
+    high = max(2.0 * low, float(np.ptp(s[compatible])), 1e-6)
+    while not reached(high):
+        low, high = high, 2.0 * high
+    for _ in range(FLOOR_BISECTIONS):
+        middle = 0.5 * (low + high)
+        if middle <= low or middle >= high:
+            break
+        low, high = (low, middle) if reached(middle) else (middle, high)
+    return weights_at(rule, s, high, compatible), high
+
+
+@dataclass(frozen=True)
+class DistanceCap:
+    """``mixing.max_source_distance``: the largest distance of a blended source from the selected source after the
+    symmetry alignment, in the units of the alignment record (None: no limit on that quantity)."""
+    rot_deg: float | None = None
+    pos_cm: float | None = None
+
+    @classmethod
+    def from_config(cls, cfg: Mapping | None) -> DistanceCap | None:
+        """The cap of a ``mixing.max_source_distance`` block; None (off) for a missing block or one without a limit."""
+        cfg = dict(cfg or {})
+        unknown = sorted(set(cfg) - {"rot_deg", "pos_cm"})
+        if unknown:
+            raise ValueError(f"mixing.max_source_distance: unknown keys {unknown}; known: rot_deg, pos_cm")
+        limits = {key: None if cfg.get(key) is None else float(cfg[key]) for key in ("rot_deg", "pos_cm")}
+        return None if all(v is None for v in limits.values()) else cls(**limits)
+
+    def describe(self) -> dict:
+        return {"rot_deg": self.rot_deg, "pos_cm": self.pos_cm}
+
+    def exceeded(self, distance: Mapping) -> bool:
+        """Whether a source with the alignment record ``distance`` (``pos_cm``, ``rot_deg``) is beyond the cap."""
+        return any(limit is not None and float(distance[key]) > limit for key, limit in self.describe().items())
+
+
+def cap_weights(w, distances: Mapping, cap: DistanceCap) -> tuple[np.ndarray, list[int]]:
+    """``(weights, dropped sources)``: ``w`` without the sources beyond ``cap``, renormalized. ``distances`` maps a source
+    index (as a string, the alignment record's keys) to its ``pos_cm`` and ``rot_deg`` from the selected source; a source
+    without an entry (the selected source itself) is never dropped. When every source with weight is beyond the cap, the
+    one with the largest weight is kept alone."""
+    w = np.asarray(w, dtype=float)
+    beyond = [j for j in np.flatnonzero(w > 0) if str(j) in distances and cap.exceeded(distances[str(j)])]
+    kept = np.array(w)
+    kept[beyond] = 0.0
+    if kept.sum() <= 0:
+        kept[int(np.argmax(w))] = 1.0
+    dropped = [int(j) for j in beyond if kept[j] == 0]
+    return kept / kept.sum(), dropped
 
 
 class RandmixDraws:
@@ -394,16 +514,22 @@ class SkillMixer:
     """
 
     def __init__(self, *, rule: str = "softmax", coefficients: SkillMixRule | None = None, chunk_seed: int = 0,
-                 gripper_events: Mapping | None = None, symmetries: Mapping | None = None, single_source: str = "best"):
+                 gripper_events: Mapping | None = None, symmetries: Mapping | None = None, single_source: str = "best",
+                 max_source_distance: Mapping | None = None, min_effective_sources: float | None = None):
         if rule not in RULES:
             raise ValueError(f"mixing.rule must be one of {RULES}, got {rule!r}")
         if rule in FITTED_RULES and (coefficients is None or coefficients.rule != rule):
             raise ValueError(f"mixing.rule={rule} needs the task's {rule} rule file (mixing.coefficients)")
         if single_source not in SINGLE_SOURCE:
             raise ValueError(f"mixing.single_source must be one of {SINGLE_SOURCE}, got {single_source!r}")
+        if min_effective_sources is not None and rule not in FITTED_RULES:
+            raise ValueError(f"mixing.min_effective_sources raises the temperature of a fitted rule {FITTED_RULES}, "
+                             f"not of mixing.rule={rule}")
         self.rule = rule
         self.coefficients = coefficients                   # the fitted rule file; None for the randmix rule
         self.single_source = single_source
+        self.max_distance = DistanceCap.from_config(max_source_distance)       # None: no cap
+        self.min_effective = None if min_effective_sources is None else float(min_effective_sources)   # None: no floor
         self.draws = RandmixDraws(chunk_seed)
         self.sources = SourceDraws(chunk_seed)
         self.detector = build_detector(gripper_events)
@@ -414,7 +540,8 @@ class SkillMixer:
     @classmethod
     def from_config(cls, cfg: Mapping, *, chunk_seed: int, method_name: str) -> SkillMixer:
         """``mixing.coefficients``: ``<generator>/<task>`` or a path to a rule file; ``mixing.rule``: softmax | sparsemax |
-        randmix. The randmix rule needs no rule file (it draws the weights). The method name is the pool, dataset and run
+        randmix; ``mixing.derived``, ``mixing.max_source_distance`` and ``mixing.min_effective_sources``: the options of
+        the module docstring (absent: off). The randmix rule needs no rule file (it draws the weights). The method name is the pool, dataset and run
         folder and the key of a generator's ``method_overrides``, so the names of ``METHOD_OF_RULE`` run their own rule
         only: pools of different rules never share a folder. A fitted rule may also run under another name (a variant
         with its own rule file); random weights are not SkillMix data, so the randmix rule runs under its name alone."""
@@ -426,14 +553,17 @@ class SkillMixer:
             raise ValueError(f"method {method_name!r} with mixing.rule={rule}: the {rule} rule runs under the method name "
                              f"{METHOD_OF_RULE[rule]!r}" + (" or a variant's own name" if rule in FITTED_RULES else "")
                              + (f", and {method_name!r} is the name of the {reserved_for} rule" if reserved_for else ""))
-        coefficients = None if rule == "randmix" else load_rule(str(cfg["coefficients"]), rule)
+        coefficients = None if rule == "randmix" else load_rule(str(cfg["coefficients"]), rule, derived=cfg.get("derived"))
         return cls(rule=rule, coefficients=coefficients, chunk_seed=chunk_seed, gripper_events=cfg.get("gripper_events"),
-                   symmetries=cfg.get("symmetries"), single_source=str(cfg.get("single_source", "best")))
+                   symmetries=cfg.get("symmetries"), single_source=str(cfg.get("single_source", "best")),
+                   max_source_distance=cfg.get("max_source_distance"), min_effective_sources=cfg.get("min_effective_sources"))
 
     def describe(self) -> dict:
         return {"type": "skillmix", "rule": self.rule, "single_source": self.single_source,
                 "coefficients": None if self.coefficients is None else self.coefficients.describe(),
-                "gripper_events": self.detector.name, "symmetries": self.symmetries}
+                "gripper_events": self.detector.name, "symmetries": self.symmetries,
+                "max_source_distance": None if self.max_distance is None else self.max_distance.describe(),
+                "min_effective_sources": self.min_effective}
 
     def begin_attempt(self) -> None:
         """Called by the runtime when an attempt starts (forgets the draws of the previous attempt)."""
@@ -448,6 +578,12 @@ class SkillMixer:
         block = self.coefficients.for_subtask(subtask)
         s = block.scores(scene, inhand)
         about = {"scores": [round(float(v), 4) for v in s], "d": round(block.d, 4)}
+        floored = None if self.min_effective is None else effective_floor(self.rule, s, block.d, compatible, self.min_effective)
+        if floored is not None:
+            w, temperature = floored
+            about.update(min_effective_sources=self.min_effective,
+                         temperature="inf" if temperature is None else round(temperature, 6))
+            return w, about
         u = None
         if block.d <= 0 and self.single_source == "sample":
             u = self.sources.draw(subtask)
@@ -466,6 +602,19 @@ class SkillMixer:
         if inhand is not None:
             record["inhand_features"] = np.round(inhand, 4).tolist()
         return w, record
+
+    def cap(self, w: np.ndarray, distances: Mapping, record: dict) -> np.ndarray:
+        """``mixing.max_source_distance`` (module docstring), the same call for every generator: ``w`` without the sources
+        whose alignment record in ``distances`` (source index as a string -> ``pos_cm``, ``rot_deg`` from the selected
+        source) is beyond the cap, renormalized. ``record`` (the decision's) then holds the weights that are blended and,
+        under ``distance_cap``, the limits, the dropped sources and the weights before. Unchanged without a cap."""
+        if self.max_distance is None:
+            return w
+        capped, dropped = cap_weights(w, distances, self.max_distance)
+        record["distance_cap"] = {**self.max_distance.describe(), "dropped": dropped, "n_dropped": len(dropped),
+                                  "weights_before": record.get("weights")}
+        record["weights"] = [round(float(v), 4) for v in capped]
+        return capped
 
     # events ------------------------------------------------------------------------------------------
     def _scalar_commands(self, commands: np.ndarray) -> bool:
@@ -512,6 +661,9 @@ class SkillMixer:
         symmetry = self._align(context, keep, series, poses, eef_obj)
         if symmetry:
             record["symmetry"] = symmetry
+        w = self.cap(w, symmetry, record)
+        within = [i for i, j in enumerate(keep) if w[j] > 0]
+        keep, poses, eef_obj = ([items[i] for i in within] for items in (keep, poses, eef_obj))
         mixed_obj, grip, meta = mix_many(poses, [series[j] for j in keep], w[keep])
         eef_mixed = mix_many([e[None] for e in eef_obj], [np.full(1, series[j][0]) for j in keep], w[keep])[0][0]
         obj_primary = np.asarray(context.src_object_poses[primary], dtype=float)
@@ -521,12 +673,14 @@ class SkillMixer:
         return MixedSegment(obj_primary @ eef_mixed, transform_all(obj_primary, mixed_obj), gripper, record)
 
     def _align(self, context: MixContext, keep: list[int], series: list, poses: list, eef_obj: list) -> dict:
-        """Step 1 of the module docstring, in place on ``poses`` and ``eef_obj`` (object frames of the ``keep`` sources)."""
+        """Step 1 of the module docstring, in place on ``poses`` and ``eef_obj`` (object frames of the ``keep`` sources).
+        Returns the alignment record per source other than the selected one: empty when there is none, or when the only
+        candidate is the identity and no distance cap needs the distances."""
         primary = int(context.primary)
         g = np.asarray(context.src_segments[primary][2], dtype=float)
         candidates = symmetry_candidates(self.symmetries.get(str(context.extra.get("reference_object"))),
                                          self._scalar_commands(g.reshape(len(g), -1)))
-        if len(candidates) == 1 or keep == [primary]:
+        if keep == [primary] or (len(candidates) == 1 and self.max_distance is None):
             return {}
         frame = invert(np.asarray(context.src_object_poses[primary], dtype=float))
         reference = frame @ np.asarray(context.src_segments[primary][1], dtype=float)[key_step(series[primary])]

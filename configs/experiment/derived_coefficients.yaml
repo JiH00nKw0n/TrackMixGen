@@ -1,0 +1,21 @@
+# Named conditions of derived SkillMix rule files (tmg/generation/derive_coefficients.py). A condition is a list of
+# transforms applied to a task's fitted rule file; `python3 scripts/derive_coefficients.py` writes the result to
+#   configs/experiment/generator/<generator>/coefficients/derived/<condition>/<task>.yaml
+# and a method reads it with `mixing.derived: <condition>` (configs/experiment/method). The conditions are the same for
+# every generator and task; nothing here names a task, a source or a subtask index.
+# Transforms: {type: set_d, subtasks, value}  the spread effect d of the chosen subtasks becomes value
+#             {type: boost_a, subtasks, source, by}  `by` is added to the effect a of `source` in the chosen subtasks
+# subtasks: all | [indices] | {kind: <kind>} | {except_kind: <kind>}   (kinds: the task's stages file, subtask_kinds)
+conditions:
+  select_only:          # no blending anywhere: d <= 0, so every subtask takes one source (the method's single_source rule)
+    transforms:
+      - {type: set_d, subtasks: all, value: -1}
+  uniform:              # nearly equal weights over the compatible sources in every subtask: softmax(s / 1000)
+    transforms:
+      - {type: set_d, subtasks: all, value: 1000}
+  mix_grasp:            # the grasp subtasks keep their fitted d (blended where the fit gives d > 0); every other subtask one source
+    transforms:
+      - {type: set_d, subtasks: {except_kind: grasp}, value: -1}
+  mix_place:            # the place and insert subtasks keep their fitted d; every other subtask one source
+    transforms:
+      - {type: set_d, subtasks: {except_kind: place}, value: -1}

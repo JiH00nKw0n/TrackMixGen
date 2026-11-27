@@ -1,0 +1,122 @@
+# DERIVED rule file, condition 'select_only': not a fit. Written by scripts/derive_coefficients.py from
+# configs/experiment/generator/cpgen/coefficients/softmax/coffee.yaml with the transforms below; do not edit, derive it again after a refit.
+#   {'type': 'set_d', 'subtasks': 'all', 'value': -1}
+# Everything else (a, g, c0 and the fit's statistics) is the fitted file's.
+# SkillMix softmax rule of cpgen coffee (tmg fit_coefficients). Per subtask k, with phi_j = (|dx|, |dy|,
+# rotation, inhand_position, inhand_rotation) of source j against the current scene (in-hand terms 0 for k = 0):
+#   P(task succeeds | reached k, weights w) = sigmoid(c0 + sum_j w_j s_j + d spread(w)),
+#   s_j = a[j] + g . phi_j,  spread(w) = -sum_j w_j log w_j
+#   weights: softmax(s / d) over the sources compatible with the selected one when d > 0, the best one when d <= 0
+# Units: {'dx': 'm', 'dy': 'm', 'rotation': 'rad', 'inhand_position': 'm', 'inhand_rotation': 'rad'}.
+generator: cpgen
+task: coffee
+rule: softmax
+basis: 'Fit (tmg fit_coefficients) on the randmix pools [''/data/pools/cpgen/coffee/ours/ours/skillmix_randmix/pool_randmix_wt'']
+  (2000 attempts) and the unmix pools [''/data/scratch_calib/ctrl_records/coffee''] (2000 attempts); rows of subtask k: the
+  attempts that reached it, label = the attempt''s task success.'
+num_sources: 10
+features:
+- dx
+- dy
+- rotation
+- inhand_position
+- inhand_rotation
+units:
+  dx: m
+  dy: m
+  rotation: rad
+  inhand_position: m
+  inhand_rotation: rad
+subtasks:
+  0:
+    a:
+    - -0.21608092027599696
+    - 0.4552666592045403
+    - 0.08467254749777851
+    - -0.047858060207094606
+    - -0.22556288620477807
+    - 0.1897910366335309
+    - -0.04274042453638914
+    - -0.15220862782867817
+    - -0.01789740588853333
+    - -0.023800543548402667
+    g:
+      dx: -0.5427870902471155
+      dy: -0.7598119843817291
+      rotation: -459.77374273952233
+      inhand_position: 0.0
+      inhand_rotation: 0.0
+    d: -1.0
+    c0: -0.8332199108865149
+    penalty: 1.0
+    rows:
+      randmix: 2000
+      unmix: 1977
+    successes: 734
+    cv_log_loss_gain_percent:
+      all_rows: 3.8
+      randmix_rows: 5.7
+  1:
+    a:
+    - -0.4596015914709588
+    - 0.3653911430366183
+    - 0.1686594138305174
+    - -0.38731315985460485
+    - -0.13040532813125147
+    - 0.16419466017911172
+    - 0.08374365202008985
+    - 0.11077518024453385
+    - -0.008651429625564248
+    - 0.3366732681428452
+    g:
+      dx: -0.3763899613626748
+      dy: -1.757651750864428
+      rotation: 0.01923199726428185
+      inhand_position: -239.43470797350065
+      inhand_rotation: 3.5461552438635637
+    d: -1.0
+    c0: -0.08747532562091198
+    penalty: 0.1
+    rows:
+      randmix: 1987
+      unmix: 1296
+    successes: 734
+    cv_log_loss_gain_percent:
+      all_rows: 8.1
+      randmix_rows: 11.3
+  2:
+    a:
+    - -0.1353421359293701
+    - 0.26287846149119065
+    - -0.1922081969070356
+    - 0.26980592532678793
+    - -1.0777143320753513
+    - 0.1146162620617496
+    - 0.09502526545174314
+    - -0.23762151011133517
+    - -0.036678871265108395
+    - 0.6794969468996542
+    g:
+      dx: -0.2607918586545884
+      dy: -1.205651735141288
+      rotation: 0.03530298331182349
+      inhand_position: 0.0
+      inhand_rotation: 0.0
+    d: -1.0
+    c0: -0.7470793099234595
+    penalty: 100.0
+    rows:
+      randmix: 1209
+      unmix: 1021
+    successes: 734
+    cv_log_loss_gain_percent:
+      all_rows: 1.0
+      randmix_rows: 0.8
+derived:
+  condition: select_only
+  from: experiment/generator/cpgen/coefficients/softmax/coffee.yaml
+  from_sha256: 51d358595d575edfaa8cee16923352f1a483f3f15adae019aad7cc44d0909cbc
+  transforms:
+  - type: set_d
+    subtasks: all
+    value: -1

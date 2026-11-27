@@ -30,6 +30,9 @@ several sources, each solved for the current scene:
    the hammer turned about z and y at once). Every retained source is then solved for the current scene by the official
    ``compute_X_W_eef_des`` at every step of its own window. Without the alignment two sources that hold the hammer from
    opposite sides are averaged into a pose in the middle of the hammer (Hammer Cleanup pilot, 2026-11-13).
+   With ``mixing.max_source_distance`` the runtime then drops the retained sources whose aligned window start is farther
+   from the primary's than the cap and renormalizes the weights (``SkillMixer.cap``, the call MimicGen's mixing makes,
+   on the ``pos_cm`` and ``rot_deg`` ``align_sources`` records per source); off unless the method sets it.
 4. Blend on the weighted timeline (``event_mix.mix_many``, the blend MimicGen uses). Each gripper event is placed at the
    weighted mean of the sources' event steps and the window length is the weighted mean of their lengths; every interval
    is time-warped separately; at each step the blended pose has the weighted mean position and the weighted mean
@@ -123,6 +126,13 @@ def decide(mixer, sequences: list, idx: int, primary: int, obs: dict, carried: s
     series = [gripper_series(c)[:, 0] for c in constraints]
     weights, decided = mixer.decide(idx, primary, scene, inhand, series)
     return {"subtask": int(idx), "source_a": int(primary), **decided, "carried_object": carried}, weights
+
+
+def retained(weights) -> tuple[list[int], int]:
+    """``(the sources with weight, the anchor)``: the anchor is the retained source with the largest weight, whose
+    constraint CP-Gen's step loop runs on."""
+    keep = [j for j in range(len(weights)) if weights[j] > 0]
+    return keep, max(keep, key=lambda j: weights[j])
 
 
 class MixedWindow:

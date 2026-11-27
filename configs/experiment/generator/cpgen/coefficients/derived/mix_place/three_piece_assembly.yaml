@@ -1,0 +1,151 @@
+# DERIVED rule file, condition 'mix_place': not a fit. Written by scripts/derive_coefficients.py from
+# configs/experiment/generator/cpgen/coefficients/softmax/three_piece_assembly.yaml with the transforms below; do not edit, derive it again after a refit.
+#   {'type': 'set_d', 'subtasks': {'except_kind': 'place'}, 'value': -1}
+# Everything else (a, g, c0 and the fit's statistics) is the fitted file's.
+# SkillMix softmax rule of cpgen three_piece_assembly (tmg fit_coefficients). Per subtask k, with phi_j = (|dx|, |dy|,
+# rotation, inhand_position, inhand_rotation) of source j against the current scene (in-hand terms 0 for k = 0):
+#   P(task succeeds | reached k, weights w) = sigmoid(c0 + sum_j w_j s_j + d spread(w)),
+#   s_j = a[j] + g . phi_j,  spread(w) = -sum_j w_j log w_j
+#   weights: softmax(s / d) over the sources compatible with the selected one when d > 0, the best one when d <= 0
+# Units: {'dx': 'm', 'dy': 'm', 'rotation': 'rad', 'inhand_position': 'm', 'inhand_rotation': 'rad'}.
+generator: cpgen
+task: three_piece_assembly
+rule: softmax
+basis: 'Fit (tmg fit_coefficients) on the randmix pools [''/data/pools/cpgen/three_piece_assembly/ours/ours/skillmix_randmix/pool_randmix_wt'']
+  (2000 attempts) and the unmix pools [''/data/scratch_calib/ctrl_records/three_piece_assembly''] (2000 attempts); rows of
+  subtask k: the attempts that reached it, label = the attempt''s task success.'
+num_sources: 10
+features:
+- dx
+- dy
+- rotation
+- inhand_position
+- inhand_rotation
+units:
+  dx: m
+  dy: m
+  rotation: rad
+  inhand_position: m
+  inhand_rotation: rad
+subtasks:
+  0:
+    a:
+    - 0.07262091615929091
+    - -0.01725778031784577
+    - -0.012509418664598523
+    - -0.052099946361749194
+    - 0.10854181565126372
+    - -0.5613351329303434
+    - 0.1735287430742488
+    - 0.2908897321097228
+    - 0.04265455244991739
+    - -0.08820688592914253
+    g:
+      dx: 0.003823835002010507
+      dy: -0.26013699353840597
+      rotation: -0.026328222968078602
+      inhand_position: 0.0
+      inhand_rotation: 0.0
+    d: -1.0
+    c0: 0.14330119687765888
+    penalty: 100.0
+    rows:
+      randmix: 2000
+      unmix: 1998
+    successes: 2023
+    cv_log_loss_gain_percent:
+      all_rows: 0.2
+      randmix_rows: -0.1
+  1:
+    a:
+    - 0.23918960234267286
+    - -0.24282523246145327
+    - 0.060145046081535716
+    - -0.21456380701669264
+    - 0.08546280802466248
+    - 0.5605063866469979
+    - 0.276874944264733
+    - -1.1530042281688804
+    - 0.7327959377162515
+    - -0.26689999394932845
+    g:
+      dx: -1.5195929999119173
+      dy: -0.1321761822341455
+      rotation: 0.2445503502615288
+      inhand_position: -58.45294184826871
+      inhand_rotation: -0.8931936423254293
+    d: -0.2345102311884536
+    c0: 1.2581173031736712
+    penalty: 1.0
+    rows:
+      randmix: 1997
+      unmix: 1923
+    successes: 2023
+    cv_log_loss_gain_percent:
+      all_rows: 5.6
+      randmix_rows: 7.8
+  2:
+    a:
+    - 0.012669176834813963
+    - 0.15518106898949294
+    - -0.047083311837825804
+    - 0.12583063617455525
+    - 0.204329789187813
+    - -0.04645844843896905
+    - -0.06220507835703389
+    - 0.06878434802565031
+    - -0.16251662817351495
+    - -0.23766491173503715
+    g:
+      dx: -0.913897907850102
+      dy: 0.11302659366143471
+      rotation: -0.06205592774503445
+      inhand_position: 0.0
+      inhand_rotation: 0.0
+    d: -1.0
+    c0: 0.4827468064674181
+    penalty: 100.0
+    rows:
+      randmix: 1969
+      unmix: 1791
+    successes: 2023
+    cv_log_loss_gain_percent:
+      all_rows: 0.5
+      randmix_rows: 0.2
+  3:
+    a:
+    - 0.27595997496860974
+    - -1.1947214701212239
+    - -0.06065971167201335
+    - 0.10740792724003026
+    - 0.12907731010059487
+    - 0.20591219412369244
+    - 0.32093797583057454
+    - -0.06631327668615075
+    - 0.12493155949289494
+    - 0.15354897015788968
+    g:
+      dx: -1.209963163036963
+      dy: -0.4847328532446577
+      rotation: -5.195783020604577
+      inhand_position: -49.71274323109036
+      inhand_rotation: -1.3672575093347612
+    d: -0.24335443669632895
+    c0: 3.401593951028172
+    penalty: 10.0
+    rows:
+      randmix: 1872
+      unmix: 1454
+    successes: 2023
+    cv_log_loss_gain_percent:
+      all_rows: 22.4
+      randmix_rows: 25.1
+derived:
+  condition: mix_place
+  from: experiment/generator/cpgen/coefficients/softmax/three_piece_assembly.yaml
+  from_sha256: 835232a09e0609461ac551eff1dc1ae60bfc7f8702d7cc2452d5e05b54a34916
+  transforms:
+  - type: set_d
+    subtasks:
+      except_kind: place
+    value: -1

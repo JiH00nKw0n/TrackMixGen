@@ -330,8 +330,9 @@ class CPGenRuntime:
 
     # source mixing (grafted into CPPolicy.solve_constraint) ----------------------------------------------------------
     def prepare_mix(self, policy, constraint, obs: dict, X_obj0_transf, X_obj1_transf, X_eef_transf):
-        """Grafted after CP-Gen chose the drawn source's (primary's) symmetry transforms: weigh every source, align and
-        solve the retained ones for the current scene and prepare the blend (``mixing`` module docstring). Returns the
+        """Grafted after CP-Gen chose the drawn source's (primary's) symmetry transforms: weigh every source, align the
+        retained ones, drop those beyond the method's distance cap (``SkillMixer.cap``; none without a cap), solve the rest
+        for the current scene and prepare the blend (``mixing`` module docstring). Returns the
         constraint CP-Gen's step loop runs on and its transforms: unchanged when the primary is the only retained source;
         the retained source's own constraint (its own window and speed, aligned to the primary) when one other source is
         retained; a copy of the anchor's constraint on the blended timeline when several are retained. In the last two
@@ -360,9 +361,8 @@ class CPGenRuntime:
             self._last_mix = {"subtask": idx, "source_a": primary, "mixed": False, "identity_reason": f"missing {err}"}
             return unchanged
         self._last_mix = record
-        keep = [j for j in range(len(w)) if w[j] > 0]
-        anchor = max(keep, key=lambda j: w[j])
-        record["anchor"] = int(anchor)
+        keep, anchor = mixing.retained(w)
+        record["anchor"] = anchor
         if keep == [primary]:
             record.update(mixed=False, identity_reason="only the drawn source is retained")
             return unchanged
@@ -371,6 +371,12 @@ class CPGenRuntime:
         chosen, symmetry = mixing.align_sources(self.official, policy, sequences, idx, primary, others, obs, transforms)
         chosen[primary] = transforms
         record["symmetry"] = symmetry                       # kept even if solving or planning fails below
+        w = self.method.mixer.cap(w, symmetry, record)      # mixing.max_source_distance: drops the sources beyond the cap
+        keep, anchor = mixing.retained(w)
+        record["anchor"] = anchor
+        if keep == [primary]:
+            record.update(mixed=False, identity_reason="only the drawn source is within the distance cap")
+            return unchanged
         policy.current_constraint_sequence_idx = anchor
         if len(keep) == 1:                                  # one source other than the drawn one: its own window and speed
             record.update(mixed=True)

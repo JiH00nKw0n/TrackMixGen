@@ -1,0 +1,121 @@
+# DERIVED rule file, condition 'mix_place': not a fit. Written by scripts/derive_coefficients.py from
+# configs/experiment/generator/mimicgen/coefficients/softmax/mug_cleanup.yaml with the transforms below; do not edit, derive it again after a refit.
+#   {'type': 'set_d', 'subtasks': {'except_kind': 'place'}, 'value': -1}
+# Everything else (a, g, c0 and the fit's statistics) is the fitted file's.
+# SkillMix softmax rule of mimicgen mug_cleanup (tmg fit_coefficients). Per subtask k, with phi_j = (|dx|, |dy|,
+# rotation, inhand_position, inhand_rotation) of source j against the current scene (in-hand terms 0 for k = 0):
+#   P(task succeeds | reached k, weights w) = sigmoid(c0 + sum_j w_j s_j + d spread(w)),
+#   s_j = a[j] + g . phi_j,  spread(w) = -sum_j w_j log w_j
+#   weights: softmax(s / d) over the sources compatible with the selected one when d > 0, the best one when d <= 0
+# Units: {'dx': 'm', 'dy': 'm', 'rotation': 'rad', 'inhand_position': 'm', 'inhand_rotation': 'rad'}.
+generator: mimicgen
+task: mug_cleanup
+rule: softmax
+basis: 'Fitted on 2026-11-20 on the A100 (scratch_calib/ana/fit_all.py, softmax form, without the older rank_human_demos pool;
+  the model and fit of tmg fit_coefficients, which reproduced the CP-Gen Threading rule to 1e-13 from the same records) from
+  /data/pools/mimicgen/mug_cleanup/ours/ours/mixup_only/pool_calib [the randmix pool; in this repository skillmix_randmix/pool_randmix]
+  (method mixup_only with TMG_MIX_DIRICHLET=1: Dirichlet(c) weights, c ~ LogUniform(0.05, 20); selection ours, pool_robosuite_lowdim
+  settings, 2,000 attempts in chunks of 50) and /data/pools/mimicgen/mug_cleanup/ours/ours/none/pool_ctrl [the unmix pool;
+  in this repository none/pool_unmix] (method none, the same code, settings and chunk seeds, 2,000 attempts); rows of subtask
+  k: the attempts that reached it, label = the attempt''s task success.'
+num_sources: 10
+features:
+- dx
+- dy
+- rotation
+- inhand_position
+- inhand_rotation
+units:
+  dx: m
+  dy: m
+  rotation: rad
+  inhand_position: m
+  inhand_rotation: rad
+subtasks:
+  0:
+    a:
+    - -0.011589360567047619
+    - -0.03955482785510995
+    - -0.029562512271729773
+    - 0.233782481395577
+    - 0.005689802556017148
+    - -0.024408607794491357
+    - -0.23860669981182825
+    - -0.018374012096225027
+    - 0.10266659438986842
+    - 0.013156736063603831
+    g:
+      dx: -0.9844380540509292
+      dy: -2.8037976401926876
+      rotation: -0.867961790940148
+      inhand_position: 0.0
+      inhand_rotation: 0.0
+    d: -1.0
+    c0: -1.3797947787993867
+    rows:
+      randmix: 2000
+      unmix: 2000
+    cv_log_loss_gain_percent:
+      all_rows: 0.5
+      randmix_rows: 0.6
+  1:
+    a:
+    - -0.251383073693544
+    - -0.13681757846738835
+    - 1.0908917257307156
+    - -0.0659214579718067
+    - -0.9833903545117845
+    - 0.16552221810515783
+    - 1.0377111580438474
+    - -1.347282818592568
+    - 0.5547170660469702
+    - 0.4828385372498911
+    g:
+      dx: -0.9267095510429991
+      dy: -2.840141797723767
+      rotation: -0.5244699748774476
+      inhand_position: 1.326725327240552
+      inhand_rotation: -1.124691434154144
+    d: -1.0
+    c0: -0.7522155124562151
+    rows:
+      randmix: 1914
+      unmix: 1865
+    cv_log_loss_gain_percent:
+      all_rows: 7.0
+      randmix_rows: 1.0
+  2:
+    a:
+    - -0.036424664870454676
+    - 0.24950036694003014
+    - 0.022798995275146307
+    - 0.6720492689832563
+    - 0.7698293865752548
+    - -0.44938224929663345
+    - -0.3691360468738551
+    - 0.30420125845397156
+    - -0.5377005749636999
+    - -0.4665336845981485
+    g:
+      dx: -0.2895591506767074
+      dy: -5.282901603807304
+      rotation: -0.40327754624680395
+      inhand_position: -57.186490057064525
+      inhand_rotation: 0.07879963847801824
+    d: 0.27003995993694085
+    c0: 1.2928063881994158
+    rows:
+      randmix: 1165
+      unmix: 995
+    cv_log_loss_gain_percent:
+      all_rows: 25.0
+      randmix_rows: 23.5
+derived:
+  condition: mix_place
+  from: experiment/generator/mimicgen/coefficients/softmax/mug_cleanup.yaml
+  from_sha256: fe5c1eb051e0827b5ab5f352b8b7edf3f47e777f02255d36328b950955eb72a1
+  transforms:
+  - type: set_d
+    subtasks:
+      except_kind: place
+    value: -1

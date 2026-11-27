@@ -1,0 +1,94 @@
+# DERIVED rule file, condition 'select_only': not a fit. Written by scripts/derive_coefficients.py from
+# configs/experiment/generator/mimicgen/coefficients/softmax/threading.yaml with the transforms below; do not edit, derive it again after a refit.
+#   {'type': 'set_d', 'subtasks': 'all', 'value': -1}
+# Everything else (a, g, c0 and the fit's statistics) is the fitted file's.
+# SkillMix softmax rule of mimicgen threading (tmg fit_coefficients). Per subtask k, with phi_j = (|dx|, |dy|,
+# rotation, inhand_position, inhand_rotation) of source j against the current scene (in-hand terms 0 for k = 0):
+#   P(task succeeds | reached k, weights w) = sigmoid(c0 + sum_j w_j s_j + d spread(w)),
+#   s_j = a[j] + g . phi_j,  spread(w) = -sum_j w_j log w_j
+#   weights: softmax(s / d) over the sources compatible with the selected one when d > 0, the best one when d <= 0
+# Units: {'dx': 'm', 'dy': 'm', 'rotation': 'rad', 'inhand_position': 'm', 'inhand_rotation': 'rad'}.
+generator: mimicgen
+task: threading
+rule: softmax
+basis: 'Fitted on 2026-11-20 on the A100 (scratch_calib/ana/fit_all.py, softmax form, without the older rank_human_demos pool;
+  the model and fit of tmg fit_coefficients, which reproduced the CP-Gen Threading rule to 1e-13 from the same records) from
+  /data/pools/mimicgen/threading/ours/ours/mixup_only/pool_calib [the randmix pool; in this repository skillmix_randmix/pool_randmix]
+  (method mixup_only with TMG_MIX_DIRICHLET=1: Dirichlet(c) weights, c ~ LogUniform(0.05, 20); selection ours, pool_robosuite_lowdim
+  settings, 2,000 attempts in chunks of 50) and /data/pools/mimicgen/threading/ours/ours/none/pool_ctrl [the unmix pool; in
+  this repository none/pool_unmix] (method none, the same code, settings and chunk seeds, 2,000 attempts); rows of subtask
+  k: the attempts that reached it, label = the attempt''s task success.'
+num_sources: 10
+features:
+- dx
+- dy
+- rotation
+- inhand_position
+- inhand_rotation
+units:
+  dx: m
+  dy: m
+  rotation: rad
+  inhand_position: m
+  inhand_rotation: rad
+subtasks:
+  0:
+    a:
+    - -0.41083564189324057
+    - -1.2933074583601243
+    - 0.4515237596305289
+    - 0.48142297563077296
+    - 0.24790670976225954
+    - 0.17302488250712225
+    - 0.463741735515014
+    - 0.007318417125439622
+    - -0.5114901071364683
+    - 0.35521052337774783
+    g:
+      dx: -0.7666421379371459
+      dy: -0.6798100331718236
+      rotation: 0.07219588610045552
+      inhand_position: 0.0
+      inhand_rotation: 0.0
+    d: -1.0
+    c0: -1.3511622380367232
+    rows:
+      randmix: 2000
+      unmix: 2000
+    cv_log_loss_gain_percent:
+      all_rows: 4.8
+      randmix_rows: 4.0
+  1:
+    a:
+    - 0.5684767205534949
+    - 1.8864752894508163
+    - 0.6646451573126186
+    - -2.271514315659347
+    - -0.13685929529586813
+    - -0.08469123899457609
+    - -0.46112764684373697
+    - 0.486819675574475
+    - 1.5892413723132999
+    - -1.9864240658898635
+    g:
+      dx: -3.1622148260098655
+      dy: -3.692491129322907
+      rotation: -0.3897920963417212
+      inhand_position: -212.8457663301093
+      inhand_rotation: 0.3959492601945837
+    d: -1.0
+    c0: 0.5545105140533659
+    rows:
+      randmix: 1989
+      unmix: 1980
+    cv_log_loss_gain_percent:
+      all_rows: 14.3
+      randmix_rows: 11.3
+derived:
+  condition: select_only
+  from: experiment/generator/mimicgen/coefficients/softmax/threading.yaml
+  from_sha256: f80a32d233118903af48a63d66e7aa922247bfd415674f2b382efd1cdd9d38b0
+  transforms:
+  - type: set_d
+    subtasks: all
+    value: -1

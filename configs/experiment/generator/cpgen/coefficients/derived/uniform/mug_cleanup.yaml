@@ -1,0 +1,150 @@
+# DERIVED rule file, condition 'uniform': not a fit. Written by scripts/derive_coefficients.py from
+# configs/experiment/generator/cpgen/coefficients/softmax/mug_cleanup.yaml with the transforms below; do not edit, derive it again after a refit.
+#   {'type': 'set_d', 'subtasks': 'all', 'value': 1000}
+# Everything else (a, g, c0 and the fit's statistics) is the fitted file's.
+# SkillMix softmax rule of cpgen mug_cleanup (tmg fit_coefficients). Per subtask k, with phi_j = (|dx|, |dy|,
+# rotation, inhand_position, inhand_rotation) of source j against the current scene (in-hand terms 0 for k = 0):
+#   P(task succeeds | reached k, weights w) = sigmoid(c0 + sum_j w_j s_j + d spread(w)),
+#   s_j = a[j] + g . phi_j,  spread(w) = -sum_j w_j log w_j
+#   weights: softmax(s / d) over the sources compatible with the selected one when d > 0, the best one when d <= 0
+# Units: {'dx': 'm', 'dy': 'm', 'rotation': 'rad', 'inhand_position': 'm', 'inhand_rotation': 'rad'}.
+generator: cpgen
+task: mug_cleanup
+rule: softmax
+basis: 'Fit (tmg fit_coefficients) on the randmix pools [''/data/pools/cpgen/mug_cleanup/ours/ours/skillmix_randmix/pool_randmix_wt'']
+  (2000 attempts) and the unmix pools [''/data/pools/cpgen/mug_cleanup/ours/ours/none/pool_ctrl''] (2000 attempts); rows of
+  subtask k: the attempts that reached it, label = the attempt''s task success.'
+num_sources: 10
+features:
+- dx
+- dy
+- rotation
+- inhand_position
+- inhand_rotation
+units:
+  dx: m
+  dy: m
+  rotation: rad
+  inhand_position: m
+  inhand_rotation: rad
+subtasks:
+  0:
+    a:
+    - 0.04582332091796574
+    - -0.4697708161281396
+    - -0.37922780561770775
+    - 0.18383195290236232
+    - 0.057881850680346555
+    - -0.1082498989405876
+    - 0.24974950473139043
+    - 0.224325164281809
+    - 0.022222566140014416
+    - 0.1724323697795984
+    g:
+      dx: 1.27029626455547
+      dy: -1.1462980894623134
+      rotation: -0.2374591367884451
+      inhand_position: 0.0
+      inhand_rotation: 0.0
+    d: 1000.0
+    c0: -0.3575515839223704
+    penalty: 100.0
+    rows:
+      randmix: 2000
+      unmix: 1989
+    successes: 1464
+    cv_log_loss_gain_percent:
+      all_rows: 1.5
+      randmix_rows: 1.3
+  1:
+    a:
+    - 0.3405140347227484
+    - -0.2545162445293699
+    - -0.7326002901331817
+    - -0.04388326869134965
+    - 0.2760365355707842
+    - -0.915200899834169
+    - 0.1963245818111314
+    - 0.11671626451607489
+    - 0.053893182190383145
+    - 0.2767872343729871
+    g:
+      dx: -1.0847975498474443
+      dy: -1.9730717343068678
+      rotation: -0.04539483242398106
+      inhand_position: 0.0
+      inhand_rotation: 0.0
+    d: 1000.0
+    c0: 0.3804594941065701
+    penalty: 10.0
+    rows:
+      randmix: 2000
+      unmix: 1644
+    successes: 1464
+    cv_log_loss_gain_percent:
+      all_rows: 5.1
+      randmix_rows: 4.1
+  2:
+    a:
+    - -0.10714416401807073
+    - 0.14251647805177528
+    - -0.04737783895218762
+    - -0.28651497203395043
+    - -0.45505521633677853
+    - 0.2925460500047114
+    - -0.3084763037183953
+    - 0.37527277331852477
+    - -0.05033539467432758
+    - 0.27102658698065485
+    g:
+      dx: 0.5987917499953175
+      dy: 1.106285559657207
+      rotation: -0.2076921166146565
+      inhand_position: -21.269929002191777
+      inhand_rotation: -0.09583699996607214
+    d: 1000.0
+    c0: 1.2459128019183923
+    penalty: 0.1
+    rows:
+      randmix: 1689
+      unmix: 1484
+    successes: 1464
+    cv_log_loss_gain_percent:
+      all_rows: 10.7
+      randmix_rows: 16.2
+  3:
+    a:
+    - 0.47385293707505616
+    - 0.4946203970290212
+    - 0.32025810239842745
+    - -0.060618724245037184
+    - 0.6367737453619352
+    - 0.6953651026434625
+    - 0.6042134359216996
+    - -1.3658687490486723
+    - -1.2697198982325923
+    - -0.41602563318597274
+    g:
+      dx: 0.8010687776640754
+      dy: 2.3166473387609274
+      rotation: -0.31493984722655916
+      inhand_position: -7.938278435747338
+      inhand_rotation: 0.5641181545468795
+    d: 1000.0
+    c0: 2.449805483150596
+    penalty: 1.0
+    rows:
+      randmix: 1262
+      unmix: 1349
+    successes: 1464
+    cv_log_loss_gain_percent:
+      all_rows: 11.7
+      randmix_rows: 8.2
+derived:
+  condition: uniform
+  from: experiment/generator/cpgen/coefficients/softmax/mug_cleanup.yaml
+  from_sha256: e6da04d9b30c62fb419d33134d1a0e0760c84d5457f92049a0333b1eaeeb9bfe
+  transforms:
+  - type: set_d
+    subtasks: all
+    value: 1000

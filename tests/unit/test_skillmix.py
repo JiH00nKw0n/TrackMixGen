@@ -10,11 +10,15 @@ from tmg.generation.method.interfaces import MixContext, build_method
 from tmg.generation.method.skillmix import (
     MIN_WEIGHT,
     RANDMIX_SEED,
+    DistanceCap,
     RandmixDraws,
     SkillMixer,
     SkillMixRule,
     SourceDraws,
     SubtaskRule,
+    cap_weights,
+    effective_floor,
+    effective_sources,
     entropy,
     fitted_weights,
     gini,
@@ -497,3 +501,125 @@ def test_mimicgen_task_symmetries_name_reference_objects():
                         ("stack_three", "cubeB"): 3, ("stack_three", "cubeC"): 3}
     method = yaml.safe_load(Path("configs/experiment/method/skillmix.yaml").read_text())
     assert method["mixing"]["symmetries"] == "${oc.select:task.mixing_symmetries,null}"
+
+
+# options of the factor experiment: effective-source floor, distance cap, derived rule files ---------------------------
+def test_effective_floor_raises_the_temperature_only_where_the_weights_are_too_concentrated():
+    scores, everyone = np.array([2.0, 1.0, 0.0, -1.0, -3.0]), [0, 1, 2, 3, 4]
+    assert effective_sources([1.0, 0, 0]) == 1.0 and effective_sources([0.25] * 4) == pytest.approx(4.0)
+    # the fitted weights already have 3 effective sources: the floor does not bind and they stand
+    assert effective_sources(fitted_weights("softmax", scores, 5.0, everyone)) > 3
+    assert effective_floor("softmax", scores, 5.0, everyone, 3) is None
+    # too concentrated: the smallest temperature above the fitted one that reaches the floor
+    assert effective_sources(fitted_weights("softmax", scores, 0.3, everyone)) < 1.2
+    w, temperature = effective_floor("softmax", scores, 0.3, everyone, 3)
+    assert temperature > 0.3 and effective_sources(w) == pytest.approx(3.0, abs=1e-3)
+    assert np.allclose(w, fitted_weights("softmax", scores, temperature, everyone)) and list(np.argsort(-w)) == everyone
+    # d <= 0 (one source by the fit) is blended too, over the compatible sources only
+    w, temperature = effective_floor("softmax", scores, -0.5, [0, 2, 3, 4], 2)
+    assert temperature > 0 and w[1] == 0 and effective_sources(w) == pytest.approx(2.0, abs=1e-3)
+    # fewer compatible sources than the floor: they share the weight equally; one source needs no blend
+    w, temperature = effective_floor("softmax", scores, 0.3, [0, 3], 3)
+    assert temperature is None and w.tolist() == [0.5, 0, 0, 0.5, 0]
+    assert effective_floor("softmax", scores, -0.5, [2], 3) is None and effective_floor("softmax", scores, 0.3, everyone, 1) is None
+    w, temperature = effective_floor("sparsemax", scores, 0.3, everyone, 3)          # the sparsemax rule in the same way
+    assert temperature > 0.3 and effective_sources(w) == pytest.approx(3.0, abs=1e-3)
+
+
+def test_min_effective_sources_changes_the_mixer_weights_and_is_off_by_default():
+    rule = _rule(4, a=[2.0, 1.0, 0.0, -1.0], d=0.2, subtasks=(0, 1))
+    rule.subtasks[1] = SubtaskRule(a=rule.subtasks[0].a, g=np.zeros(5), d=-1.0, c0=0.0)
+    scene, series = np.zeros((4, 3)), [np.full(4, -1.0)] * 4
+    plain, rec = SkillMixer(coefficients=rule).decide(0, 0, scene, None, series)
+    assert effective_sources(plain) < 1.1 and "temperature" not in rec and "min_effective_sources" not in rec
+    mixer = SkillMixer(coefficients=rule, min_effective_sources=3)
+    for k in (0, 1):                                      # the blended subtask and the one the fit gives one source
+        w, rec = mixer.decide(k, 0, scene, None, series)
+        assert effective_sources(w) == pytest.approx(3.0, abs=1e-3) and rec["min_effective_sources"] == 3
+        assert rec["temperature"] > 0.2 and rec["d"] == (0.2, -1.0)[k]
+    w, rec = SkillMixer(coefficients=_rule(4, d=1.0), min_effective_sources=3).decide(0, 0, scene, None, series)
+    assert w.tolist() == [0.25] * 4 and "temperature" not in rec          # equal scores: 4 effective sources already
+    assert mixer.describe()["min_effective_sources"] == 3 and SkillMixer(coefficients=rule).describe()["min_effective_sources"] is None
+    with pytest.raises(ValueError, match="min_effective_sources"):
+        SkillMixer(rule="randmix", min_effective_sources=3)
+
+
+def test_cap_weights_drops_the_sources_beyond_the_cap_and_renormalizes():
+    distances = {"1": {"pos_cm": 1.0, "rot_deg": 10.0}, "2": {"pos_cm": 1.0, "rot_deg": 31.0}, "3": {"pos_cm": 3.5, "rot_deg": 2.0}}
+    cap = DistanceCap.from_config({"rot_deg": 30, "pos_cm": 3})
+    w, dropped = cap_weights([0.4, 0.2, 0.2, 0.2], distances, cap)
+    assert dropped == [2, 3] and w.tolist() == pytest.approx([2 / 3, 1 / 3, 0, 0])      # the selected source (0) has no entry
+    w, dropped = cap_weights([0.4, 0.2, 0.2, 0.2], distances, DistanceCap.from_config({"rot_deg": 30, "pos_cm": None}))
+    assert dropped == [2] and w.tolist() == pytest.approx([0.5, 0.25, 0, 0.25])          # no limit on the position
+    w, dropped = cap_weights([0.4, 0.2, 0.2, 0.2], distances, DistanceCap.from_config({"rot_deg": 31, "pos_cm": 3.5}))
+    assert dropped == [] and w.tolist() == pytest.approx([0.4, 0.2, 0.2, 0.2])           # at the limit is within it
+    # the selected source has no weight and every retained source is beyond the cap: the largest weight stays alone
+    w, dropped = cap_weights([0.0, 0.0, 0.3, 0.7], distances, cap)
+    assert dropped == [2] and w.tolist() == [0, 0, 0, 1.0]
+    assert DistanceCap.from_config(None) is None and DistanceCap.from_config({"rot_deg": None, "pos_cm": None}) is None
+    with pytest.raises(ValueError, match="unknown keys"):
+        DistanceCap.from_config({"rot": 30})
+
+
+def _cap_case():
+    """Four sources that grasp the hammer 0, 2, 8 and 2 cm (the last turned 40 degrees) from the selected source's grasp."""
+    objs = [pose(0.0)] * 4
+    segs = [_grasp_segment(objs[0], -0.06, 0.0), _grasp_segment(objs[1], -0.08, 0.0), _grasp_segment(objs[2], -0.14, 0.0),
+            _grasp_segment(objs[3], -0.08, np.radians(40.0))]
+    return segs, objs
+
+
+def test_skillmix_mixer_leaves_out_the_sources_beyond_the_distance_cap():
+    segs, objs = _cap_case()
+    rule = _rule(4)                                       # equal scores: equal weights
+    plain = SkillMixer(coefficients=rule).mix(_hammer_context(segs, objs))
+    assert plain.record["weights"] == [0.25] * 4 and "distance_cap" not in plain.record
+    capped = SkillMixer(coefficients=rule, max_source_distance={"rot_deg": 30, "pos_cm": 3}).mix(_hammer_context(segs, objs))
+    rec = capped.record
+    assert rec["symmetry"]["2"]["pos_cm"] == pytest.approx(8.0, abs=0.01) and rec["symmetry"]["3"]["rot_deg"] == pytest.approx(40.0, abs=0.1)
+    assert rec["weights"] == [0.5, 0.5, 0.0, 0.0] and rec["mixed"]
+    assert rec["distance_cap"] == {"rot_deg": 30.0, "pos_cm": 3.0, "dropped": [2, 3], "n_dropped": 2, "weights_before": [0.25] * 4}
+    # the blend is the blend of the two sources within the cap: the same poses as a mixer given only those two
+    two = SkillMixer(coefficients=_rule(2)).mix(_hammer_context(segs[:2], objs[:2]))
+    assert np.allclose(capped.targets, two.targets) and np.allclose(capped.gripper, two.gripper)
+    assert not np.allclose(capped.targets, plain.targets)
+    # a cap that drops nothing leaves the blend exactly as it is without a cap
+    loose = SkillMixer(coefficients=rule, max_source_distance={"rot_deg": 90, "pos_cm": 50}).mix(_hammer_context(segs, objs))
+    assert loose.record["distance_cap"]["n_dropped"] == 0 and loose.record["weights"] == plain.record["weights"]
+    assert np.array_equal(loose.targets, plain.targets) and np.array_equal(loose.gripper, plain.gripper)
+    # every other source beyond the cap: the selected source alone, which is no mixing
+    alone = SkillMixer(coefficients=rule, max_source_distance={"pos_cm": 1}).mix(_hammer_context(segs, objs))
+    assert alone.record["weights"] == [1.0, 0.0, 0.0, 0.0] and not alone.record["mixed"]
+
+
+def test_distance_cap_measures_sources_without_any_symmetry_candidate_too():
+    # many-joint hand commands have no gripper flip, so without a cap no alignment record is written; the cap needs the
+    # distances and gets them from the identity candidate
+    def hand(n, close_at, closed):
+        g = np.zeros((n, 3))
+        g[close_at:] = closed
+        return g
+
+    segs = [(pose(0.02 + dx), np.stack([pose(dx + 0.01 * t) for t in range(6)]), hand(6, 3, [0.5, 0.6, 0.4])) for dx in (0.0, 0.08)]
+    ctx = _context(segs, [pose(0.0), pose(0.0)], 0, pose(0.0))
+    events_rule = {"type": "closure", "columns": [0, 1, 2]}
+    assert "symmetry" not in SkillMixer(coefficients=_rule(2), gripper_events=events_rule).mix(ctx).record
+    rec = SkillMixer(coefficients=_rule(2), gripper_events=events_rule, max_source_distance={"pos_cm": 3}).mix(ctx).record
+    assert rec["symmetry"]["1"] == {"symmetry": "identity", "pos_cm": 8.0, "rot_deg": 0.0, "identity_pos_cm": 8.0, "identity_rot_deg": 0.0}
+    assert rec["distance_cap"]["dropped"] == [1] and rec["weights"] == [1.0, 0.0] and not rec["mixed"]
+
+
+def test_build_method_reads_a_derived_rule_file_and_the_options():
+    base = {"enabled": True, "type": "skillmix", "rule": "softmax", "coefficients": "mimicgen/threading"}
+    fitted = build_method({"name": "skillmix", "mixing": base}, chunk_seed=0).mixer
+    assert fitted.max_distance is None and fitted.min_effective is None                    # both off unless set
+    assert all(fitted.coefficients.for_subtask(k).d > 0 for k in (0, 1))
+    derived = build_method({"name": "skillmix_select", "mixing": {**base, "derived": "select_only"}}, chunk_seed=0).mixer
+    assert derived.coefficients.path.endswith("coefficients/derived/select_only/threading.yaml")
+    assert [derived.coefficients.for_subtask(k).d for k in (0, 1)] == [-1.0, -1.0]
+    assert np.array_equal(derived.coefficients.for_subtask(0).a, fitted.coefficients.for_subtask(0).a)
+    with pytest.raises(FileNotFoundError, match="derive_coefficients.py"):
+        build_method({"name": "skillmix_x", "mixing": {**base, "derived": "no_such_condition"}}, chunk_seed=0)
+    options = build_method({"name": "skillmix_y", "mixing": {**base, "max_source_distance": {"rot_deg": 30, "pos_cm": 3},
+                                                             "min_effective_sources": 3}}, chunk_seed=0).mixer
+    assert options.max_distance == DistanceCap(rot_deg=30.0, pos_cm=3.0) and options.min_effective == 3.0

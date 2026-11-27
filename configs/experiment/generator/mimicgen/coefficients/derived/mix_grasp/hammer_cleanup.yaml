@@ -1,0 +1,121 @@
+# DERIVED rule file, condition 'mix_grasp': not a fit. Written by scripts/derive_coefficients.py from
+# configs/experiment/generator/mimicgen/coefficients/softmax/hammer_cleanup.yaml with the transforms below; do not edit, derive it again after a refit.
+#   {'type': 'set_d', 'subtasks': {'except_kind': 'grasp'}, 'value': -1}
+# Everything else (a, g, c0 and the fit's statistics) is the fitted file's.
+# SkillMix softmax rule of mimicgen hammer_cleanup (tmg fit_coefficients). Per subtask k, with phi_j = (|dx|, |dy|,
+# rotation, inhand_position, inhand_rotation) of source j against the current scene (in-hand terms 0 for k = 0):
+#   P(task succeeds | reached k, weights w) = sigmoid(c0 + sum_j w_j s_j + d spread(w)),
+#   s_j = a[j] + g . phi_j,  spread(w) = -sum_j w_j log w_j
+#   weights: softmax(s / d) over the sources compatible with the selected one when d > 0, the best one when d <= 0
+# Units: {'dx': 'm', 'dy': 'm', 'rotation': 'rad', 'inhand_position': 'm', 'inhand_rotation': 'rad'}.
+generator: mimicgen
+task: hammer_cleanup
+rule: softmax
+basis: 'Fitted on 2026-11-20 on the A100 (scratch_calib/ana/fit_all.py, softmax form, without the older rank_human_demos pool;
+  the model and fit of tmg fit_coefficients, which reproduced the CP-Gen Threading rule to 1e-13 from the same records) from
+  /data/pools/mimicgen/hammer_cleanup/ours/ours/mixup_only/pool_calib [the randmix pool; in this repository skillmix_randmix/pool_randmix]
+  (method mixup_only with TMG_MIX_DIRICHLET=1: Dirichlet(c) weights, c ~ LogUniform(0.05, 20); selection ours, pool_robosuite_lowdim
+  settings, 2,000 attempts in chunks of 50) and /data/pools/mimicgen/hammer_cleanup/ours/ours/none/pool_ctrl [the unmix pool;
+  in this repository none/pool_unmix] (method none, the same code, settings and chunk seeds, 2,000 attempts); rows of subtask
+  k: the attempts that reached it, label = the attempt''s task success.'
+num_sources: 10
+features:
+- dx
+- dy
+- rotation
+- inhand_position
+- inhand_rotation
+units:
+  dx: m
+  dy: m
+  rotation: rad
+  inhand_position: m
+  inhand_rotation: rad
+subtasks:
+  0:
+    a:
+    - 0.21375252723007201
+    - 0.052205987674528595
+    - -0.006445993737959361
+    - -0.3285112649783421
+    - -0.07147521451492003
+    - 0.15710710733150365
+    - -0.08158434055748015
+    - -0.013504632890370903
+    - 0.041231329386784296
+    - 0.04032036233687995
+    g:
+      dx: -1.550522503120492
+      dy: -3.8817790418464653
+      rotation: -1.1187812826679036
+      inhand_position: 0.0
+      inhand_rotation: 0.0
+    d: -1.0
+    c0: -0.8326348510350225
+    rows:
+      randmix: 2000
+      unmix: 2000
+    cv_log_loss_gain_percent:
+      all_rows: 0.7
+      randmix_rows: 1.2
+  1:
+    a:
+    - 0.37590412821073954
+    - -0.015260405330372739
+    - -0.017810267835892332
+    - -0.0482477258247624
+    - 0.05499340784108294
+    - 0.45618056140132307
+    - 0.30973919848880727
+    - -0.5509801410383799
+    - -0.41206860719425115
+    - -0.11811920375429558
+    g:
+      dx: -3.066157334538003
+      dy: -0.4000310635746073
+      rotation: -1.3589124432002548
+      inhand_position: -6.3582987114020035
+      inhand_rotation: -2.541605817140183
+    d: 0.2381755823853781
+    c0: 2.13888019536824
+    rows:
+      randmix: 1880
+      unmix: 1878
+    cv_log_loss_gain_percent:
+      all_rows: 20.7
+      randmix_rows: 4.0
+  2:
+    a:
+    - -0.14410400308577961
+    - 0.2677143488685717
+    - -0.3854760303098281
+    - -0.2955289425912215
+    - 0.26652622989593944
+    - -0.1352513098845947
+    - 0.3460625577825101
+    - 0.032142752756940465
+    - -0.2507916866223855
+    - 0.4742977430655997
+    g:
+      dx: -3.8440627178002678
+      dy: -9.38103995313843
+      rotation: 0.10174967528790922
+      inhand_position: -86.61923906022278
+      inhand_rotation: 0.13603039093723504
+    d: -1.0
+    c0: 2.6611159037588643
+    rows:
+      randmix: 707
+      unmix: 693
+    cv_log_loss_gain_percent:
+      all_rows: 35.2
+      randmix_rows: 36.0
+derived:
+  condition: mix_grasp
+  from: experiment/generator/mimicgen/coefficients/softmax/hammer_cleanup.yaml
+  from_sha256: f7a62b0ecf3c371e031f3d9a29dbc799da9edf977dcd76c213e9d5a43684dc57
+  transforms:
+  - type: set_d
+    subtasks:
+      except_kind: grasp
+    value: -1

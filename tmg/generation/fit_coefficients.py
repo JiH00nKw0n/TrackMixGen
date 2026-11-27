@@ -294,18 +294,22 @@ def fit_blocks(randmix: Attempts, unmix: Attempts, *, num_sources: int, signals:
 
 
 # rule file ------------------------------------------------------------------------------------------------------------
-def write_rule(path: Path, *, rule: str, generator: str, task: str, basis: str, num_sources: int, blocks: Mapping) -> Path:
-    """Write a SkillMix rule file of ``rule`` (read by ``tmg.generation.method.skillmix.load_rule``)."""
+def write_rule(path: Path, *, rule: str, generator: str, task: str, basis: str, num_sources: int, blocks: Mapping,
+               note: str = "", extra: Mapping | None = None) -> Path:
+    """Write a SkillMix rule file of ``rule`` (read by ``tmg.generation.method.skillmix.load_rule``). ``note`` (comment
+    lines put before the header) and ``extra`` (top-level keys after the rule's own) are for files that are not a plain
+    fit: the derived rule files of ``tmg.generation.derive_coefficients``."""
     path.parent.mkdir(parents=True, exist_ok=True)
     fitted = FITTED[rule]
-    head = (f"# SkillMix {rule} rule of {generator} {task} (tmg fit_coefficients). Per subtask k, with phi_j = (|dx|, |dy|,\n"
+    head = (f"{note}# SkillMix {rule} rule of {generator} {task} (tmg fit_coefficients). Per subtask k, with phi_j = (|dx|, |dy|,\n"
             f"# rotation, inhand_position, inhand_rotation) of source j against the current scene (in-hand terms 0 for k = 0):\n"
             f"#   P(task succeeds | reached k, weights w) = sigmoid(c0 + sum_j w_j s_j + d spread(w)),\n"
             f"#   s_j = a[j] + g . phi_j,  spread(w) = {fitted.spread_formula}\n"
             f"#   weights: {fitted.weights_formula} over the sources compatible with the selected one when d > 0, the best one when d <= 0\n"
             f"# Units: {UNITS}.\n")
     data = {"generator": generator, "task": task, "rule": rule, "basis": basis, "num_sources": int(num_sources),
-            "features": list(FEATURES), "units": UNITS, "subtasks": {int(k): dict(v) for k, v in sorted(blocks.items())}}
+            "features": list(FEATURES), "units": UNITS, "subtasks": {int(k): dict(v) for k, v in sorted(blocks.items())},
+            **dict(extra or {})}
     path.write_text(head + yaml.safe_dump(data, sort_keys=False, width=120))
     return path
 

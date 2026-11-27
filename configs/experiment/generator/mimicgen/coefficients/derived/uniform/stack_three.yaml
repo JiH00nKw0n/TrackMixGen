@@ -1,0 +1,146 @@
+# DERIVED rule file, condition 'uniform': not a fit. Written by scripts/derive_coefficients.py from
+# configs/experiment/generator/mimicgen/coefficients/softmax/stack_three.yaml with the transforms below; do not edit, derive it again after a refit.
+#   {'type': 'set_d', 'subtasks': 'all', 'value': 1000}
+# Everything else (a, g, c0 and the fit's statistics) is the fitted file's.
+# SkillMix softmax rule of mimicgen stack_three (tmg fit_coefficients). Per subtask k, with phi_j = (|dx|, |dy|,
+# rotation, inhand_position, inhand_rotation) of source j against the current scene (in-hand terms 0 for k = 0):
+#   P(task succeeds | reached k, weights w) = sigmoid(c0 + sum_j w_j s_j + d spread(w)),
+#   s_j = a[j] + g . phi_j,  spread(w) = -sum_j w_j log w_j
+#   weights: softmax(s / d) over the sources compatible with the selected one when d > 0, the best one when d <= 0
+# Units: {'dx': 'm', 'dy': 'm', 'rotation': 'rad', 'inhand_position': 'm', 'inhand_rotation': 'rad'}.
+generator: mimicgen
+task: stack_three
+rule: softmax
+basis: 'Fitted on 2026-11-20 on the A100 (scratch_calib/ana/fit_all.py, softmax form, without the older rank_human_demos pool;
+  the model and fit of tmg fit_coefficients, which reproduced the CP-Gen Threading rule to 1e-13 from the same records) from
+  /data/pools/mimicgen/stack_three/ours/ours/mixup_only/pool_calib [the randmix pool; in this repository skillmix_randmix/pool_randmix]
+  (method mixup_only with TMG_MIX_DIRICHLET=1: Dirichlet(c) weights, c ~ LogUniform(0.05, 20); selection ours, pool_robosuite_lowdim
+  settings, 2,000 attempts in chunks of 50) and /data/pools/mimicgen/stack_three/ours/ours/none/pool_ctrl [the unmix pool;
+  in this repository none/pool_unmix] (method none, the same code, settings and chunk seeds, 2,000 attempts); rows of subtask
+  k: the attempts that reached it, label = the attempt''s task success.'
+num_sources: 10
+features:
+- dx
+- dy
+- rotation
+- inhand_position
+- inhand_rotation
+units:
+  dx: m
+  dy: m
+  rotation: rad
+  inhand_position: m
+  inhand_rotation: rad
+subtasks:
+  0:
+    a:
+    - -0.2275448098078596
+    - -0.1900448179121245
+    - 0.11752990552543205
+    - -0.023168043074993563
+    - -0.21213914791567026
+    - 0.167659332536212
+    - 0.22965811660462596
+    - -0.1594298386079999
+    - 0.23519777408313694
+    - 0.05526327774505015
+    g:
+      dx: -2.140358270118288
+      dy: -0.9078263240157278
+      rotation: -0.2665873154992097
+      inhand_position: 0.0
+      inhand_rotation: 0.0
+    d: 1000.0
+    c0: -1.1598354787378422
+    rows:
+      randmix: 2000
+      unmix: 2000
+    cv_log_loss_gain_percent:
+      all_rows: 2.1
+      randmix_rows: 2.0
+  1:
+    a:
+    - -0.24751797755342347
+    - 0.6587948081225555
+    - -0.2848491062334319
+    - -0.09623226328485944
+    - -0.09718102909950344
+    - -0.1464587302076188
+    - -0.356497006137299
+    - 0.0905687909434407
+    - 0.3892300515318593
+    - 0.13612803713863364
+    g:
+      dx: -1.0571795344151615
+      dy: -2.846069970718928
+      rotation: -0.29261076995652263
+      inhand_position: -83.34431384250692
+      inhand_rotation: 0.013436474816613654
+    d: 1000.0
+    c0: -0.15827939976512306
+    rows:
+      randmix: 1709
+      unmix: 1666
+    cv_log_loss_gain_percent:
+      all_rows: 5.1
+      randmix_rows: 5.8
+  2:
+    a:
+    - -0.037391909854043476
+    - 0.1775204461959134
+    - -0.2065673727889909
+    - 0.2298113998634407
+    - -0.004589491672935187
+    - 0.048045571168343966
+    - -0.3506337812352776
+    - 0.11777133333977698
+    - 0.014981205581136624
+    - -0.01236393306637339
+    g:
+      dx: -1.1966254157563632
+      dy: -1.1790363340099903
+      rotation: -0.17227047924771138
+      inhand_position: -4.8259791787013695
+      inhand_rotation: 0.021656276018809092
+    d: 1000.0
+    c0: -0.3049592465564488
+    rows:
+      randmix: 1128
+      unmix: 989
+    cv_log_loss_gain_percent:
+      all_rows: 1.2
+      randmix_rows: 0.8
+  3:
+    a:
+    - -0.04805712330169165
+    - 0.5155167476242805
+    - 0.09579638669724909
+    - -0.654569054446356
+    - 0.03944991825145141
+    - 0.25157572524194843
+    - 0.12363672835695032
+    - 0.2761785608312107
+    - -0.3064869831669428
+    - -0.27505533852606656
+    g:
+      dx: 0.9065540764611312
+      dy: -0.49372977466226936
+      rotation: -1.2792994118612002
+      inhand_position: -45.37733740750864
+      inhand_rotation: 0.08093290443243355
+    d: 1000.0
+    c0: 2.1354222666757896
+    rows:
+      randmix: 663
+      unmix: 552
+    cv_log_loss_gain_percent:
+      all_rows: 13.7
+      randmix_rows: 13.9
+derived:
+  condition: uniform
+  from: experiment/generator/mimicgen/coefficients/softmax/stack_three.yaml
+  from_sha256: 52144d3c8c57e35468867e39f83f30ee0db3d99c09822849142bd602f2379d50
+  transforms:
+  - type: set_d
+    subtasks: all
+    value: 1000
