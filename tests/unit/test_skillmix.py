@@ -1,11 +1,12 @@
-"""SkillMix: the features, the rows of the fit, the softmax and randmix weights, the rule files, the mixer and the fit."""
+"""SkillMix: the features, the softmax and randmix weights, the rule files, the subtask ids and the mixer (the fit:
+test_fit.py)."""
 from pathlib import Path
 
 import numpy as np
 import pytest
 import yaml
 
-from tmg.generation.method.interfaces import MixContext, build_method
+from tmg.generation.method.interfaces import Arms, HeldRule, HeldTest, MixContext, SubtaskId, SubtaskScene, build_method
 from tmg.generation.method.skillmix import (
     MIN_WEIGHT,
     RANDMIX_SEED,
@@ -15,19 +16,20 @@ from tmg.generation.method.skillmix import (
     SourceDraws,
     SubtaskRule,
     load_rule,
-    parse_subtask_key,
     randmix_weights,
     single_source,
     softmax_weights,
-    subtask_key,
 )
 from tmg.generation.method.success_model import (
-    design_rows,
+    FEATURES,
+    HELD_FEATURES,
     in_hand,
     inhand_features,
     scene_features,
-    subtask_outcomes,
+    source_features,
 )
+
+S = SubtaskId
 
 
 def pose(x=0.0, y=0.0, z=0.0, yaw=0.0):
@@ -45,7 +47,7 @@ def flat(p):
 def _rule(n, a=None, g=None, d=1.0, subtasks=(0,)):
     a = np.zeros(n) if a is None else np.asarray(a, dtype=float)
     g = np.zeros(5) if g is None else np.asarray(g, dtype=float)
-    return SkillMixRule(name="g/t", num_sources=n, subtasks={k: SubtaskRule(a=a, g=g, d=float(d), c0=0.0) for k in subtasks})
+    return SkillMixRule(name="g/t", num_sources=n, subtasks={S(k): SubtaskRule(a=a, g=g, d=float(d), c0=0.0) for k in subtasks})
 
 
 # features and rows ----------------------------------------------------------------------------------------------------
@@ -56,41 +58,6 @@ def test_scene_and_inhand_features():
     h2 = in_hand(pose(0, 0, 0, yaw=0.5), pose(0.02, 0, -0.1, yaw=0.5))
     d = inhand_features(h1, h2)
     assert d[0] == pytest.approx(0.02) and d[1] == pytest.approx(0.0, abs=1e-9)
-
-
-def test_subtask_outcomes_from_term_signals():
-    steps = {"seg_sub": np.array([0, 0, 1, 1]), "seg_of_step": np.array([0, 0, 1, 2, 2, 3, 3]),
-             "term__grasp": np.array([0, 0, 1, 1, 0, 0, 0])}
-    assert subtask_outcomes({"success": True}, steps, ["grasp", None]) == [True, True]
-    late = dict(steps, term__grasp=np.array([0, 0, 0, 0, 0, 1, 1]))      # fires only during the second subtask
-    assert subtask_outcomes({"success": False}, late, ["grasp", None]) == [False, False]
-
-
-def _attempt(src0, src1, cur0, cur1, srcpose0, srcpose1, eef, objects):
-    return {"success": True, "subtasks": [
-        {"subtask_ind": 0, "object_name": "a", "src_demo_ind": src0, "src_subtask_start": 0,
-         "cur_obj_pose": flat(cur0), "src_obj_pose": flat(srcpose0), "eef_pose": flat(eef), "objects": {"a": flat(objects["a"])}},
-        {"subtask_ind": 1, "object_name": "b", "src_demo_ind": src1, "src_subtask_start": 2,
-         "cur_obj_pose": flat(cur1), "src_obj_pose": flat(srcpose1), "eef_pose": flat(eef), "objects": {k: flat(v) for k, v in objects.items()}}]}
-
-
-def test_design_rows_keep_only_attempts_that_reached_the_subtask():
-    infos = [{"eef_pose": np.stack([pose()] * 5), "object_poses": {"a": np.stack([pose(z=-0.1)] * 5)}} for _ in range(2)]
-    objects = {"a": pose(z=-0.12), "b": pose(0.5)}
-    a = _attempt(0, 1, pose(0.1), pose(0.5), pose(), pose(0.4), pose(), objects)
-    X, y, kept = design_rows([a, a], [[True, True], [False, False]], 1, 2, infos)
-    assert kept == [0] and X.shape == (1, 2 + 3 + 2) and y.tolist() == [1.0]
-    assert np.allclose(X[0, :2], [0, 1]) and X[0, 2] == pytest.approx(0.1) and X[0, 5] == pytest.approx(0.02)
-
-
-def test_design_rows_label_is_task_success_not_the_subtask_success():
-    objects = {"a": pose(z=-0.12), "b": pose(0.5)}
-    ok = _attempt(0, 1, pose(0.1), pose(0.5), pose(), pose(0.4), pose(), objects)
-    failed = dict(ok, success=False)                       # the grasp (subtask 0) succeeded, the task did not
-    X, y, kept = design_rows([ok, failed], [[True, True], [True, False]], 0, 2, None)
-    assert X.shape == (2, 2 + 3 + 2) and y.tolist() == [1.0, 0.0] and kept == [0, 1]
-    assert np.all(X[:, 5:] == 0)                           # no in-hand features in the first subtask
-    assert design_rows([ok], [[False, False]], 1, 2, None)[0].shape == (0, 2 + 3 + 2)      # nobody reached subtask 1
 
 
 # weights --------------------------------------------------------------------------------------------------------------
@@ -122,14 +89,14 @@ def test_softmax_weights_drop_weights_below_the_minimum_and_renormalize():
 def test_rule_scores_add_the_feature_slopes_to_the_source_effects():
     block = SubtaskRule(a=np.array([0.5, -0.5]), g=np.array([-1.0, -2.0, -0.5, -10.0, -1.0]), d=0.3, c0=-1.0)
     scene = np.array([[0.1, 0.2, 0.3], [0.0, 0.0, 0.0]])
-    assert np.allclose(block.scores(scene), [0.5 - 0.1 - 0.4 - 0.15, -0.5])          # no in-hand features: zeros
-    assert np.allclose(block.scores(scene, np.array([[0.01, 0.1], [0.0, 0.0]])), [0.5 - 0.65 - 0.1 - 0.1, -0.5])
+    assert np.allclose(block.scores(np.hstack([scene, np.zeros((2, 2))])), [0.5 - 0.1 - 0.4 - 0.15, -0.5])
+    assert np.allclose(block.scores(np.hstack([scene, [[0.01, 0.1], [0.0, 0.0]]])), [0.5 - 0.65 - 0.1 - 0.1, -0.5])
 
 
 def test_randmix_draws_are_dirichlet_weights_from_their_own_stream():
     draws = RandmixDraws(chunk_seed=30001)
-    first = draws.draw(0, 4)
-    assert draws.draw(0, 4) is first                       # one draw per subtask and attempt (CP-Gen may re-solve)
+    first = draws.draw(S(0), 4)
+    assert draws.draw(S(0), 4) is first                       # one draw per subtask and attempt (CP-Gen may re-solve)
     rng = np.random.default_rng(np.random.SeedSequence([30001, RANDMIX_SEED]))
     c = float(np.exp(rng.uniform(np.log(0.05), np.log(20.0))))
     gamma = rng.gamma(c, size=4)
@@ -139,9 +106,9 @@ def test_randmix_draws_are_dirichlet_weights_from_their_own_stream():
     expected = np.r_[gamma[[0, 1]], 0.0, gamma[3]] / gamma[[0, 1, 3]].sum()
     expected[expected < MIN_WEIGHT] = 0.0
     assert np.allclose(w, expected / expected.sum()) and w[2] == 0.0
-    second = draws.draw(1, 4)
+    second = draws.draw(S(1), 4)
     draws.begin_attempt()
-    assert draws.draw(0, 4)[0] != first[0] and second[0] != first[0]     # the stream moves on; a new attempt draws anew
+    assert draws.draw(S(0), 4)[0] != first[0] and second[0] != first[0]     # the stream moves on; a new attempt draws anew
     assert randmix_weights((0.1, np.zeros(4), 5), [1, 2]).tolist() == [0.0, 0.0, 1.0, 0.0]   # all gammas 0: fallback
 
 
@@ -155,35 +122,42 @@ def test_committed_rule_files_load_and_give_weights():
     for generator, tasks in COMMITTED.items():
         for task, n in tasks.items():
             rule = load_rule(f"{generator}/{task}")
-            assert rule.num_sources == 10 and sorted(rule.subtasks) == list(range(n))
+            assert rule.num_sources == 10 and sorted(rule.subtasks, key=lambda s: s.order) == [S(k) for k in range(n)]
+            assert rule.features == FEATURES and rule.held_rule is None and rule.object_frame is None
             for k in range(n):
-                block = rule.for_subtask(k)
+                block = rule.block(S(k))
                 assert block.a.shape == (10,) and block.g.shape == (5,) and np.isfinite(block.d)
                 if k == 0:
                     assert np.allclose(block.g[3:], 0.0)          # no in-hand terms in the first subtask
-                w = softmax_weights(block.scores(np.full((10, 3), 0.05), np.full((10, 2), 0.01)), block.d, list(range(10)))
+                w = softmax_weights(block.scores(np.hstack([np.full((10, 3), 0.05), np.full((10, 2), 0.01)])), block.d, list(range(10)))
                 assert w.sum() == pytest.approx(1.0) and (w >= 0).all()
     # the MimicGen fits favour spreading the weight (d > 0) in every subtask
     assert all(b.d > 0 for t in COMMITTED["mimicgen"] for b in load_rule(f"mimicgen/{t}").subtasks.values())
 
 
 def test_every_committed_rule_file_loads_unchanged_with_single_arm_keys():
-    """Every file under configs/experiment/generator/*/coefficients/ is read with the per-arm keys as before: integer keys,
-    and a lookup with an end effector falls back to the plain subtask of a single-arm file."""
+    """Every file under configs/experiment/generator/*/coefficients/ is read as before: integer keys, the five features, and
+    a one-armed generator (ids k, whatever its records call the arm) finds its blocks while a two-armed one never does."""
     root = Path(__file__).resolve().parents[2] / "configs" / "experiment" / "generator"
     files = sorted(root.glob("*/coefficients/*.yaml"))
     assert len(files) >= sum(len(t) for t in COMMITTED.values())
     for path in files:
         data = yaml.safe_load(path.read_text())
         rule = load_rule(str(path))
-        assert sorted(rule.subtasks) == sorted(int(k) for k in data["subtasks"])
+        assert sorted(key.key for key in rule.subtasks) == sorted(int(k) for k in data["subtasks"])
         for k, block in data["subtasks"].items():
-            b = rule.for_subtask(int(k))
-            assert b is rule.for_subtask(int(k), "robot0", single_arm=True)   # a single-arm generator (SoftMimicGen)
+            b = rule.block(Arms().subtask(int(k)))
+            assert b is rule.block(Arms(("robot0",)).subtask(int(k), "robot0"))      # a single-arm generator (SoftMimicGen)
             with pytest.raises(KeyError, match="more than one end effector"):
-                rule.for_subtask(int(k), "right")                        # never for a two-armed generator
+                rule.block(Arms(("left", "right")).subtask(int(k), "right"))       # never for a two-armed generator
             assert b.a.tolist() == [float(block["a"][j]) for j in range(rule.num_sources)] and b.d == float(block["d"])
-        assert rule.describe()["subtasks"] == sorted(rule.subtasks)
+            assert b.g.tolist() == [float(block["g"][f]) for f in FEATURES]
+        assert rule.describe()["subtasks"] == sorted(int(k) for k in data["subtasks"])
+
+
+def scene(n=2, k=0, eef=None, current=None, sources=None, **more):
+    return SubtaskScene(subtask=k, eef=eef, reference_object="obj", current_object_pose=pose() if current is None else current,
+                        source_object_poses=sources or [pose()] * n, **more)
 
 
 def test_two_arm_rule_files_key_their_blocks_by_end_effector_and_subtask(tmp_path):
@@ -193,61 +167,147 @@ def test_two_arm_rule_files_key_their_blocks_by_end_effector_and_subtask(tmp_pat
         "right/0": {"a": [1.0, 0.0], "g": g, "d": 0.5, "c0": 0.0}, "right/1": {"a": [0.0, 0.0], "g": g, "d": 0.5, "c0": 0.0},
         "left/0": {"a": [0.0, 1.0], "g": g, "d": 0.5, "c0": 0.0}}}))
     rule = load_rule(str(path))
-    assert sorted(rule.subtasks) == ["left/0", "right/0", "right/1"]
+    assert sorted(rule.subtasks, key=lambda s: s.order) == [S(0, "left"), S(0, "right"), S(1, "right")]
     assert rule.describe()["subtasks"] == ["left/0", "right/0", "right/1"]
-    assert rule.for_subtask(0, "right").a.tolist() == [1.0, 0.0] and rule.for_subtask(0, "left").a.tolist() == [0.0, 1.0]
+    assert rule.block(S(0, "right")).a.tolist() == [1.0, 0.0] and rule.block(S(0, "left")).a.tolist() == [0.0, 1.0]
     with pytest.raises(KeyError, match="left/1"):
-        rule.for_subtask(1, "left")
-    with pytest.raises(KeyError):
-        rule.for_subtask(0)                                          # a two-arm file needs the end effector
-    assert subtask_key(2) == 2 and subtask_key(2, "right") == "right/2"
-    assert parse_subtask_key(3) == (None, 3) and parse_subtask_key("3") == (None, 3) and parse_subtask_key("left/1") == ("left", 1)
+        rule.block(S(1, "left"))
+    with pytest.raises(KeyError, match="the generator has one arm"):
+        rule.block(S(0))                                             # a two-arm file is not for a one-armed generator
     # the mixer picks the arm's block: right prefers source 0, left source 1 (no collision on k = 0)
-    mixer = SkillMixer(coefficients=rule)
-    w_right, rec_right = mixer.decide(0, 0, np.zeros((2, 3)), None, [np.full(4, -1.0)] * 2, eef="right")
-    w_left, rec_left = mixer.decide(0, 0, np.zeros((2, 3)), None, [np.full(4, -1.0)] * 2, eef="left")
+    mixer = SkillMixer(coefficients=rule, arms=Arms(("left", "right")))
+    w_right, rec_right = mixer.decide(scene(eef="right"), 0, [np.full(4, -1.0)] * 2)
+    w_left, rec_left = mixer.decide(scene(eef="left"), 0, [np.full(4, -1.0)] * 2)
     assert w_right[0] > w_left[0] and rec_right["eef"] == "right" and rec_left["eef"] == "left"
 
 
+def test_subtask_ids_and_arms():
+    assert S(2).key == 2 and S(2, "right").key == "right/2" and str(S(2, "right")) == "right/2"
+    assert S.parse(3) == S(3) and S.parse("3") == S(3) and S.parse("left/1") == S(1, "left")
+    with pytest.raises(ValueError, match="<eef>/<k>"):
+        S.parse("/1")
+    assert sorted([S(1, "right"), S(0, "right"), S(0, "left")], key=lambda s: s.order) == [S(0, "left"), S(0, "right"), S(1, "right")]
+    one, named, two = Arms(), Arms.of(["robot0"]), Arms.of(("left", "right"))
+    assert Arms.of(None) == one and Arms.of(two) is two
+    assert not one.per_arm and not named.per_arm and two.per_arm
+    assert one.subtask(1) == S(1) and named.subtask(1, "robot0") == S(1) and two.subtask(1, "left") == S(1, "left")
+    for eef in (None, "robot0"):
+        with pytest.raises(KeyError, match="arms"):
+            two.subtask(0, eef)                                       # a two-armed generator must name one of its arms
+    assert one.record_eefs == (None,) and named.record_eefs == ("robot0",) and two.record_eefs == ("left", "right")
+
+
 def test_randmix_and_source_draws_of_two_arms_do_not_collide_and_one_arm_streams_are_unchanged():
-    one, keyed = RandmixDraws(3), RandmixDraws(3)
-    assert one.draw(0, 4)[0] == keyed.draw(0, 4, None)[0]        # single arm: same key, same stream as before
+    one, keyed = RandmixDraws(3), RandmixDraws(3, arms=Arms(("robot0",)))
+    assert one.draw(S(0), 4)[0] == keyed.draw(S(0), 4)[0]        # single arm: same key, same stream as before
     two = RandmixDraws(3, arms=["left", "right"])
-    right, left = two.draw(0, 4, "right"), two.draw(0, 4, "left")
-    assert right[0] != left[0] and two.draw(0, 4, "right") is right      # kept within the attempt per arm
+    right, left = two.draw(S(0, "right"), 4), two.draw(S(0, "left"), 4)
+    assert right[0] != left[0] and two.draw(S(0, "right"), 4) is right      # kept within the attempt per arm
     src = SourceDraws(5, arms=["left", "right"])
-    assert src.draw(0, "right") != src.draw(0, "left") and src.draw(0, "right") == src.draw(0, "right")
+    assert src.draw(S(0, "right")) != src.draw(S(0, "left")) and src.draw(S(0, "right")) == src.draw(S(0, "right"))
 
 
 def test_skillmix_mixer_scores_with_feature_poses_and_zero_inhand_for_unknown_sources():
     """SoftMimicGen blends a deformable object's segments in the world frame (identity blending frames) but scores the
-    sources with their nodal frames (extra feature_object_poses); a source without an in-hand pose gets in-hand 0."""
+    sources with their nodal frames (the scene's source_object_poses); a source without an in-hand pose gets in-hand 0."""
     segs = [_segment(0.0), _segment(0.0), _segment(0.0)]
     world = [np.eye(4)] * 3
     nodal = [pose(0.0), pose(0.05), pose(0.3)]
     rule = _rule(3, g=[-10.0, 0.0, 0.0, -10.0, 0.0], d=0.5, subtasks=(0, 1))
-    mixer = SkillMixer(coefficients=rule)
-    mixer.set_end_effectors(["robot0"])
-    out = mixer.mix(_context(segs, world, 0, pose(0.0), extra={"feature_object_poses": nodal, "eef": "robot0"}))
+    mixer = SkillMixer(coefficients=rule, arms=Arms(("robot0",)))
+    out = mixer.mix(_context(segs, world, 0, pose(0.0), features=nodal, eef="robot0"))
     rec = out.record
     assert rec["scores"] == [0.0, -0.5, -3.0] and rec["eef"] == "robot0" and rec["mixed"] is True
     assert len(set(rec["weights"])) == 3                              # non-identity weights from the nodal frames
-    extra = {"current_in_hand": pose(0.0), "source_in_hand": [pose(0.1), None, pose(0.0)]}
-    rec = SkillMixer(coefficients=rule).mix(_context(segs, nodal, 0, pose(0.0), subtask=1, extra=extra)).record
-    assert rec["inhand_features"] == [[0.1, 0.0], [0.0, 0.0], [0.0, 0.0]]
+    hand = dict(carried_object="obj", eef_pose=pose(), carried_pose=pose(0.0), source_eef_poses=[pose()] * 3,
+                source_carried_poses=[pose(0.1), None, pose(0.0)])
+    rec = SkillMixer(coefficients=rule).mix(_context(segs, nodal, 0, pose(0.0), subtask=1, **hand)).record
+    assert rec["inhand_features"] == [[0.1, 0.0], [0.0, 0.0], [0.0, 0.0]] and "held" not in rec
 
 
 def test_skillmix_mixer_with_a_current_object_pose_gives_non_identity_weights():
-    """The Isaac Lab runtimes pass extra current_object_pose: the mixer then scores and blends (no identity record)."""
+    """A scene with a current object pose: the mixer scores and blends (no identity record); without one it declines."""
     segs = [_segment(0.0), _segment(0.0), _segment(0.0)]
     objs = [pose(0.0), pose(0.02), pose(0.04)]
     rule = _rule(3, g=[-5.0, 0.0, 0.0, 0.0, 0.0], d=1.0)
-    mixer = SkillMixer(coefficients=rule)
-    mixer.set_end_effectors(["right"])
-    rec = mixer.mix(_context(segs, objs, 1, pose(0.01), extra={"eef": "right"})).record
+    rec = SkillMixer(coefficients=rule, arms=Arms(("right",))).mix(_context(segs, objs, 1, pose(0.01), eef="right")).record
     assert "identity_reason" not in rec and rec["mixed"] is True and max(rec["weights"]) < 1.0
-    rec = SkillMixer(coefficients=rule).mix(_context(segs, objs, 1, None)).record
-    assert rec["mixed"] is False and rec["identity_reason"] == "no current object pose"
+    for ctx in (_context(segs, objs, 1, None), MixContext(**{**vars(_context(segs, objs, 1, pose())), "scene": None})):
+        rec = SkillMixer(coefficients=rule).mix(ctx).record
+        assert rec["mixed"] is False and rec["identity_reason"] == "no current object pose"
+
+
+# the hold test: features, record and the rule file's check --------------------------------------------------------
+RULE = HeldRule(version=1, rigid_m=0.2, nodes_m=0.1)
+
+
+def held_scene(now_m, sources_m, k=1):
+    """Three sources whose in-hand pose is 5 cm from the hand; held where the hold distance is within the rule."""
+    test = HeldTest(rule=RULE, deformable=False, now_m=now_m, sources_m=list(sources_m))
+    return scene(3, k=k, carried_object="obj", eef_pose=pose(), source_eef_poses=[pose()] * 3, held=test, held_rule=RULE,
+                 carried_pose=pose(0.05) if test.now else None,
+                 source_carried_poses=[pose(0.05 + 0.01 * j) if h else None for j, h in enumerate(test.sources)])
+
+
+def test_the_hold_mismatch_feature_tells_a_source_that_does_not_hold_from_one_that_holds_alike():
+    """Source 0 holds the object exactly as now, source 1 a centimetre away, source 2 does not hold it: the in-hand
+    features of 0 and 2 are both (0, 0); only the mismatch tells them apart."""
+    held = held_scene(0.01, [0.01, 0.02, 0.6])
+    f = source_features(held, HELD_FEATURES)
+    assert f.shape == (3, 6) and np.allclose(f[:, 3], [0.0, 0.01, 0.0]) and f[:, 5].tolist() == [0.0, 0.0, 1.0]
+    assert np.array_equal(source_features(held, FEATURES), f[:, :5])            # the five features are unchanged by it
+    not_now = held_scene(0.9, [0.01, 0.02, 0.6])                                # the hand holds nothing now
+    f = source_features(not_now, HELD_FEATURES)
+    assert np.all(f[:, 3:5] == 0) and f[:, 5].tolist() == [1.0, 1.0, 0.0]        # the two holders mismatch; source 2 is alike
+    assert np.all(source_features(held_scene(0.01, [0.01] * 3, k=0), HELD_FEATURES)[:, 5] == 0)
+    first = scene(3)                                                             # first subtask: nothing carried
+    assert np.all(source_features(first, HELD_FEATURES)[:, 3:] == 0)
+    with pytest.raises(ValueError, match="unknown or repeated"):
+        source_features(first, ("dx", "height"))
+
+
+def test_the_mixer_records_who_holds_and_scores_the_mismatch_with_the_rule_files_features():
+    g = np.array([0.0, 0.0, 0.0, 0.0, 0.0, -2.0])
+    rule = SkillMixRule(name="g/t", num_sources=3, subtasks={S(1): SubtaskRule(a=np.zeros(3), g=g, d=1.0, c0=0.0)},
+                        features=HELD_FEATURES, held_rule=RULE)
+    w, rec = SkillMixer(coefficients=rule).decide(held_scene(0.01, [0.01, 0.02, 0.6]), 0, [np.full(4, -1.0)] * 3)
+    assert rec["scores"] == [0.0, 0.0, -2.0] and rec["held"] == {"now": True, "sources": [True, True, False]}
+    assert rec["inhand_features"][2] == [0.0, 0.0] and w[2] < w[0]
+    randmix = SkillMixer(rule="randmix").decide(held_scene(0.9, [0.01, 0.02, 0.6]), 0, [np.full(4, -1.0)] * 3)[1]
+    assert randmix["held"] == {"now": False, "sources": [True, True, False]} and np.all(np.array(randmix["inhand_features"]) == 0)
+
+
+def test_the_mixer_checks_the_hold_rule_against_the_rule_file():
+    def rule(held_rule, features=HELD_FEATURES):
+        return SkillMixRule(name="g/t", num_sources=3, subtasks={S(1): SubtaskRule(a=np.zeros(3), g=np.zeros(len(features)), d=1.0, c0=0.0)},
+                            features=features, held_rule=held_rule)
+
+    series = [np.full(4, -1.0)] * 3
+    assert "weights" in SkillMixer(coefficients=rule(RULE)).decide(held_scene(0.01, [0.01] * 3), 0, series)[1]
+    with pytest.raises(ValueError, match="hold rule"):                # fitted with other distances
+        SkillMixer(coefficients=rule(HeldRule(2, 0.3, 0.1))).decide(held_scene(0.01, [0.01] * 3), 0, series)
+    with pytest.raises(ValueError, match="hold rule"):                # fitted without a hold test
+        SkillMixer(coefficients=rule(None, FEATURES)).decide(held_scene(0.01, [0.01] * 3), 0, series)
+    with pytest.raises(ValueError, match="hold rule"):                # a runtime without a hold test, a rule fitted with one
+        SkillMixer(coefficients=rule(RULE)).decide(scene(3, k=1), 0, series)
+    assert "weights" in SkillMixer(rule="randmix").decide(held_scene(0.01, [0.01] * 3), 0, series)[1]   # nothing fitted yet
+
+
+def test_a_rule_file_lists_its_features_and_hold_rule(tmp_path):
+    from tmg.generation.fit_coefficients import write_rule
+
+    block = {"a": [0.0, 0.0], "g": dict.fromkeys(HELD_FEATURES, 0.5), "d": 1.0, "c0": 0.0}
+    path = write_rule(tmp_path / "rope.yaml", generator="softmimicgen", task="rope", basis="t", num_sources=2,
+                      blocks={S(0): block}, features=HELD_FEATURES, held_rule=RULE)
+    data = yaml.safe_load(path.read_text())
+    assert data["features"] == list(HELD_FEATURES) and data["held_rule"] == {"version": 1, "rigid_m": 0.2, "nodes_m": 0.1}
+    assert data["units"]["inhand_mismatch"] == "0 or 1" and "inhand_mismatch" in path.read_text().split("generator:")[0]
+    rule = load_rule(str(path))
+    assert rule.features == HELD_FEATURES and rule.held_rule == RULE and rule.block(S(0)).g.shape == (6,)
+    data["features"] = [*FEATURES, "height"]
+    path.write_text(yaml.safe_dump(data))
+    with pytest.raises(ValueError, match="unknown or repeated"):
+        load_rule(str(path))
 
 
 def test_a_coefficient_file_of_the_removed_above_mean_rule_is_refused(tmp_path):
@@ -268,7 +328,7 @@ def test_build_method_reads_the_rule_file_and_keeps_randmix_out_of_the_skillmix_
                                   "d": 0.4, "c0": -1.0}})
     m = build_method({"name": "skillmix", "mixing": {"enabled": True, "type": "skillmix", "rule": "softmax",
                                                      "coefficients": str(path)}}, chunk_seed=0)
-    assert isinstance(m.mixer, SkillMixer) and m.mixer.rule == "softmax" and m.mixer.coefficients.for_subtask(0).d == 0.4
+    assert isinstance(m.mixer, SkillMixer) and m.mixer.rule == "softmax" and m.mixer.coefficients.block(S(0)).d == 0.4
     with pytest.raises(ValueError, match="skillmix_randmix"):
         build_method({"name": "skillmix", "mixing": {"enabled": True, "type": "skillmix", "rule": "randmix"}}, chunk_seed=0)
     with pytest.raises(ValueError, match="skillmix_randmix"):          # and no softmax pool in the randmix folder
@@ -299,30 +359,30 @@ def test_single_source_is_the_best_or_drawn_from_the_softmax_of_the_scores():
 
 def test_source_draws_are_reproducible_and_kept_within_an_attempt():
     a, b = SourceDraws(30001), SourceDraws(30001)
-    first = a.draw(0)
-    assert a.draw(0) == first and b.draw(0) == first                  # one draw per subtask; same chunk seed, same draws
+    first = a.draw(S(0))
+    assert a.draw(S(0)) == first and b.draw(S(0)) == first            # one draw per subtask; same chunk seed, same draws
     a.begin_attempt()
-    assert a.draw(0) != first
+    assert a.draw(S(0)) != first
 
 
 def test_skillmix_sample_draws_one_source_only_where_the_fit_gives_no_spread():
     segs = [_segment(0.0), _segment(0.0), _segment(0.0)]
     objs = [pose(0.0), pose(0.0), pose(0.0)]
     rule = SkillMixRule(name="g/t", num_sources=3, subtasks={
-        0: SubtaskRule(a=np.array([0.2, 0.1, 0.0]), g=np.zeros(5), d=-0.3, c0=0.0),
-        1: SubtaskRule(a=np.array([0.2, 0.1, 0.0]), g=np.zeros(5), d=0.5, c0=0.0)})
+        S(0): SubtaskRule(a=np.array([0.2, 0.1, 0.0]), g=np.zeros(5), d=-0.3, c0=0.0),
+        S(1): SubtaskRule(a=np.array([0.2, 0.1, 0.0]), g=np.zeros(5), d=0.5, c0=0.0)})
     picked = set()
     for seed in range(40):
         m = SkillMixer(coefficients=rule, chunk_seed=seed, single_source="sample")
         m.begin_attempt()
-        w, rec = m.weights(0, np.zeros((3, 3)), None, [0, 1, 2])
+        w, rec = m.weights(S(0), scene(3), [0, 1, 2])
         assert sorted(w.tolist()) == [0.0, 0.0, 1.0] and "source_draw" in rec
         picked.add(int(np.argmax(w)))
-        w1, rec1 = m.weights(1, np.zeros((3, 3)), None, [0, 1, 2])
+        w1, rec1 = m.weights(S(1), scene(3, k=1), [0, 1, 2])
         assert (w1 > 0).sum() == 3 and "source_draw" not in rec1      # d > 0: blended as before
     assert picked == {0, 1, 2}
     best = SkillMixer(coefficients=rule, chunk_seed=0)
-    assert best.weights(0, np.zeros((3, 3)), None, [0, 1, 2])[0].tolist() == [1.0, 0.0, 0.0]
+    assert best.weights(S(0), scene(3), [0, 1, 2])[0].tolist() == [1.0, 0.0, 0.0]
     with pytest.raises(ValueError, match="single_source"):
         SkillMixer(coefficients=rule, single_source="random")
 
@@ -332,10 +392,14 @@ def _segment(x, T=6):
     return (pose(x), targets, np.full((T, 1), -1.0))
 
 
-def _context(segs, objs, primary, current, subtask=0, extra=None):
+def _context(segs, objs, primary, current, subtask=0, features=None, eef=None, reference_object="obj", **more):
+    """A mix context: ``objs`` are the blending frames, ``features`` the poses the sources are scored with (the same by
+    default); ``more`` are further ``SubtaskScene`` fields."""
+    scene = SubtaskScene(subtask=subtask, eef=eef, reference_object=reference_object, current_object_pose=current,
+                         source_object_poses=list(features or objs), **more)
     return MixContext(subtask_ind=subtask, primary=primary, primary_eef_start=segs[primary][0], primary_targets=segs[primary][1],
                       primary_gripper=segs[primary][2], src_object_poses=objs, src_segments=segs, num_sources=len(segs),
-                      has_reference_object=True, extra={"current_object_pose": current, **(extra or {})})
+                      has_reference_object=True, scene=scene)
 
 
 def test_skillmix_mixer_weighs_the_sources_by_the_softmax_of_their_scores():
@@ -357,7 +421,7 @@ def test_skillmix_mixer_identity_without_reference_object():
     segs = [_segment(0.0)] * 2
     ctx = MixContext(subtask_ind=0, primary=0, primary_eef_start=segs[0][0], primary_targets=segs[0][1],
                      primary_gripper=segs[0][2], src_object_poses=[None, None], src_segments=segs, num_sources=2,
-                     has_reference_object=False, extra={})
+                     has_reference_object=False, scene=SubtaskScene(subtask=0))
     rec = SkillMixer(coefficients=_rule(2)).mix(ctx).record
     assert rec["mixed"] is False and "identity_reason" in rec
 
@@ -391,232 +455,6 @@ def test_skillmix_mixer_blends_many_joint_hand_commands_with_the_closure_rule():
     assert np.allclose(out.gripper[-1, :4], 0.5 * -1.2 + 0.5 * -1.0)    # the joint commands blended with the weights
 
 
-# the fit --------------------------------------------------------------------------------------------------------------
-def test_fit_recovers_the_sign_of_the_spread_effect():
-    from tmg.generation.fit_coefficients import entropy, fit_subtask
-
-    rng = np.random.default_rng(0)
-    J, n = 3, 6000
-    a = np.array([0.5, 0.0, -0.5])
-    for d_true in (1.5, -1.5):
-        W = rng.dirichlet(np.full(J, 0.7), size=n)
-        H = np.array([entropy(w) for w in W])
-        y = (rng.random(n) < 1 / (1 + np.exp(-(-0.5 + W @ a + d_true * H)))).astype(float)
-        rows = [np.concatenate([w, np.zeros(5), [h]]) for w, h in zip(W, H)]
-        groups = list(np.arange(n) // 50)
-        block = fit_subtask((rows, list(y), groups), ([], [], []), J, with_cv=False)
-        assert np.sign(block["d"]) == np.sign(d_true) and abs(block["d"] - d_true) < 0.5
-        assert block["a"][0] > block["a"][2]
-
-
-def _write_pool(folder, chunks, attempts):
-    """A finished pool with ``attempts(chunk)`` as the attempt records of every chunk."""
-    import json
-
-    for c in range(chunks):
-        records = folder / "chunks" / f"seed{c:05d}" / "records"
-        records.mkdir(parents=True)
-        (records.parent / "CHUNK_DONE.json").write_text("{}")
-        (records / "attempts.jsonl").write_text("".join(json.dumps(a) + "\n" for a in attempts(c)))
-
-
-def test_fit_reads_the_pools_of_a_generator_that_stops_at_the_first_failed_subtask(tmp_path):
-    """CP-Gen records: a unmix attempt reached subtask k when it has k + 1 subtask records; a randmix attempt when it
-    has a mix record of k, also one whose motion plan to k failed (``unplanned_mixes``)."""
-    from tmg.generation.fit_coefficients import fit_blocks, read_pools
-
-    rng = np.random.default_rng(1)
-
-    def sub(k, mix):
-        s = {"subtask_ind": k, "object_name": "ab"[k], "src_demo_ind": int(rng.integers(2)), "src_subtask_start": 0,
-             "cur_obj_pose": flat(pose(rng.normal(0, 0.05))), "src_obj_pose": flat(pose()), "eef_pose": flat(pose()),
-             "objects": {}}
-        return dict(s, mix=mix(k)) if mix else s
-
-    def mix(k):
-        w = rng.dirichlet([0.5, 0.5]).round(4)
-        return {"subtask": k, "weights": [float(w[0]), float(1 - w[0])], "scene_features": rng.random((2, 3)).tolist()}
-
-    def randmix(chunk):
-        out = [{"success": bool(rng.random() < 0.5), "subtasks": [sub(0, mix), sub(1, mix)]} for _ in range(20)]
-        return [*out, {"success": False, "subtasks": [sub(0, mix)], "unplanned_mixes": [mix(1)]}]      # plan to 1 failed
-
-    def unmix(chunk):
-        return [{"success": bool(n == 2 and rng.random() < 0.5), "subtasks": [sub(k, None) for k in range(n)]}
-                for n in (1, 2, 2, 2, 2) * 4]
-
-    _write_pool(tmp_path / "randmix", 4, randmix)
-    _write_pool(tmp_path / "unmix", 3, unmix)
-    blocks = fit_blocks(read_pools([tmp_path / "randmix"]), read_pools([tmp_path / "unmix"]), num_sources=2,
-                        signals=None, source=None, with_cv=False)
-    assert sorted(blocks) == [0, 1] and blocks[0]["rows"] == {"randmix": 84, "unmix": 60}
-    assert blocks[1]["rows"] == {"randmix": 84, "unmix": 48}       # the failed plans count, the 12 that stopped do not
-    assert len(blocks[1]["a"]) == 2 and sorted(blocks[1]["g"]) == sorted(["dx", "dy", "rotation", "inhand_position", "inhand_rotation"])
-
-
-def _isaaclab_attempt(rng, *, success, grasped, mix=None, eefs=("right", "left")):
-    """One DexMimicGen-like attempt record: right subtasks 0 (grasp the bottle, term signal grasp_bottle) and 1 (place it in
-    the fridge, carried: the bottle), left subtask 0 (hold the fridge); the scene fields the Isaac Lab runtime records."""
-    def sub(eef, k, obj, carried=None, signal=None):
-        j = int(rng.integers(2))
-        eef_now = pose(rng.normal(0, 0.02), 0.1)
-        s = {"eef": eef, "subtask_ind": k, "object_name": obj, "src_demo_ind": j, "src_subtask_start": 4 * k, "start_step": 10 * k,
-             "cur_obj_pose": flat(pose(rng.normal(0, 0.05), yaw=rng.normal(0, 0.2))), "src_obj_pose": flat(pose(0.01 * j)),
-             "eef_pose": flat(eef_now), "src_eef_pose": flat(pose(0.0, 0.1)), "objects": {}, "src_objects": {},
-             "carried_object": carried, "term_signal": signal}
-        if carried is not None:
-            s["objects"][carried] = flat(eef_now @ pose(0.0, 0.0, rng.normal(0.05, 0.01)))
-            s["src_objects"][carried] = flat(pose(0.0, 0.1, 0.05))
-        if mix is not None:
-            w = rng.dirichlet([0.5, 0.5]).round(4)
-            s["mix"] = {"subtask": k, "eef": eef, "weights": [float(w[0]), float(1 - w[0])],
-                        "scene_features": rng.random((2, 3)).tolist(), **({"inhand_features": rng.random((2, 2)).tolist()} if k else {})}
-        return s
-
-    subs = []
-    if "right" in eefs:
-        subs += [sub("right", 0, "bottle", signal="grasp_bottle"), sub("right", 1, "fridge", carried="bottle")]
-    if "left" in eefs:
-        subs.insert(1, sub("left", 0, "fridge"))
-    return {"success": bool(success), "subtasks": subs, "n_steps": 30, "term_first": {"grasp_bottle": 3 if grasped else -1}}
-
-
-def test_fit_reads_isaaclab_records_per_end_effector_and_subtask(tmp_path, capsys):
-    """Two arms, subtasks numbered per arm: blocks right/0, right/1, left/0 (no collision on k = 0); right/1's rows are the
-    attempts whose grasp signal fired; the in-hand features come from the records (no source file)."""
-    from tmg.generation.fit_coefficients import fit_isaaclab_blocks, read_pools, write_rule
-
-    rng = np.random.default_rng(3)
-
-    def randmix(chunk):
-        return [_isaaclab_attempt(rng, success=rng.random() < 0.5, grasped=rng.random() < 0.8, mix=True) for _ in range(20)]
-
-    def unmix(chunk):
-        return [_isaaclab_attempt(rng, success=rng.random() < 0.4, grasped=n % 5 != 0) for n in range(20)]
-
-    _write_pool(tmp_path / "randmix", 3, randmix)
-    _write_pool(tmp_path / "unmix", 3, unmix)
-    blocks, reached = fit_isaaclab_blocks(read_pools([tmp_path / "randmix"]), read_pools([tmp_path / "unmix"]), num_sources=2,
-                                          with_cv=False)
-    assert sorted(blocks) == ["left/0", "right/0", "right/1"]
-    assert blocks["right/0"]["rows"]["unmix"] == 60 and blocks["left/0"]["rows"]["unmix"] == 60
-    assert blocks["right/1"]["rows"]["unmix"] == 48                      # the 12 attempts whose grasp never fired did not reach it
-    assert "term signal" in reached["right/1"] and "first subtask" in reached["right/0"]
-    path = write_rule(tmp_path / "rule.yaml", generator="dexmimicgen", task="bottle_door", basis="test", num_sources=2, blocks=blocks)
-    assert "<eef>/<k>" in path.read_text()
-    rule = load_rule(str(path))
-    assert rule.for_subtask(0, "left").a.tolist() == pytest.approx(blocks["left/0"]["a"])
-    assert rule.for_subtask(1, "right").d == pytest.approx(blocks["right/1"]["d"])
-    # the unmix rows of right/1 have non-zero in-hand features, from the recorded poses
-    from tmg.generation.fit_coefficients import isaaclab_outcomes, unmix_rows
-    unmix_attempts = read_pools([tmp_path / "unmix"])
-    outcomes, used = isaaclab_outcomes(unmix_attempts, "right", 2)
-    rows = unmix_rows(unmix_attempts, outcomes, 1, 2, None, "right")
-    assert np.abs(np.array(rows.x)[:, 2 + 3]).max() > 0 and used == {0: {"term_signal": 60, "fallback": 0}}
-
-
-def test_fit_of_a_single_arm_isaaclab_task_without_term_signals_falls_back_and_says_so(tmp_path):
-    """SoftMimicGen-like records of one arm (keys k) whose attempts recorded no signal: every recorded subtask counts as
-    reached (fallback), the label is the task success, and the fit says which was used."""
-    from tmg.generation.fit_coefficients import fit_isaaclab_blocks, read_pools
-
-    rng = np.random.default_rng(4)
-
-    def pool(mix):
-        def make(chunk):
-            out = []
-            for _ in range(20):
-                a = _isaaclab_attempt(rng, success=rng.random() < 0.5, grasped=True, mix=mix, eefs=("right",))
-                a["term_first"] = {}
-                out.append(a)
-            return out
-        return make
-
-    _write_pool(tmp_path / "randmix", 2, pool(True))
-    _write_pool(tmp_path / "unmix", 2, pool(None))
-    randmix, unmix = read_pools([tmp_path / "randmix"]), read_pools([tmp_path / "unmix"])
-    with pytest.raises(ValueError, match="allow_reached_fallback"):            # a missing signal is loud by default
-        fit_isaaclab_blocks(randmix, unmix, num_sources=2, with_cv=False)
-    blocks, reached = fit_isaaclab_blocks(randmix, unmix, num_sources=2, with_cv=False, allow_fallback=True)
-    assert sorted(blocks) == [0, 1] and blocks[1]["rows"] == {"randmix": 40, "unmix": 40}
-    assert "FALLBACK" in reached[1]
-
-
-def test_reached_counts_the_signal_only_before_the_next_subtask_of_the_arm_starts():
-    from tmg.generation.fit_coefficients import Attempts, isaaclab_outcomes
-
-    rng = np.random.default_rng(6)
-    early, late, never = (_isaaclab_attempt(rng, success=False, grasped=True) for _ in range(3))
-    late["term_first"] = {"grasp_bottle": 12}                         # right/1 started at step 10: too late
-    never["term_first"] = {"grasp_bottle": -1}
-    no_steps = _isaaclab_attempt(rng, success=False, grasped=True)
-    no_steps.update(n_steps=0, term_first={})                          # the plan failed before the first step
-    out, used = isaaclab_outcomes(Attempts([early, late, never, no_steps], [], []), "right", 2)
-    assert [row[0] for row in out] == [True, False, False, False] and used[0] == {"term_signal": 4, "fallback": 0}
-    renamed = _isaaclab_attempt(rng, success=False, grasped=True)
-    renamed["term_first"] = {"grasp": 3}                               # the recorded name is not among the signals
-    with pytest.raises(ValueError, match="grasp_bottle"):
-        isaaclab_outcomes(Attempts([renamed], [], []), "right", 2)
-    eager = _isaaclab_attempt(rng, success=False, grasped=True)
-    for s in eager["subtasks"]:
-        s["start_step"] = 0                                           # every subtask built before the first step
-    with pytest.raises(ValueError, match="not built when they started"):
-        isaaclab_outcomes(Attempts([eager], [], []), "right", 2)
-
-
-def test_fit_refuses_isaaclab_records_without_their_subtask_scene(tmp_path):
-    from tmg.generation.fit_coefficients import check_isaaclab_records
-
-    rng = np.random.default_rng(5)
-    good = _isaaclab_attempt(rng, success=True, grasped=True)
-    check_isaaclab_records([good])
-    old = _isaaclab_attempt(rng, success=True, grasped=True)
-    del old["subtasks"][0]["src_obj_pose"]
-    with pytest.raises(ValueError, match="regenerate"):
-        check_isaaclab_records([good, old])
-    broken = _isaaclab_attempt(rng, success=True, grasped=True)
-    broken["subtasks"][0]["scene_error"] = "KeyError: 'env_id'"
-    with pytest.raises(ValueError, match="scene_error"):
-        check_isaaclab_records([broken])
-    a, b = (_isaaclab_attempt(rng, success=True, grasped=True) for _ in range(2))
-    a["subtasks"][0]["object_frame"] = {"version": "nodal_yaw_v1", "reference_sha256": "x"}
-    b["subtasks"][0]["object_frame"] = {"version": "nodal_yaw_v1", "reference_sha256": "y"}
-    with pytest.raises(ValueError, match="frames"):
-        check_isaaclab_records([a, b])
-
-
-def test_fit_coefficients_dispatches_isaaclab_generators_to_the_per_arm_fit(tmp_path, monkeypatch):
-    from omegaconf import OmegaConf
-
-    import tmg.generation.fit_coefficients as fc
-
-    seen = {}
-
-    def fake_isaaclab(randmix, unmix, *, num_sources, with_cv=True, allow_fallback=False, no_step_signals=False):
-        seen["isaaclab"] = num_sources
-        seen["allow_fallback"] = allow_fallback
-        seen["no_step_signals"] = no_step_signals
-        block = {"a": [0.0, 0.0], "g": dict.fromkeys(("dx", "dy", "rotation", "inhand_position", "inhand_rotation"), 0.0),
-                 "d": 0.3, "c0": 0.0, "penalty": 1.0, "rows": {"randmix": 1, "unmix": 1}, "successes": 1,
-                 "cv_log_loss_gain_percent": {"all_rows": 0.0, "randmix_rows": 0.0}}
-        return {"right/0": block}, {"right/0": "first subtask: every attempt reaches it"}
-
-    monkeypatch.setattr(fc, "fit_isaaclab_blocks", fake_isaaclab)
-    monkeypatch.setattr(fc, "fit_blocks", lambda *a, **k: (_ for _ in ()).throw(AssertionError("MimicGen path used")))
-    monkeypatch.setattr(fc, "write_provenance", lambda *a, **k: None)
-    monkeypatch.setattr(fc, "read_pools", lambda paths: fc.Attempts([{"success": True, "subtasks": []}], [tmp_path], [0]))
-    cfg = OmegaConf.create({"randmix_pools": ["r"], "unmix_pools": ["u"], "output": str(tmp_path / "out"), "min_attempts": 1,
-                            "task": {"name": "bottle_door", "num_sources": 2}, "source": None, "write_config": False,
-                            "generator": {"name": "dexmimicgen", "simulator": "isaaclab"}})
-    fc.fit_coefficients(OmegaConf.merge(cfg, {"fit": {"allow_reached_fallback": True}}))
-    assert seen["allow_fallback"] is True
-    summary = fc.fit_coefficients(cfg)
-    assert seen == {"isaaclab": 2, "allow_fallback": False, "no_step_signals": False} and summary["reached_from"] == {"right/0": "first subtask: every attempt reaches it"}
-    assert load_rule(str(tmp_path / "out" / "coefficients.yaml")).for_subtask(0, "right").d == 0.3
-    fc.fit_coefficients(OmegaConf.merge(cfg, {"generator": {"per_step_subtask_signals": False}}))
-    assert seen["no_step_signals"] is True and seen["allow_fallback"] is False
-
-
 # symmetry alignment ----------------------------------------------------------------------------------------------------
 HAMMER_SYM = {"hammer": [{"rot_axis": "z", "rot_param": np.pi, "translation": [0, 0, 0]}]}
 
@@ -635,9 +473,7 @@ def _grasp_segment(obj, y, yaw, T=6, close_at=3):
 
 
 def _hammer_context(segs, objs, primary=0):
-    return MixContext(subtask_ind=0, primary=primary, primary_eef_start=segs[primary][0], primary_targets=segs[primary][1],
-                      primary_gripper=segs[primary][2], src_object_poses=objs, src_segments=segs, num_sources=len(segs),
-                      has_reference_object=True, extra={"current_object_pose": objs[primary], "reference_object": "hammer"})
+    return _context(segs, objs, primary, objs[primary], reference_object="hammer")
 
 
 def test_skillmix_mixer_aligns_sources_held_from_the_other_side():
@@ -688,49 +524,54 @@ def test_mimicgen_task_symmetries_name_reference_objects():
 
 # per-arm random streams ---------------------------------------------------------------------------------------------
 def test_single_arm_draw_streams_are_unchanged_by_the_arms():
-    """MimicGen and CP-Gen (eef None) and SoftMimicGen (one arm, robot0) keep SeedSequence([chunk seed, word])."""
+    """MimicGen and CP-Gen (no named arm) and SoftMimicGen (one arm, robot0) keep SeedSequence([chunk seed, word])."""
     from tmg.generation.method.skillmix import SOURCE_SEED
 
     ref = np.random.default_rng(np.random.SeedSequence([11, RANDMIX_SEED]))
     c = float(np.exp(ref.uniform(np.log(0.05), np.log(20.0))))
     gamma = ref.gamma(c, size=4)
-    for draws, eef in ((RandmixDraws(11), None), (RandmixDraws(11, arms=["robot0"]), "robot0")):
-        got = draws.draw(0, 4, eef)
+    for arms in (Arms(), Arms(("robot0",))):
+        got = RandmixDraws(11, arms=arms).draw(arms.subtask(0, arms.names[0] if arms.names else None), 4)
         assert got[0] == c and np.array_equal(got[1], gamma)
     u = np.random.default_rng(np.random.SeedSequence([11, SOURCE_SEED])).random()
-    assert SourceDraws(11).draw(0) == u == SourceDraws(11, arms=["robot0"]).draw(0, "robot0")
+    assert SourceDraws(11).draw(S(0)) == u == SourceDraws(11, arms=["robot0"]).draw(S(0))
 
 
 def test_two_arm_draws_come_from_per_arm_streams_independent_of_the_call_order():
     import zlib
 
     first = RandmixDraws(5, arms=["left", "right"])
-    a_right, a_left = first.draw(0, 3, "right")[0], first.draw(0, 3, "left")[0]
+    a_right, a_left = first.draw(S(0, "right"), 3)[0], first.draw(S(0, "left"), 3)[0]
     second = RandmixDraws(5, arms=["left", "right"])
-    b_left, b_right = second.draw(0, 3, "left")[0], second.draw(0, 3, "right")[0]
+    b_left, b_right = second.draw(S(0, "left"), 3)[0], second.draw(S(0, "right"), 3)[0]
     assert (a_right, a_left) == (b_right, b_left) and a_right != a_left
     ref = np.random.default_rng(np.random.SeedSequence([5, RANDMIX_SEED, zlib.crc32(b"right")]))
     assert a_right == float(np.exp(ref.uniform(np.log(0.05), np.log(20.0))))
     with pytest.raises(KeyError, match="stream"):
-        first.draw(1, 3, None)                      # a two-arm generator must name the arm
+        first.draw(S(1), 3)                         # a two-arm generator must name the arm
     src = SourceDraws(5, arms=["left", "right"])
-    assert src.draw(0, "left") != src.draw(0, "right")
+    assert src.draw(S(0, "left")) != src.draw(S(0, "right"))
 
 
-def test_the_mixer_takes_the_generators_end_effectors_before_its_first_call():
-    mixer = SkillMixer(rule="randmix", chunk_seed=2)
-    mixer.set_end_effectors(["left", "right"])
-    assert mixer.arms == ["left", "right"] and mixer.draws._streams.multi
-    mixer.mix(_context([_segment(0.0)] * 2, [pose()] * 2, 0, pose(), extra={"eef": "left"}))
-    with pytest.raises(RuntimeError, match="before the first"):
-        mixer.set_end_effectors(["left"])
+def test_the_mixer_is_built_with_the_generators_arms():
+    """The arms come from the generator's layout when the method is built, not from a later call on the mixer."""
+    method = build_method({"name": "skillmix_randmix", "mixing": {"enabled": True, "type": "skillmix", "rule": "randmix"}},
+                          chunk_seed=2, arms=["left", "right"])
+    mixer = method.mixer
+    assert mixer.arms == Arms(("left", "right")) and mixer.draws._streams.arms.per_arm and not hasattr(mixer, "set_end_effectors")
+    assert mixer.describe()["arms"] == ["left", "right"]
+    rec = mixer.mix(_context([_segment(0.0)] * 2, [pose()] * 2, 0, pose(), eef="left")).record
+    assert rec["eef"] == "left"
+    with pytest.raises(KeyError, match="arms"):
+        mixer.mix(_context([_segment(0.0)] * 2, [pose()] * 2, 0, pose()))        # a call that names no arm
+    one = build_method({"name": "skillmix_randmix", "mixing": {"enabled": True, "type": "skillmix", "rule": "randmix"}}, chunk_seed=2)
+    assert one.mixer.arms == Arms() and not one.mixer.draws._streams.arms.per_arm
 
 
 def test_a_two_armed_generator_refuses_a_rule_file_without_per_arm_blocks():
-    mixer = SkillMixer(coefficients=_rule(2))
-    mixer.set_end_effectors(["left", "right"])
+    mixer = SkillMixer(coefficients=_rule(2), arms=Arms(("left", "right")))
     with pytest.raises(KeyError, match="more than one end effector"):
-        mixer.mix(_context([_segment(0.0)] * 2, [pose()] * 2, 0, pose(), extra={"eef": "right"}))
+        mixer.mix(_context([_segment(0.0)] * 2, [pose()] * 2, 0, pose(), eef="right"))
     with pytest.raises(ValueError, match="mixes per-arm keys"):
         SkillMixRule.from_mapping({"rule": "softmax", "num_sources": 1, "subtasks": {
             0: {"a": [0.0], "g": dict.fromkeys(("dx", "dy", "rotation", "inhand_position", "inhand_rotation"), 0.0), "d": 1, "c0": 0},
@@ -743,16 +584,14 @@ def test_the_mixer_checks_the_deformable_frame_against_the_rule_file(tmp_path):
     g = dict.fromkeys(("dx", "dy", "rotation", "inhand_position", "inhand_rotation"), 0.0)
     frame = {"version": "nodal_yaw_v1", "reference_sha256": "abc"}
     path = write_rule(tmp_path / "rope.yaml", generator="softmimicgen", task="rope", basis="t", num_sources=2,
-                      blocks={0: {"a": [0.0, 0.0], "g": g, "d": 1.0, "c0": 0.0}}, object_frame=frame)
+                      blocks={S(0): {"a": [0.0, 0.0], "g": g, "d": 1.0, "c0": 0.0}}, object_frame=frame)
     rule = load_rule(str(path))
     assert rule.object_frame == frame
     segs, world = [_segment(0.0)] * 2, [np.eye(4)] * 2
 
     def mix(rule, frame):
-        mixer = SkillMixer(coefficients=rule)
-        mixer.set_end_effectors(["robot0"])
-        return mixer.mix(_context(segs, world, 0, pose(), extra={"eef": "robot0", "object_frame": frame,
-                                                                 "feature_object_poses": [pose(), pose(0.1)]}))
+        mixer = SkillMixer(coefficients=rule, arms=Arms(("robot0",)))
+        return mixer.mix(_context(segs, world, 0, pose(), features=[pose(), pose(0.1)], eef="robot0", object_frame=frame))
 
     assert "weights" in mix(rule, frame).record
     with pytest.raises(ValueError, match="object frame"):
@@ -760,59 +599,3 @@ def test_the_mixer_checks_the_deformable_frame_against_the_rule_file(tmp_path):
     with pytest.raises(ValueError, match="object frame"):
         mix(_rule(2), frame)                                          # a rule fitted without frames
     assert "weights" in mix(_rule(2), None).record                    # a rigid reference object: nothing to check
-
-
-def test_a_generator_without_per_step_signals_falls_back_only_for_attempts_that_recorded_none():
-    """DexMimicGen (generator.per_step_subtask_signals: false): an attempt with no per-step signal at all counts its recorded
-    subtasks as reached; one that recorded signals but not the subtask's own still raises (a name mismatch)."""
-    from tmg.generation.fit_coefficients import Attempts, isaaclab_outcomes
-
-    rng = np.random.default_rng(8)
-    silent = _isaaclab_attempt(rng, success=True, grasped=True)
-    silent["term_first"] = {}
-    out, used = isaaclab_outcomes(Attempts([silent], [], []), "right", 2, no_step_signals=True)
-    assert out == [[True, True]] and used[0] == {"term_signal": 0, "fallback": 1}
-    with pytest.raises(ValueError, match="allow_reached_fallback"):
-        isaaclab_outcomes(Attempts([silent], [], []), "right", 2)
-    renamed = _isaaclab_attempt(rng, success=True, grasped=True)
-    renamed["term_first"] = {"other_signal": 2}
-    with pytest.raises(ValueError, match="grasp_bottle"):
-        isaaclab_outcomes(Attempts([renamed], [], []), "right", 2, no_step_signals=True)
-
-
-def test_the_generators_declare_which_tasks_publish_no_per_step_signals():
-    from tmg.generation.fit_coefficients import no_step_signals_declared
-
-    root = Path(__file__).resolve().parents[2] / "configs" / "experiment" / "generator"
-    dex = yaml.safe_load((root / "dexmimicgen.yaml").read_text())
-    soft = yaml.safe_load((root / "softmimicgen.yaml").read_text())
-    assert all(no_step_signals_declared(dex, t) for t in ("pick_place", "microwave", "bottle_door"))
-    assert no_step_signals_declared(soft, "towel") and not no_step_signals_declared(soft, "rope")   # rope records grasp
-    mimicgen = yaml.safe_load((root / "mimicgen.yaml").read_text())
-    assert not no_step_signals_declared(mimicgen, "square")
-
-
-def test_fit_coefficients_falls_back_for_towel_and_not_for_rope(tmp_path, monkeypatch):
-    from omegaconf import OmegaConf
-
-    import tmg.generation.fit_coefficients as fc
-
-    seen = {}
-
-    def fake(randmix, unmix, *, num_sources, with_cv=True, allow_fallback=False, no_step_signals=False):
-        seen["no_step_signals"] = no_step_signals
-        g = dict.fromkeys(("dx", "dy", "rotation", "inhand_position", "inhand_rotation"), 0.0)
-        return ({0: {"a": [0.0, 0.0], "g": g, "d": 0.3, "c0": 0.0, "penalty": 1.0, "rows": {"randmix": 1, "unmix": 1},
-                     "successes": 1, "cv_log_loss_gain_percent": {"all_rows": 0.0, "randmix_rows": 0.0}}}, {})
-
-    monkeypatch.setattr(fc, "fit_isaaclab_blocks", fake)
-    monkeypatch.setattr(fc, "write_provenance", lambda *a, **k: None)
-    monkeypatch.setattr(fc, "read_pools", lambda paths: fc.Attempts([{"success": True, "subtasks": []}], [tmp_path], [0]))
-    soft = yaml.safe_load((Path(__file__).resolve().parents[2] / "configs/experiment/generator/softmimicgen.yaml").read_text())
-    for task, expected in (("towel", True), ("rope", False)):
-        cfg = OmegaConf.create({"randmix_pools": ["r"], "unmix_pools": ["u"], "output": str(tmp_path / task), "min_attempts": 1,
-                                "task": {"name": task, "num_sources": 2}, "source": None, "write_config": False,
-                                "generator": {"name": "softmimicgen", "simulator": "isaaclab",
-                                              "tasks_without_step_signals": soft["tasks_without_step_signals"]}})
-        fc.fit_coefficients(cfg)
-        assert seen["no_step_signals"] is expected

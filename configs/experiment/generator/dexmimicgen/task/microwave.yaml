@@ -36,3 +36,10 @@ instruction: "Reach out to the microwave and open it."        # language instruc
 policy_overrides:
   bc_rnn: {crop_shape: null}
   diffusion_policy: {crop_shape: null}
+# How tmg fit_coefficients reads this task's records (not part of a chunk's identity). The environment publishes no
+# per-step subtask signal (2026-11-27, read in the isaaclab-dex image: AutoData reads it from a subtask_terms observation
+# group or get_subtask_term_signals; the Arena environments define the Mimic subtask configs and signal names but no such
+# group, and Isaac Lab Mimic's GR1T2 Pick Place env implements no get_subtask_term_signals; the released datasets carry
+# annotated signals). Generation never checks a subtask end online, only the task success, so every recorded subtask
+# counts as reached and the task-success label alone is used.
+fit: {reached: task_success}

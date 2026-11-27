@@ -5,6 +5,9 @@
 #
 # Naming: pool_<simulator>_<observation> for the full pools; `test/` holds the small configs for smoke runs and checks.
 name: pool_robosuite_image
+purpose: data                      # data | calibration (a pool the SkillMix fit reads, pool_unmix.yaml): what the pool is for,
+                                   # not part of a chunk's identity; an Isaac Lab calibration chunk whose records the fit cannot
+                                   # use fails and stops the pool (tmg/generation/base.py needs_subtask_scenes)
 attempts: 10000
 chunk: 250
 seed_offset: 30000                # chunk seeds are seed_offset + 1, + 2, ...

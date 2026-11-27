@@ -26,8 +26,5 @@ source: ${task.source}           # source demonstrations with datagen_info (each
 overrides: []
 write_config: true                # also write configs/experiment/generator/<generator>/coefficients/<task>.yaml
 min_attempts: 100                 # refuse to fit on fewer attempts (per kind of pool)
-# Isaac Lab generators: an earlier subtask counts as done when its recorded termination signal fired before the next
-# subtask of the same arm started. A subtask without a usable signal stops the fit unless this is true; then every recorded
-# subtask counts as reached and the task-success label alone is used (tmg/generation/fit_coefficients.py isaaclab_outcomes).
-fit:
-  allow_reached_fallback: false
+# How the records are read is declared by the generator adapter (its fit layout) and, per task, by task.fit.reached
+# (tmg/generation/method/fit_layout.py); the sanity limits are the generator's fit block.

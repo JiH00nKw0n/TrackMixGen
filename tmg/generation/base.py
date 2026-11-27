@@ -17,11 +17,16 @@ from pathlib import Path
 from tmg.core import egl
 from tmg.core.chunks import Chunk
 from tmg.core.records import RECORDS_DIR
+from tmg.generation.method.fit_layout import FitLayout
 
 # The renderer a chunk spec without one counts as (``tmg.core.egl.renderer``): such a spec was written before 2026-11-22,
 # when the robosuite images rendered with Mesa, or by an Isaac Lab image, which renders with Isaac Sim and always compares
 # equal to itself. Main renders with EGL only; keeping "mesa" here makes an old Mesa pool refused, not silently mixed.
 LEGACY_RENDER = "mesa"
+# Task-config keys that say how finished records are READ (``task.fit``: the fit layout of ``tmg fit_coefficients``), not
+# how a chunk is generated: left out of the chunk identity, so declaring or changing them keeps finished pools reusable.
+NON_IDENTITY_TASK_KEYS = ("fit",)
+CALIBRATION = "calibration"         # generation.purpose of the pools tmg fit_coefficients reads (pool_unmix.yaml)
 
 
 @dataclass
@@ -39,12 +44,17 @@ class ChunkSpec:
     expected_outputs: list = field(default_factory=list)   # files that must exist when the chunk finished
     extra: dict = field(default_factory=dict)
     render: str | None = None       # offscreen renderer (tmg.core.egl.renderer); None in specs written before 2026-11-22
+    # How the runtime reads a subtask's scene for the records and the mixer (the Isaac Lab adapters: ``held_rule``). Not
+    # part of the identity: the values are written into every record (``held_rule``) and into the rule file, and the fit
+    # and the mixer refuse records or scenes measured otherwise, so finished chunks stay reusable.
+    scene_reading: dict = field(default_factory=dict)
 
     def identity(self) -> dict:
-        """What must be equal for a finished chunk to be reused (machine-specific paths excluded). The renderer is part of
-        it: Mesa and EGL images differ (2026-11-22: 50-61 % of the pixels), so an old Mesa pool (no ``render``) refuses
-        to continue under EGL."""
-        return {"generator": self.generator, "chunk": self.chunk, "task": _without_paths(self.task),
+        """What must be equal for a finished chunk to be reused (machine-specific paths, ``scene_reading`` and the task's
+        ``NON_IDENTITY_TASK_KEYS`` excluded). The renderer is part of it: Mesa and EGL images differ (2026-11-22: 50-61 %
+        of the pixels), so an old Mesa pool (no ``render``) refuses to continue under EGL."""
+        task = {k: v for k, v in self.task.items() if k not in NON_IDENTITY_TASK_KEYS}
+        return {"generator": self.generator, "chunk": self.chunk, "task": _without_paths(task),
                 "scene": self.scene, "method": _without_paths(self.method), "protocol": self.protocol,
                 "extra": self.extra, "render": self.render or LEGACY_RENDER}
 
@@ -89,6 +99,11 @@ class SyntheticDataGenerator(ABC):
 
     Class attributes: ``name`` is the generator name (``generator.name`` of its config file); ``entrypoint_module`` is
     the module the default :meth:`chunk_command` runs with ``python -m <module> --spec <path>``.
+
+    What shared code needs to know about a generator is asked here, never derived from its name or its simulator's:
+    :meth:`fit_layout` (how ``tmg fit_coefficients`` reads its records), :attr:`simulator` (``generator.simulator``, the key
+    of per-simulator machine settings such as ``cluster.max_workers_by_simulator``) and :attr:`supports_byte_verify`
+    (``generator.byte_verify``: ``tmg verify_baseline`` can compare its output with the official generator's byte for byte).
     """
 
     name: str = "abstract"
@@ -105,6 +120,26 @@ class SyntheticDataGenerator(ABC):
         self.method = apply_method_overrides(dict(cfg.get("method") or {}), self.generator_cfg)
         self.generation = dict(cfg.get("generation") or {})
         self.protocol = dict(self.generation.get("protocol") or {})
+
+    @property
+    def simulator(self) -> str:
+        """``generator.simulator`` of the generator config (empty when it names none)."""
+        return str(self.generator_cfg.get("simulator") or "")
+
+    @property
+    def supports_byte_verify(self) -> bool:
+        """``generator.byte_verify``: a rerun with the same seed is byte-identical and the generator writes the statistics
+        ``tmg verify_baseline`` compares (the Makefile reads the same key)."""
+        return bool(self.generator_cfg.get("byte_verify", False))
+
+    def needs_subtask_scenes(self) -> bool:
+        """True when the pool is only useful with the scene of every subtask in its records: a pool the SkillMix fit reads
+        (``generation.purpose: calibration``) or one of a mixing method (a subtask without its scene is not mixed)."""
+        return self.generation.get("purpose") == CALIBRATION or bool((self.method.get("mixing") or {}).get("enabled"))
+
+    def fit_layout(self) -> FitLayout:
+        """How ``tmg fit_coefficients`` reads this generator's records (``tmg.generation.method.fit_layout``)."""
+        raise NotImplementedError(f"{type(self).__name__} declares no fit layout: tmg fit_coefficients cannot read its records")
 
     def require_generation_config(self) -> None:
         """Raise ``KeyError`` when the command's config lacks the ``scene``, ``method`` or ``generation`` group."""

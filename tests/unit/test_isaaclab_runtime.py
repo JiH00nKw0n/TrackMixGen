@@ -187,10 +187,14 @@ def soft_generator(infos, env=None):
                                  env=env or SceneEnv())
 
 
-def make_runtime(method, records_dir=None):
-    from tmg.generation.generators.isaaclab.runtime import SoftMimicGenRuntime
+HELD_RULE = {"version": 1, "rigid_m": 0.20, "nodes_m": 0.10}       # scene_reading.held_rule of the generator configs
 
-    return SoftMimicGenRuntime(method, soft_layout(), records_dir=records_dir)
+
+def make_runtime(method, records_dir=None, held_rule=HELD_RULE):
+    from tmg.generation.generators.isaaclab.runtime import SoftMimicGenRuntime
+    from tmg.generation.method.interfaces import HeldRule
+
+    return SoftMimicGenRuntime(method, soft_layout(), records_dir=records_dir, held_rule=HeldRule.from_mapping(held_rule))
 
 
 # mix_segment ------------------------------------------------------------------------------------------
@@ -212,8 +216,11 @@ def test_mix_segment_hands_the_mixer_every_source_and_repacks_the_mixed_segment(
     eef, targets, grippers = rt.mix_segment(gen, local_vars)
     ctx = mixer.contexts[0]
     assert ctx.subtask_ind == 0 and ctx.primary == 1 and ctx.num_sources == 2 and ctx.has_reference_object is True
-    assert _same_extra(ctx.extra, {"eef": "robot0", "soft": False, "reference_object": "rope", "current_object_pose": pose(105.0),
-                                   "carried_object": None})         # subtask 0: no carried object, no in-hand poses
+    scene = ctx.scene                                               # subtask 0: no carried object, no in-hand poses
+    assert (scene.eef, scene.subtask, scene.reference_object, scene.carried_object, scene.held) == ("robot0", 0, "rope", None, None)
+    np.testing.assert_array_equal(scene.current_object_pose, pose(105.0))
+    np.testing.assert_array_equal(scene.source_object_poses, ctx.src_object_poses)     # a rigid object: the blending frames
+    assert scene.held_rule.as_dict() == HELD_RULE and scene.object_frame is None
     assert ctx.rng.random() == np.random.default_rng(0).random()                     # the mixer's stream is always default_rng(0)
     np.testing.assert_array_equal(ctx.primary_eef_start, pose(10))
     np.testing.assert_array_equal(ctx.primary_targets, infos[1].target_eef_pose["robot0"].a[0:4])
@@ -253,7 +260,7 @@ def test_mix_segment_registers_donor_segments_into_the_primary_rope(torch, monke
     rt.mix_segment(soft_generator(infos), soft_locals(infos, primary=1, soft=True))
     ctx = mixer.contexts[0]
     assert [c[2:] for c in calls] == [(True, 0.1, 1e-3)] * 2 and calls[0][0] == calls[1][0] == float(infos[1].object_nodal_positions["rope"].a[0, 0, 0])
-    assert ctx.extra["eef"] == "robot0" and ctx.extra["soft"] is True and ctx.extra["reference_object"] == "rope"
+    assert ctx.scene.eef == "robot0" and ctx.scene.reference_object == "rope" and ctx.scene.object_frame["version"] == "nodal_yaw_v1"
     assert all(np.array_equal(p, np.eye(4)) for p in ctx.src_object_poses)          # blending frames: the world after registration
     assert ctx.src_segments[0][1][0, 0, 3] == 1000.5 and ctx.src_segments[1][1][0, 0, 3] == 10.5 and ctx.src_segments[2][1][0, 0, 3] == 1020.5
     # the donors' start poses are registered too (the primary's is its own)
@@ -262,12 +269,8 @@ def test_mix_segment_registers_donor_segments_into_the_primary_rope(torch, monke
     from tmg.generation.method.soft_frame import nodal_frame
     ref = infos[0].object_nodal_positions["rope"].a[0]
     for j, info in enumerate(infos):
-        np.testing.assert_allclose(ctx.extra["feature_object_poses"][j], nodal_frame(info.object_nodal_positions["rope"].a[0], ref))
-    np.testing.assert_allclose(ctx.extra["current_object_pose"], nodal_frame(infos[1].object_nodal_positions["rope"].a[0], ref))
-
-
-def _same_extra(a, b):
-    return a.keys() == b.keys() and all(np.array_equal(a[k], b[k]) if isinstance(b[k], np.ndarray) else a[k] == b[k] for k in b)
+        np.testing.assert_allclose(ctx.scene.source_object_poses[j], nodal_frame(info.object_nodal_positions["rope"].a[0], ref))
+    np.testing.assert_allclose(ctx.scene.current_object_pose, nodal_frame(infos[1].object_nodal_positions["rope"].a[0], ref))
 
 
 def install_fake_registration(monkeypatch, register):
@@ -472,6 +475,8 @@ def test_rope_records_the_nodal_frames_and_in_hand_poses_the_fit_needs(torch, tm
     np.testing.assert_allclose(P(s0["src_eef_pose"]), node_pose(infos[2].object_nodal_positions["rope"].a[0]), atol=1e-6)
     assert s0["carried_object"] is None and s1["carried_object"] == "rope" and s1["carried_candidate"] == "rope"
     assert s1["held_distance"]["now"] <= 0.03 and s1["held_distance"]["source"] < 1e-3
+    assert s1["held"] == {"now": True, "source": True, "deformable": True} and "held" not in s0     # tested on the nearest node
+    assert s0["held_rule"] == s1["held_rule"] == HELD_RULE and line["record_version"] == 2 and "invalid" not in line
     np.testing.assert_allclose(P(s1["objects"]["rope"]), nodal_frame(now1, ref), atol=1e-6)
     np.testing.assert_allclose(P(s1["src_objects"]["rope"]), P(s1["src_obj_pose"]))
     # the in-hand features the fit computes from these fields are non-zero for this scene
@@ -489,36 +494,80 @@ def test_rope_mixer_gets_nodal_scene_and_in_hand_inputs_from_the_second_subtask(
     rt.begin_attempt(gen, 0)
     rope_subtask(rt, gen, infos, 0, 1, rope_cloud(0.5, 0.7))
     rope_subtask(rt, gen, infos, 1, 1, now1)
-    first, second = (c.extra for c in mixer.contexts)
-    assert "current_in_hand" not in first and first["current_object_pose"] is not None and len(first["feature_object_poses"]) == 3
-    assert second["carried_object"] == "rope" and second["current_in_hand"].shape == (4, 4) and len(second["source_in_hand"]) == 3
-    assert second["source_in_hand"][1] is None and second["source_in_hand"][0] is not None   # only where the rope is held
-    rots = [p[:2, :2] for p in second["feature_object_poses"]]
+    from tmg.generation.method.success_model import current_in_hand, held_flags, source_in_hand
+
+    first, second = (c.scene for c in mixer.contexts)
+    assert first.carried_object is None and current_in_hand(first) is None and first.current_object_pose is not None
+    assert len(first.source_object_poses) == 3
+    assert second.carried_object == "rope" and current_in_hand(second).shape == (4, 4) and len(second.source_carried_poses) == 3
+    assert source_in_hand(second, 1) is None and source_in_hand(second, 0) is not None      # only where the rope is held
+    assert held_flags(second) == (True, [True, False, True]) and second.held.deformable and second.held.sources == [True, False, True]
+    rots = [p[:2, :2] for p in second.source_object_poses]
     assert not np.allclose(rots[0], rots[1])                           # the sources' frames differ: non-zero scene features
 
 
-def test_a_scene_that_cannot_be_read_is_noted_without_a_mixer_and_raises_with_one(torch, tmp_path, capsys):
+def unreadable_subtask(rt, gen, infos, subtask=0):
+    """One builder call whose scene cannot be read (the current node positions are missing)."""
+    local_vars = soft_locals(infos, subtask=subtask, soft=True)
+    local_vars.update({"self": gen, "selected_src_subtask_boundary": T([0, 4])})
+    local_vars.pop("subtask_nodal_positions")
+    out = rt.mix_segment(gen, local_vars)
+    rt.record_subtask(local_vars)
+    return local_vars, out
+
+
+@pytest.mark.parametrize("mixing", [False, True])
+def test_a_scene_that_cannot_be_read_fails_the_attempt_only_never_the_chunk(torch, tmp_path, capsys, mixing):
+    """Without a mixer the record notes it and the generation goes on. With one the subtask is NOT mixed and says so (no
+    silent identity): the mix record names the scene error and the attempt is marked invalid; the next attempt is mixed
+    again."""
     import json
 
+    install_fake_registration(monkeypatch=pytest.MonkeyPatch(), register=lambda **kw: kw["src_eef_poses"])
     infos = [rope_info(6, 0), rope_info(6, 10)]
     gen = rope_generator(infos)
-    for method, raises in ((Method0(None), False), (Method0(RecordingMixer()), True)):
-        rt = make_runtime(method, records_dir=tmp_path / str(raises))
-        rt.begin_attempt(gen, 0)
-        local_vars = soft_locals(infos, soft=True)
-        local_vars.update({"self": gen, "selected_src_subtask_boundary": T([0, 4])})
-        local_vars.pop("subtask_nodal_positions")
-        if raises:
-            with pytest.raises(KeyError, match="subtask_nodal_positions"):
-                rt.mix_segment(gen, local_vars)
-            continue
-        rt.mix_segment(gen, local_vars)
-        rt.record_subtask(local_vars)
-        assert "subtask_nodal_positions" in rt.rec.subtasks[0]["scene_error"] and "WARNING" in capsys.readouterr().out
-        rt.end_attempt(gen, 0, {"success": False})
-        line = json.loads((tmp_path / "False" / "attempts.jsonl").read_text().splitlines()[0])
-        assert line["scene_errors"] == 1                                 # counted in the attempt line
+    mixer = RecordingMixer() if mixing else None
+    rt = make_runtime(Method0(mixer), records_dir=tmp_path)
+    rt.begin_attempt(gen, 0)
+    local_vars, out = unreadable_subtask(rt, gen, infos)
+    assert out[0] is local_vars["src_subtask_eef_poses"] and out[1] is local_vars["src_subtask_target_poses"]   # the source's own segment
+    assert "subtask_nodal_positions" in rt.rec.subtasks[0]["scene_error"] and "WARNING" in capsys.readouterr().out
+    assert rt.rec.subtasks[0]["term_signal"] == "grasp"                 # what could be read is still recorded
+    rt.end_attempt(gen, 0, {"success": True})
+    rt.begin_attempt(gen, 0)                                            # the chunk goes on: a readable attempt
+    rope_subtask(rt, gen, infos, 0, 1, rope_cloud(0.5, 0.7))
+    rt.end_attempt(gen, 0, {"success": True})
+    bad, good = (json.loads(text) for text in (tmp_path / "attempts.jsonl").read_text().splitlines())
+    assert bad["scene_errors"] == 1 and good["scene_errors"] == 0 and "invalid" not in good and "scene_error" not in good["subtasks"][0]
+    assert bad["success"] is True                                       # the official verdict is not rewritten
+    if mixing:
+        mix = bad["subtasks"][0]["mix"]
+        assert bad["invalid"] == "scene_error" and mix["mixed"] is False and mix["identity_reason"].startswith("scene_error: scene: KeyError")
+        assert len(mixer.contexts) == 1 and good["subtasks"][0]["mix"] == {"mixed": True, "donor": 1}     # only the good attempt was mixed
+    else:
+        assert "invalid" not in bad and bad["subtasks"][0]["mix"] is None
 
+
+def test_a_term_signal_that_cannot_be_read_is_a_record_error_but_the_subtask_is_still_mixed(torch, tmp_path, monkeypatch):
+    import json
+
+    install_fake_registration(monkeypatch, lambda **kw: kw["src_eef_poses"])
+    infos = [rope_info(6, 0), rope_info(6, 10)]
+    gen = rope_generator(infos)
+    del gen.env_cfg                                                     # the term signal lives there
+    mixer = RecordingMixer()
+    rt = make_runtime(Method0(mixer), records_dir=tmp_path)
+    rt.begin_attempt(gen, 0)
+    local_vars = soft_locals(infos, soft=True)
+    local_vars.update({"self": gen, "selected_src_subtask_boundary": T([0, 4])})
+    rt.mix_segment(gen, local_vars)
+    monkeypatch.setattr(rt, "subtask_settings", lambda *a: (5, 0, 0.0))
+    rt.record_subtask(local_vars)
+    rt.end_attempt(gen, 0, {"success": False})
+    line = json.loads((tmp_path / "attempts.jsonl").read_text().splitlines()[0])
+    s = line["subtasks"][0]
+    assert len(mixer.contexts) == 1 and s["mix"]["mixed"] is True and "invalid" not in line
+    assert s["scene_error"].startswith("term_signal: AttributeError") and line["scene_errors"] == 1 and "src_obj_pose" in s
 
 
 def test_rigid_objects_use_the_builder_pose_and_the_environment_for_another_carried_object(torch):
@@ -568,7 +617,38 @@ def test_an_object_the_hand_does_not_hold_gives_no_in_hand_pose(torch):
         rt.record_subtask(local_vars)
     s1 = rt.rec.subtasks[1]
     assert s1["carried_object"] is None and s1["carried_candidate"] == "bottle" and s1["objects"] == {} and s1["src_objects"] == {}
-    assert s1["held_distance"]["now"] == pytest.approx(0.6)
+    assert s1["held_distance"]["now"] == pytest.approx(0.6) and s1["held"] == {"now": False, "source": False, "deformable": False}
+
+
+def test_the_hold_limits_come_from_the_rule_not_from_the_code(torch):
+    """The same scene (the bottle 0.6 m from the hand) under three rules: the configured 0.20 m (not held), a 1 m rule
+    (held: the in-hand poses appear), and no rule at all (no test: the carried object's poses are kept)."""
+    from tmg.generation.generators.isaaclab import runtime as module
+
+    assert not hasattr(module, "HOLD_RIGID_M") and not hasattr(module, "HOLD_NODES_M")
+    infos = [datagen_info(6, 0, obj="bottle"), datagen_info(6, 10, obj="bottle")]
+    for info, offset in zip(infos, (0, 10)):
+        info.object_poses["fridge"] = T(np.stack([pose(200 + offset + i) for i in range(6)]))
+    env = SceneEnv(eef={"robot0": pose(1.0)}, objects={"bottle": pose(1.6), "fridge": pose(300.0)})
+    gen = soft_generator(infos, env)
+    gen.env_cfg = types.SimpleNamespace(subtask_configs={"robot0": [types.SimpleNamespace(
+        num_interpolation_steps=0, num_fixed_steps=0, action_noise=0.0, subtask_term_signal="support")] * 2})
+    seen = {}
+    for name, rule in (("configured", HELD_RULE), ("wide", {"version": 7, "rigid_m": 1.0, "nodes_m": 0.1}), ("none", None)):
+        rt = make_runtime(Method0(None), held_rule=rule)
+        rt.begin_attempt(gen, 0)
+        for k, obj in enumerate(("bottle", "fridge")):
+            local_vars = soft_locals(infos, primary=1, subtask=k)
+            local_vars.update({"self": gen, "subtask_object_name": obj, "subtask_object_pose": T(pose(150.0 + k)),
+                               "selected_src_subtask_boundary": T([0, 4] if k == 0 else [4, 6])})
+            rt.record_subtask(local_vars)
+        seen[name] = rt.rec.subtasks[1]
+    assert seen["configured"]["carried_object"] is None and seen["configured"]["held_rule"] == HELD_RULE
+    assert seen["wide"]["carried_object"] == "bottle" and seen["wide"]["held_rule"]["version"] == 7
+    assert seen["wide"]["held"]["now"] is True and seen["wide"]["held"]["source"] is False       # the source's bottle is 100 m away
+    assert sorted(seen["wide"]["objects"]) == ["bottle"] and seen["wide"]["src_objects"] == {}
+    assert seen["none"]["carried_object"] == "bottle" and "held" not in seen["none"] and "held_rule" not in seen["none"]
+    assert sorted(seen["none"]["src_objects"]) == ["bottle"]
 
 
 # grafts and the entrypoint dispatch -------------------------------------------------------------------
@@ -659,7 +739,7 @@ def test_install_from_spec_picks_the_runtime_by_soft(tmp_path, monkeypatch, soft
     from tmg.generation.generators.isaaclab import runtime as rt
 
     dg, _wp = fake_package(tmp_path, monkeypatch, "fakepkg", package_source, WAYPOINT_MODULE)
-    spec = {"chunk": {"seed": 31}, "records_dir": str(tmp_path / "records"), "task": {},
+    spec = {"chunk": {"seed": 31}, "records_dir": str(tmp_path / "records"), "task": {}, "scene_reading": {"held_rule": HELD_RULE},
             "method": {"name": "none", "mixing": {"enabled": False}, "tracking": {"enabled": False}},
             "extra": {"soft": soft, "package": "fakepkg", "graft_hashes": {},
                       "layout": {"eefs": ["robot0"], "arm_action_dims": {"robot0": [0, 6]}, "hand_prefixes": None, "hand_term": None,
@@ -669,6 +749,8 @@ def test_install_from_spec_picks_the_runtime_by_soft(tmp_path, monkeypatch, soft
     runtime = getattr(dg.DataGenerator, builder).__globals__["_tmg"]
     assert type(runtime) is (rt.SoftMimicGenRuntime if soft else rt.IsaacLabRuntime)
     assert runtime.layout.arm_action_dims == {"robot0": (0, 6)} and runtime.layout.noise_draw_shapes == (6,) and runtime.records_dir == tmp_path / "records"
+    assert runtime.held_rule.as_dict() == HELD_RULE
+    assert rt.held_rule_of({"chunk": {}}) is None                       # a spec written before scene_reading existed: no hold test
     assert info[builder][0].startswith("after 'src_subtask_nodal_positions = ...'" if soft else "after 'src_subtask_object_pose = ...'")
     assert dg.DataGenerator.generate.__globals__["_tmg"] is runtime          # the official generate, grafted
 
@@ -708,7 +790,8 @@ def test_mixer_features_at_generation_equal_the_fits_design_rows(torch, tmp_path
     import json
 
     from tmg.generation.method.skillmix import SkillMixer
-    from tmg.generation.method.success_model import FEATURES, design_rows
+    from tmg.generation.method.interfaces import Arms
+    from tmg.generation.method.success_model import HELD_FEATURES, design_rows, mix_record_features
 
     torch.Tensor = T                       # scipy's array-API check looks the fake module's Tensor up
     install_fake_registration(monkeypatch, lambda **kw: kw["src_eef_poses"])
@@ -721,7 +804,7 @@ def test_mixer_features_at_generation_equal_the_fits_design_rows(torch, tmp_path
     env = SceneEnv(eef={"robot0": hand}, objects={})
     gen = rope_generator(infos, eef_pose=hand)
     gen.env = env
-    mixer = SkillMixer(rule="randmix", chunk_seed=4)
+    mixer = SkillMixer(rule="randmix", chunk_seed=4, arms=Arms(("robot0",)))
     rt = make_runtime(Method0(mixer), records_dir=tmp_path)
     rt.begin_attempt(gen, 0)
     primary = 2
@@ -738,11 +821,47 @@ def test_mixer_features_at_generation_equal_the_fits_design_rows(torch, tmp_path
     for k in (0, 1):
         mix = line["subtasks"][k]["mix"]
         assert "weights" in mix and "identity_reason" not in mix
-        X, _, kept = design_rows([line], [[True, True]], k, 3, None, eef="robot0")
+        X, _, kept = design_rows([line], [[True, True]], k, 3, eef="robot0", features=HELD_FEATURES)
         assert kept == [0]
         fit_features = X[0, 3:]
-        scene = np.asarray(mix["scene_features"])[primary]
-        inhand = np.asarray(mix["inhand_features"])[primary] if k else np.zeros(2)
-        np.testing.assert_allclose(fit_features, np.concatenate([scene, inhand]), atol=2e-4, err_msg=str(FEATURES))
+        mixer_features = mix_record_features(mix, HELD_FEATURES, 3)[primary]     # what the mixer scored for that source
+        np.testing.assert_allclose(fit_features, mixer_features, atol=2e-4, err_msg=str(HELD_FEATURES))
         if k == 1:
-            assert np.abs(inhand).sum() > 0 and np.abs(scene).sum() > 0        # non-zero features, not a trivial match
+            assert np.abs(mixer_features[3:5]).sum() > 0 and np.abs(mixer_features[:3]).sum() > 0   # not a trivial match
+            assert mix["held"] == {"now": True, "sources": [True, True, True]} and mixer_features[5] == 0
+
+
+# the unmixed baseline: nothing reaches the generation --------------------------------------------------------------
+@pytest.mark.parametrize("held_rule", [HELD_RULE, {"version": 9, "rigid_m": 5.0, "nodes_m": 5.0}, None])
+def test_unmixed_generation_returns_the_builders_own_objects_and_draws_nothing(torch, tmp_path, monkeypatch, held_rule):
+    """Method none: ``mix_segment`` hands back the very objects the official builder sliced without reading the scene, and
+    the scene reading for the record (whatever the hold rule, and when it fails) draws from no random stream, so the
+    official code runs on exactly what it would without the grafts."""
+    import random
+
+    from tmg.generation.generators.isaaclab import runtime as module
+
+    infos = hand_on_rope([rope_info(6, 0), rope_info(6, 10), rope_info(6, 20)])
+    gen = rope_generator(infos, eef_pose=node_pose(rope_cloud(0.6, 0.9)))
+    rt = make_runtime(Method0(None), records_dir=tmp_path, held_rule=held_rule)
+    reads = []
+    original = module.IsaacLabRuntime.subtask_scene
+    monkeypatch.setattr(module.IsaacLabRuntime, "subtask_scene", lambda self, g, lv: reads.append(lv["subtask_ind"]) or original(self, g, lv))
+    np.random.seed(5)
+    random.seed(5)
+    before = (np.random.get_state()[1].copy(), random.getstate(), torch.random.get_rng_state())
+    rt.begin_attempt(gen, 0)
+    for k, nodes in enumerate((rope_cloud(0.5, 0.7), rope_cloud(0.6, 0.9))):
+        local_vars = soft_locals(infos, primary=2, subtask=k, soft=True)
+        local_vars.update({"self": gen, "subtask_nodal_positions": T(nodes), "selected_src_subtask_boundary": T([0, 4] if k == 0 else [4, 6])})
+        if k == 1:
+            local_vars.pop("subtask_nodal_positions")              # the scene of the second subtask cannot be read
+        out = rt.mix_segment(gen, local_vars)
+        assert reads == list(range(k))                             # mix_segment itself read no scene
+        assert out[0] is local_vars["src_subtask_eef_poses"] and out[1] is local_vars["src_subtask_target_poses"]
+        assert out[2] is local_vars["src_subtask_gripper_actions"] and rt._last_mix is None
+        rt.record_subtask(local_vars)
+    rt.end_attempt(gen, 0, {"success": True})
+    after = (np.random.get_state()[1], random.getstate(), torch.random.get_rng_state())
+    assert np.array_equal(before[0], after[0]) and before[1] == after[1] and before[2] == after[2]
+    assert reads == [0, 1] and "scene_error" in rt.rec.subtasks[1] and "scene_error" not in rt.rec.subtasks[0]

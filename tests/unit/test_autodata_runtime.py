@@ -26,10 +26,15 @@ def dex_layout():
                           hand_term=None, measure_links=None, noise_draw_shapes=(3, 4, 3, 4))
 
 
+HELD_RULE = {"version": 1, "rigid_m": 0.20, "nodes_m": 0.10}       # scene_reading.held_rule of dexmimicgen.yaml
+
+
 def make_runtime(method, records_dir=None, cameras=()):
     from tmg.generation.generators.autodata.runtime import AutoDataRuntime
+    from tmg.generation.method.interfaces import HeldRule
 
-    return AutoDataRuntime(method, dex_layout(), records_dir=records_dir, cameras=cameras, image_size=None)
+    return AutoDataRuntime(method, dex_layout(), records_dir=records_dir, cameras=cameras, image_size=None,
+                           held_rule=HeldRule.from_mapping(HELD_RULE))
 
 
 def datagen_info(num_steps, offset, eefs=("left", "right"), obj="object"):
@@ -99,9 +104,10 @@ def test_mix_segment_keeps_other_passthrough_channels_next_to_the_mixed_hand(tor
     eef, targets, passthrough = rt.mix_segment(gen, local_vars)
     ctx = mixer.contexts[0]
     assert ctx.primary == 1 and ctx.rng.random() == np.random.default_rng(0).random()
-    assert sorted(ctx.extra) == ["carried_object", "current_object_pose", "eef", "reference_object", "soft"]
-    assert ctx.extra["eef"] == "right" and ctx.extra["reference_object"] == "object" and ctx.extra["carried_object"] is None
-    np.testing.assert_array_equal(ctx.extra["current_object_pose"], pose(105.0))
+    scene = ctx.scene
+    assert scene.eef == "right" and scene.reference_object == "object" and scene.carried_object is None and scene.held is None
+    assert scene.held_rule.as_dict() == HELD_RULE and scene.object_frame is None
+    np.testing.assert_array_equal(scene.current_object_pose, pose(105.0))
     np.testing.assert_array_equal(ctx.primary_gripper, np.full((4, 2), 10))
     np.testing.assert_array_equal(ctx.primary_eef_start, pose(60))
     np.testing.assert_array_equal(ctx.primary_targets, infos[1].target_eef_pose["right"].a[0:4])
@@ -169,11 +175,14 @@ def test_two_arms_record_and_mix_their_own_subtasks_without_colliding(torch, tmp
     build("left", 0, "fridge", pose(300.0))
     build("right", 1, "fridge", pose(300.0))
     rt.end_attempt(gen, 0, {"success": True})
-    right0, left0, right1 = (c.extra for c in mixer.contexts)
-    assert (right0["eef"], left0["eef"], right1["eef"]) == ("right", "left", "right")
-    assert right0["carried_object"] is None and left0["carried_object"] is None and right1["carried_object"] == "bottle"
-    np.testing.assert_array_equal(right1["current_in_hand"], np.linalg.inv(pose(1.0)) @ pose(0.95))
-    np.testing.assert_array_equal(right1["source_in_hand"][1], np.linalg.inv(infos[1].eef_pose["right"].a[4]) @ infos[1].object_poses["bottle"].a[4])
+    from tmg.generation.method.success_model import current_in_hand, source_in_hand
+
+    right0, left0, right1 = (c.scene for c in mixer.contexts)
+    assert (right0.eef, left0.eef, right1.eef) == ("right", "left", "right") and (right0.subtask, left0.subtask, right1.subtask) == (0, 0, 1)
+    assert right0.carried_object is None and left0.carried_object is None and right1.carried_object == "bottle"
+    np.testing.assert_array_equal(current_in_hand(right1), np.linalg.inv(pose(1.0)) @ pose(0.95))
+    np.testing.assert_array_equal(source_in_hand(right1, 1), np.linalg.inv(infos[1].eef_pose["right"].a[4]) @ infos[1].object_poses["bottle"].a[4])
+    assert right1.held.now and right1.held.sources == [True, True] and not right1.held.deformable
     line = json.loads((tmp_path / "attempts.jsonl").read_text().splitlines()[0])
     keys = [(s["eef"], s["subtask_ind"]) for s in line["subtasks"]]
     assert keys == [("right", 0), ("left", 0), ("right", 1)]
@@ -355,12 +364,23 @@ def test_install_from_spec_grafts_autodata_and_wraps_the_success_term_setup(tmp_
     assert seen == [(ds, cfg)] and cfg.func.env == "E"
 
 
-def test_the_runtime_gives_the_mixer_the_generators_end_effectors():
-    from tmg.generation.method.skillmix import SkillMixer
+def test_install_from_spec_builds_the_mixer_with_the_layouts_end_effectors_and_the_specs_hold_rule(tmp_path, monkeypatch):
+    """The arms reach the mixer when it is built, from the layout of the chunk spec (the generator config's eefs); the
+    runtime never patches a mixer afterwards."""
+    from tmg.generation.generators.autodata import runtime as rt
+    from tmg.generation.method.interfaces import Arms
 
-    mixer = SkillMixer(rule="randmix", chunk_seed=1)
-    make_runtime(Method0(mixer))
-    assert mixer.arms == ["left", "right"] and mixer.draws._streams.multi
+    built = {}
+    monkeypatch.setattr(rt, "install", lambda runtime, hashes: built.setdefault("runtime", runtime) and {})
+    spec = {"chunk": {"seed": 7}, "records_dir": str(tmp_path), "task": {"cameras": []}, "scene_reading": {"held_rule": HELD_RULE},
+            "method": {"name": "skillmix_randmix", "mixing": {"enabled": True, "type": "skillmix", "rule": "randmix"}},
+            "extra": {"graft_hashes": {}, "cameras": [], "layout": {
+                "eefs": ["left", "right"], "arm_action_dims": {"left": [0, 7], "right": [7, 14]}, "hand_prefixes": None,
+                "hand_term": None, "measure_links": None, "noise_draw_shapes": [3, 4, 3, 4]}}}
+    rt.install_from_spec(spec, None)
+    runtime = built["runtime"]
+    assert runtime.method.mixer.arms == Arms(("left", "right")) and runtime.method.mixer.draws._streams.arms.per_arm
+    assert runtime.held_rule.as_dict() == HELD_RULE and not hasattr(runtime.method.mixer, "set_end_effectors")
 
 
 def test_autodata_records_the_subtask_term_signals_from_the_environment(torch, tmp_path):

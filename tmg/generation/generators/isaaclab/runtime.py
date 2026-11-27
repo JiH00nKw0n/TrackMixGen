@@ -24,18 +24,31 @@ runs SoftMimicGen (DexMimicGen runs on AutoData, ``..autodata.runtime``).
 | after the first ``play_action = env.target_eef_pose_to_action(...)`` | ``_tmg.record_command(self, env, env_id, state, play_action)`` |
 | after ``success = ...``                           | ``_tmg.record_step(self, env, env_id, obs, success)``         |
 
-Scene of a subtask (``subtask_scene``, once per builder call): the reference object's pose now and in every source at the
-start of its segment, the end-effector pose now and in every source, and the in-hand pose (the previous subtask's reference
-object of the same end effector in its frame, only where that object is held: ``held_distance``) now and in every source. ``mix_segment`` hands them to the mixer
-(``MixContext.extra``: ``current_object_pose``, ``current_in_hand``, ``source_in_hand``, ``carried_object``) and
-``record_subtask`` writes the selected source's into the attempt record (``cur_obj_pose``, ``src_obj_pose``, ``eef_pose``,
-``src_eef_pose``, ``objects``, ``src_objects``, ``carried_object``, ``term_signal``, and ``start_step``, the number of steps
-executed before the subtask was built: the builders make a subtask when the end effector's previous one is exhausted),
-which is what ``tmg fit_coefficients`` reads. The record is written for every method, the unmixed baseline included; the values are read from the simulation and
-the source demonstrations and change nothing in the generation. Should reading them fail in a run without a mixer, the
-subtask record says why (``scene_error``) and the generation goes on; with a mixer the error stops the chunk. A deformable
-reference object (SoftMimicGen's rope and towel) has the nodal frame of ``tmg.generation.method.soft_frame`` (also
-recorded: ``object_frame``).
+Scene of a subtask (``subtask_scene``, read once per builder call into a ``SubtaskScene`` of
+``tmg.generation.method.interfaces``): the reference object's pose now and in every source at the start of its segment, the
+end-effector pose now and in every source, and the previous subtask's reference object of the same end effector (the
+carried object) now and in every source, kept only where the hand holds it. Whether a hand holds it is the hold test
+(``held_distance`` against the ``HeldRule`` of the chunk spec's ``scene_reading``, from the generator config
+``scene_reading.held_rule``): a grasp leaves the object at the hand, while the previous subtask's reference object of a
+hand that only reached, pushed or supported it is 0.4 to 1.3 m away (GR1 Bottle Placement pilot, 2026-11-27).
+``mix_segment`` hands the scene to the mixer (``MixContext.scene``) and ``record_subtask`` writes the selected source's part
+into the attempt record (``SubtaskScene.record``: ``cur_obj_pose``, ``src_obj_pose``, ``eef_pose``, ``src_eef_pose``,
+``objects``, ``src_objects``, ``carried_object``, ``carried_candidate``, ``held_distance``, ``held``, ``held_rule``,
+``object_frame``) with ``term_signal`` and ``start_step``, the number of steps executed before the subtask was built (the
+builders make a subtask when the end effector's previous one is exhausted), which is what ``tmg fit_coefficients`` reads.
+The record is written for every method, the unmixed baseline included; the values are read from the simulation and the
+source demonstrations and change nothing in the generation. A deformable reference object (SoftMimicGen's rope and
+towel) has the nodal frame of ``tmg.generation.method.soft_frame`` (also recorded: ``object_frame``).
+
+A scene that cannot be read (for example a towel folded so far that its nodal frame has no yaw) never stops the chunk:
+the subtask record says why (``scene_error``), the attempt counts its errors (``scene_errors``) and the generation goes
+on with the selected source's own segment. With a mixer that subtask was not mixed as the method says, so the mix record
+says so (``mixed: false``, ``identity_reason: scene_error ...``) and the attempt is marked ``invalid: scene_error``
+(a termination signal that cannot be read is a ``scene_error`` of the record too, but the subtask is still mixed):
+``tmg dataset`` and ``tmg fit_coefficients`` leave such attempts out, and the adapter fails the chunk and stops the pool
+when the share of such attempts in a chunk exceeds ``scene_reading.max_error_rate`` (``adapter.chunk_result``). The
+official success verdict of the attempt is not changed: the official recorder has exported the episode by then, and the
+k-th demonstration of its file must stay the k-th successful attempt of the records.
 
 Pre-noise labels: for the attempt's duration ``env.target_eef_pose_to_action`` is replaced by a wrapper that
 first computes the noiseless action (with the torch RNG state saved and restored around that call, so the
@@ -57,11 +70,11 @@ import numpy as np
 
 from tmg.core.records import LABELS_FORMAT, AttemptRecorder, record_file
 from tmg.generation.graft import Graft
-from tmg.generation.method.interfaces import Method, MixContext
-from tmg.generation.method.success_model import in_hand
+from tmg.generation.method.interfaces import HeldRule, HeldTest, Method, MixContext, SubtaskScene
 from tmg.generation.simulators.isaaclab import HandLayout, measured_eef_poses, observed_eef_poses
 
 RECORD_ERROR = "RECORD_ERROR.json"
+INVALID_SCENE = "scene_error"      # ``invalid`` of an attempt of a mixing method with a subtask whose scene could not be read
 
 
 def _np(x) -> np.ndarray:
@@ -100,13 +113,12 @@ class IsaacLabLayout:
         return layout
 
 
-HOLD_RIGID_M = 0.20       # a rigid object counts as held when its origin is this close to the end effector
-HOLD_NODES_M = 0.10       # a deformable object counts as held when one of its nodes is this close to the end effector
+HELD_DISTANCE_DECIMALS = 4      # the hold distances are rounded to 0.1 mm, then tested: the record gives the verdict
 
 
 def held_distance(eef_pose, object_pose, nodes=None) -> float:
     """How far the end effector is from an object (m): from its nearest node for a deformable object (``nodes`` (N, 3)),
-    else from its origin. Compared with ``HOLD_NODES_M`` / ``HOLD_RIGID_M`` to decide whether the object is in the hand."""
+    else from its origin. Compared with the ``HeldRule`` limits to decide whether the object is in the hand."""
     position = np.asarray(eef_pose, dtype=float)[:3, 3]
     if nodes is not None:
         return float(np.linalg.norm(np.asarray(nodes, dtype=float) - position, axis=1).min())
@@ -114,67 +126,14 @@ def held_distance(eef_pose, object_pose, nodes=None) -> float:
 
 
 @dataclass
-class SubtaskScene:
-    """What SkillMix needs of one subtask of one end effector (module docstring), per source j at the start of its
-    segment and now. Poses are 4x4 world poses; a pose that is not known is None."""
-
+class SubtaskRead:
+    """What the runtime read for the subtask the builder is making: its scene and termination signal, and the first
+    failure (``error``, "<field>: <exception>"). A scene that failed is None; the mixer needs the scene only."""
     eef: str
     subtask: int
-    reference_object: str | None
-    soft: bool
-    current_object_pose: np.ndarray | None          # reference object now (the nodal frame for a deformable one)
-    source_object_poses: list                       # per source: reference object at its segment start
-    eef_pose: np.ndarray                            # end effector now
-    source_eef_poses: list                          # per source: end effector at its segment start
-    carried: str | None = None                      # the previous subtask's reference object, when it is held now
-    current_carried_pose: np.ndarray | None = None
-    source_carried_poses: list | None = None        # per source: that object's pose, None where the source does not hold it
-    object_frame: dict | None = None                # deformable object: frame definition and reference hash
-    candidate: str | None = None                    # the previous subtask's reference object, held or not
-    held: dict | None = None                        # distances of the hold test: {"now": m, "sources": [m, ...]}
-
-    def current_in_hand(self) -> np.ndarray | None:
-        if self.current_carried_pose is None:
-            return None
-        return in_hand(self.eef_pose, self.current_carried_pose)
-
-    def source_in_hand(self) -> list:
-        carried = self.source_carried_poses or [None] * len(self.source_eef_poses)
-        return [None if c is None else in_hand(e, c) for e, c in zip(self.source_eef_poses, carried)]
-
-    def mix_extra(self) -> dict:
-        """``MixContext.extra`` (the blending frames stay the generator's; a deformable object's sources are scored with
-        their nodal frames, ``feature_object_poses``)."""
-        extra = {"eef": self.eef, "soft": self.soft, "reference_object": self.reference_object,
-                 "current_object_pose": self.current_object_pose, "carried_object": self.carried}
-        if self.held is not None:
-            extra["held_distance"] = self.held
-        if self.soft:
-            extra["feature_object_poses"] = self.source_object_poses
-            extra["object_frame"] = self.object_frame
-        now = self.current_in_hand()
-        if now is not None:
-            extra["current_in_hand"] = now
-            extra["source_in_hand"] = self.source_in_hand()
-        return extra
-
-    def record(self, selected: int) -> dict:
-        """The subtask record's fields for the selected source (what the fit's rows are made of). ``objects`` and
-        ``src_objects`` hold the carried object only, and only where it is held (now; in the selected source), so the fit's
-        in-hand features are 0 exactly where the mixer's are."""
-        objects, src_objects = {}, {}
-        if self.carried is not None and self.current_carried_pose is not None:
-            objects[self.carried] = self.current_carried_pose
-            if self.source_carried_poses and self.source_carried_poses[selected] is not None:
-                src_objects[self.carried] = self.source_carried_poses[selected]
-        out = {"cur_obj_pose": self.current_object_pose, "src_obj_pose": self.source_object_poses[selected],
-               "eef_pose": self.eef_pose, "src_eef_pose": self.source_eef_poses[selected], "objects": objects,
-               "src_objects": src_objects, "carried_object": self.carried, "carried_candidate": self.candidate}
-        if self.held is not None:
-            out["held_distance"] = {"now": self.held["now"], "source": self.held["sources"][selected]}
-        if self.object_frame is not None:
-            out["object_frame"] = self.object_frame
-        return out
+    scene: SubtaskScene | None = None
+    term_signal: str | None = None
+    error: str | None = None
 
 
 @contextmanager
@@ -208,12 +167,12 @@ class IsaacLabRuntime:
     hand_var = "src_subtask_gripper_actions"             # the builder's local holding the segment's hand commands
     boundary_var = "selected_src_subtask_boundary"       # the builder's local holding the selected source boundary
 
-    def __init__(self, method: Method, layout: IsaacLabLayout, records_dir: Path | None):
+    def __init__(self, method: Method, layout: IsaacLabLayout, records_dir: Path | None, held_rule: HeldRule | None = None):
+        """``method``: built with the layout's end effectors (``build_method(..., arms=layout.eefs)``). ``held_rule``: the
+        hold test of the chunk spec's ``scene_reading``; None makes no test (a carried object counts as held)."""
         self.method = method
         self.layout = layout
-        mixer = getattr(method, "mixer", None)
-        if hasattr(mixer, "set_end_effectors"):            # per-arm random streams and rule blocks for two arms
-            mixer.set_end_effectors(layout.eefs)
+        self.held_rule = held_rule
         self.rec = AttemptRecorder()
         self.rec.configure(records_dir)
         self.records_dir = records_dir
@@ -224,8 +183,9 @@ class IsaacLabRuntime:
         self._pending: dict | None = None
         self._selected: dict[str, int] = {}           # eef -> source demonstration chosen in this attempt
         self._carried: dict[str, tuple] = {}          # eef -> (reference object, soft) of its previous subtask in this attempt
-        self._scene: SubtaskScene | None = None       # the scene of the subtask being built (mix_segment, then record_subtask)
-        self._scene_errors = 0                        # subtask records of this attempt without their scene
+        self._read: SubtaskRead | None = None         # what was read for the subtask being built (mix_segment, then record_subtask)
+        self._scene_errors = 0                        # subtask records of this attempt without their scene or term signal
+        self._not_mixed = False                       # a mixing method left a subtask of this attempt unmixed for a scene error
         self._warned_scene = False
         self._seg_id = -1
         self._action_owner = None                     # object whose target_eef_pose_to_action is wrapped
@@ -294,12 +254,33 @@ class IsaacLabRuntime:
         return observed_eef_poses(owner, env_id, list(eefs))
 
     # scene of a subtask ---------------------------------------------------------------------------
+    def read_subtask(self, generator, local_vars: dict) -> SubtaskRead:
+        """The scene and termination signal of the subtask the builder is making, read once per builder call; a failure
+        is kept as ``error`` (module docstring), never raised."""
+        eef, k = str(local_vars["eef_name"]), int(local_vars["subtask_ind"])
+        if self._read is not None and (self._read.eef, self._read.subtask) == (eef, k):
+            return self._read
+        read = SubtaskRead(eef=eef, subtask=k)
+        for field, reader in (("scene", lambda: self.subtask_scene(generator, local_vars)),
+                              ("term_signal", lambda: self.subtask_term_signal(generator, local_vars, eef, k))):
+            try:
+                setattr(read, field, reader())
+            except Exception as error:                 # noqa: BLE001  any failure to read is one scene error of the attempt
+                read.error = read.error or f"{field}: {type(error).__name__}: {error}"
+        if read.error is not None:
+            self._scene_errors += 1
+            if not self._warned_scene:
+                self._warned_scene = True
+                print(f"[tmg] WARNING subtask {eef}/{k}: not read ({read.error}); the attempt is left out of "
+                      f"tmg fit_coefficients" + (", and of the datasets when the subtask cannot be mixed for it"
+                                                 if self.method.mixer is not None else ""), flush=True)
+        self._read = read
+        return read
+
     def subtask_scene(self, generator, local_vars: dict) -> SubtaskScene:
-        """The ``SubtaskScene`` of the subtask the builder is making (module docstring), read once per builder call."""
+        """The ``SubtaskScene`` of the subtask the builder is making (module docstring)."""
         eef = str(local_vars["eef_name"])
         k = int(local_vars["subtask_ind"])
-        if self._scene is not None and (self._scene.eef, self._scene.subtask) == (eef, k):
-            return self._scene
         infos = generator.src_demo_datagen_info_pool.datagen_infos
         bounds = np.asarray(_np(local_vars["all_randomized_subtask_boundaries"][eef]), dtype=int)   # (sources, subtasks, 2)
         starts = [int(bounds[i, k, 0]) for i in range(len(infos))]
@@ -315,14 +296,14 @@ class IsaacLabRuntime:
             pose_now = local_vars.get("subtask_object_pose")
             current = _np(pose_now) if pose_now is not None else self.current_object_poses(generator, env_id)[obj]
             sources = [_np(info.object_poses[obj][t]) for info, t in zip(infos, starts)]
-        scene = SubtaskScene(eef=eef, subtask=k, reference_object=None if obj is None else str(obj), soft=soft,
+        scene = SubtaskScene(subtask=k, eef=eef, reference_object=None if obj is None else str(obj),
                              current_object_pose=current, source_object_poses=sources,
                              eef_pose=self.current_eef_pose(generator, env_id, eef),
                              source_eef_poses=[_np(info.eef_pose[eef][t]) for info, t in zip(infos, starts)],
-                             object_frame=frame)
+                             object_frame=frame, held_rule=self.held_rule)
         carried, carried_soft = self._carried.get(eef, (None, False))
         if carried is not None:
-            scene.candidate = carried
+            scene.carried_object = carried
             nodes_now = nodes_src = None
             if carried == scene.reference_object:              # the same object (Rope, Towel, Microwave): its poses above
                 now_pose, src_poses = current, sources
@@ -335,28 +316,26 @@ class IsaacLabRuntime:
                 now_pose = src_poses = None
             if now_pose is not None:
                 self._hold(scene, now_pose, src_poses, nodes_now, nodes_src, soft and carried == scene.reference_object)
-        self._scene = scene
         return scene
 
     def held_nodes(self, local_vars: dict, infos, object_name: str, starts: list) -> tuple:
         """``(nodes now, per-source nodes)`` of a deformable object for the hold test (SoftMimicGen only)."""
         raise NotImplementedError(f"{type(self).__name__}: no deformable objects")
 
-    @staticmethod
-    def _hold(scene: SubtaskScene, now_pose, src_poses, nodes_now, nodes_src, deformable: bool) -> None:
-        """Keep the carried object only where it is held (``held_distance`` within ``HOLD_NODES_M`` for a deformable
-        object, ``HOLD_RIGID_M`` for a rigid one): not held now, no in-hand features at all; not held in source j, in-hand
-        features 0 for j. A grasp leaves the object at the hand; the previous subtask's reference object of a hand that
-        only reached, pushed or supported it is 0.4 to 1.3 m away (GR1 Bottle Placement pilot, 2026-11-27)."""
-        limit = HOLD_NODES_M if deformable else HOLD_RIGID_M
+    def _hold(self, scene: SubtaskScene, now_pose, src_poses, nodes_now, nodes_src, deformable: bool) -> None:
+        """Keep the carried object's pose only where it is held (the hold test of the module docstring): now, and in
+        every source by itself, so a source that holds an object the hand does not hold now (or the reverse) is told
+        apart from one in the same state (``inhand_mismatch``). Without a hold rule the pose is kept everywhere."""
+        if self.held_rule is None:
+            scene.carried_pose, scene.source_carried_poses = now_pose, list(src_poses)
+            return
         now = held_distance(scene.eef_pose, now_pose, nodes_now)
         dist = [held_distance(e, p, None if nodes_src is None else nodes_src[j])
                 for j, (e, p) in enumerate(zip(scene.source_eef_poses, src_poses))]
-        scene.held = {"now": round(now, 4), "sources": [round(d, 4) for d in dist]}
-        if now > limit:
-            return
-        scene.carried, scene.current_carried_pose = scene.candidate, now_pose
-        scene.source_carried_poses = [p if d <= limit else None for p, d in zip(src_poses, dist)]
+        scene.held = HeldTest(rule=self.held_rule, deformable=bool(deformable), now_m=round(now, HELD_DISTANCE_DECIMALS),
+                              sources_m=[round(d, HELD_DISTANCE_DECIMALS) for d in dist])
+        scene.carried_pose = now_pose if scene.held.now else None
+        scene.source_carried_poses = [p if held else None for p, held in zip(src_poses, scene.held.sources)]
 
     def _label_wrapper(self, original, env_id: int):
         """The replacement ``target_eef_pose_to_action`` (the official parameter names, so keyword calls bind)."""
@@ -373,7 +352,7 @@ class IsaacLabRuntime:
         self._attempt_t0 = time.time()
         self._labels, self._executed, self._pending = [], [], None
         self._selected = {}
-        self._carried, self._scene, self._scene_errors = {}, None, 0
+        self._carried, self._read, self._scene_errors, self._not_mixed = {}, None, 0, False
         self.rec.begin_attempt()
         self._seg_id = -1
         if self.method.mixer is not None:
@@ -389,6 +368,8 @@ class IsaacLabRuntime:
             self.rec.add_extra(elapsed_s=round(time.time() - self._attempt_t0, 3), labels=self.method.labels,
                                num_label_steps=len(self._labels), executed_steps=len(self._executed),
                                scene_errors=self._scene_errors)
+            if self._not_mixed:
+                self.rec.add_extra(invalid=INVALID_SCENE)      # a subtask was not mixed as the method says
             src = {eef: int(v) for eef, v in self._selected.items()}
             self.rec.flush(success=bool(results.get("success", False)), src_demo_inds=[src[e] for e in self.layout.eefs if e in src])
             if self.records_dir is not None and self._labels:
@@ -444,7 +425,12 @@ class IsaacLabRuntime:
         infos = generator.src_demo_datagen_info_pool.datagen_infos
         object_name = local_vars.get("subtask_object_name")
         soft = bool(local_vars.get("subtask_object_soft", False))
-        scene = self.subtask_scene(generator, local_vars)
+        read = self.read_subtask(generator, local_vars)
+        if read.scene is None:                             # not mixed, and said so: the attempt is marked invalid
+            self._not_mixed = True
+            self._last_mix = {"subtask": subtask_ind, "eef": eef_name, "source_a": primary, "mixed": False,
+                              "identity_reason": f"{INVALID_SCENE}: {read.error}"}
+            return eef, targets, unchanged
         segments, object_poses = [], []
         for i, info in enumerate(infos):
             start, end = (int(v) for v in bounds[i, subtask_ind])
@@ -455,7 +441,7 @@ class IsaacLabRuntime:
         context = MixContext(subtask_ind=subtask_ind, primary=primary, primary_eef_start=_np(eef[0]),
                              primary_targets=_np(targets), primary_gripper=_np(grippers), src_object_poses=object_poses,
                              src_segments=segments, num_sources=len(infos), has_reference_object=object_name is not None,
-                             rng=np.random.default_rng(0), extra=scene.mix_extra())
+                             rng=np.random.default_rng(0), scene=read.scene)
         mixed = self.method.mixer.mix(context)
         self._last_mix = mixed.record
         if not mixed.record.get("mixed"):
@@ -475,19 +461,13 @@ class IsaacLabRuntime:
         object_pose = local_vars.get("subtask_object_pose")
         interpolation, fixed, noise = self.subtask_settings(generator, local_vars, eef_name, subtask_ind)
         fields = {"cur_obj_pose": _np(object_pose) if object_pose is not None else None}
-        try:
-            fields.update(self.subtask_scene(generator, local_vars).record(selected))
-            fields["term_signal"] = self.subtask_term_signal(generator, local_vars, eef_name, subtask_ind)
-        except Exception as error:                     # never stop a run without a mixer over a record field
-            if self.method.mixer is not None:
-                raise
-            fields["scene_error"] = f"{type(error).__name__}: {error}"
-            self._scene_errors += 1
-            if not self._warned_scene:
-                self._warned_scene = True
-                print(f"[tmg] WARNING subtask {eef_name}/{subtask_ind}: scene not recorded ({fields['scene_error']}); "
-                      f"tmg fit_coefficients will refuse these records", flush=True)
-        self._scene = None
+        read = self.read_subtask(generator, local_vars)
+        if read.scene is not None:
+            fields.update(read.scene.record(selected))
+        fields["term_signal"] = read.term_signal
+        if read.error is not None:
+            fields["scene_error"] = read.error
+        self._read = None
         self._carried[eef_name] = (object_name, bool(local_vars.get("subtask_object_soft", False)))
         self.rec.add_subtask(subtask_ind=subtask_ind, eef=eef_name, object_name=object_name,
                              start_step=len(self.rec.w_pos),          # steps executed before this subtask was built
@@ -624,14 +604,18 @@ def install(package: str, runtime: IsaacLabRuntime, graft_hashes: dict) -> dict:
     return {"generate": gen.edits, runtime.builder_name: builder.edits, "execute": exe.edits}
 
 
+def held_rule_of(spec: dict) -> HeldRule | None:
+    """The hold rule of a chunk spec (``scene_reading.held_rule``, from the generator config), None when it has none."""
+    return HeldRule.from_mapping((spec.get("scene_reading") or {}).get("held_rule"))
+
+
 def install_from_spec(spec: dict, namespace: dict | None = None) -> dict:
     """Entry used by the chunk entrypoint: build the runtime from the chunk spec and install the grafts. ``namespace`` (the
     official script's globals) is not needed here."""
     from tmg.generation.method import build_method
 
-    chunk_seed = int(spec["chunk"]["seed"])
-    method = build_method(spec["method"], chunk_seed=chunk_seed)
     layout = IsaacLabLayout.from_spec(spec["extra"]["layout"])
-    runtime = runtime_class(bool(spec["extra"]["soft"]))(method, layout, Path(spec["records_dir"]))
+    method = build_method(spec["method"], chunk_seed=int(spec["chunk"]["seed"]), arms=layout.eefs)
+    runtime = runtime_class(bool(spec["extra"]["soft"]))(method, layout, Path(spec["records_dir"]), held_rule=held_rule_of(spec))
     info = install(spec["extra"]["package"], runtime, dict(spec["extra"].get("graft_hashes") or {}))
     return info

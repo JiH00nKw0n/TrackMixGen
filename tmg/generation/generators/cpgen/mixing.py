@@ -51,8 +51,8 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 
 from tmg.generation.method.event_mix import events, mix_many
+from tmg.generation.method.interfaces import SubtaskScene
 from tmg.generation.method.skillmix import gripper_flip, pose_distance, symmetry_label, symmetry_score
-from tmg.generation.method.success_model import in_hand, inhand_features, scene_features
 
 
 def reference_object(constraint) -> str:
@@ -89,39 +89,40 @@ def quat_key(d) -> str:
     return "robot0_eef_quat_site" if "robot0_eef_quat_site" in d else "robot0_eef_quat"
 
 
-def features(constraints: list, obs: dict, carried: str | None):
-    """``(scene (J,3), inhand (J,2) or None)`` of every source for one constraint (module docstring, step 1). ``carried``
-    is the previous constraint's reference object (None for the first constraint)."""
+def subtask_scene(constraints: list, idx: int, obs: dict, carried: str | None) -> SubtaskScene:
+    """The ``SubtaskScene`` of constraint ``idx`` (module docstring, step 1): the reference object now and in every source
+    at its window start, and the previous constraint's reference object ``carried`` (None for the first constraint) with
+    the end effector, now and in every source. A carried pose that the observation or a source's constraint data does not
+    have stays None (in-hand features 0, in the mixing and in the fit alike)."""
     ref = reference_object(constraints[0])
     current = np.asarray(obs[f"{ref}_pose"], dtype=float)
-    scene = np.array([scene_features(current, np.asarray(c.src_obj_pose[ref], dtype=float)[0]) for c in constraints])
+    scene = SubtaskScene(subtask=int(idx), reference_object=ref, current_object_pose=current,
+                         source_object_poses=[np.asarray(c.src_obj_pose[ref], dtype=float)[0] for c in constraints])
     if carried is None:
-        return scene, None
+        return scene
+    scene.carried_object = carried
+    scene.source_eef_poses, scene.source_carried_poses = [None] * len(constraints), [None] * len(constraints)
     if f"{carried}_pose" not in obs:
-        return scene, np.zeros((len(constraints), 2))
-    now = in_hand(site_pose(obs["robot0_eef_pos"], obs[quat_key(obs)]), np.asarray(obs[f"{carried}_pose"], dtype=float))
-    rows = []
-    for c in constraints:
+        return scene
+    scene.eef_pose = site_pose(obs["robot0_eef_pos"], obs[quat_key(obs)])
+    scene.carried_pose = np.asarray(obs[f"{carried}_pose"], dtype=float)
+    for j, c in enumerate(constraints):
         src_obs = getattr(c, "src_obs", None) or {}
         src_obj = getattr(c, "src_obj_pose", None) or {}
         if carried not in src_obj or "robot0_eef_pos" not in src_obs:
-            rows.append(np.zeros(2))          # the fit used 0 where the source pose of the carried object is unknown
-            continue
-        src = in_hand(site_pose(np.asarray(src_obs["robot0_eef_pos"])[0], np.asarray(src_obs[quat_key(src_obs)])[0]),
-                      np.asarray(src_obj[carried], dtype=float)[0])
-        rows.append(inhand_features(now, src))
-    return scene, np.array(rows)
+            continue                              # the fit used 0 where the source pose of the carried object is unknown
+        scene.source_eef_poses[j] = site_pose(np.asarray(src_obs["robot0_eef_pos"])[0], np.asarray(src_obs[quat_key(src_obs)])[0])
+        scene.source_carried_poses[j] = np.asarray(src_obj[carried], dtype=float)[0]
+    return scene
 
 
 def decide(mixer, sequences: list, idx: int, primary: int, obs: dict, carried: str | None) -> tuple[dict, np.ndarray]:
-    """Features and weights of constraint ``idx`` (module docstring, steps 1 and 2) under ``mixer`` (a ``SkillMixer``):
+    """Scene and weights of constraint ``idx`` (module docstring, steps 1 and 2) under ``mixer`` (a ``SkillMixer``):
     ``(record, weights (J,))``."""
     constraints = [seq[idx] for seq in sequences]
-    scene, inhand = features(constraints, obs, carried)
-    if inhand is None and idx >= 1:
-        inhand = np.zeros((len(constraints), 2))     # from the second constraint on the in-hand features are recorded (0)
+    scene = subtask_scene(constraints, idx, obs, carried)
     series = [gripper_series(c)[:, 0] for c in constraints]
-    weights, decided = mixer.decide(idx, primary, scene, inhand, series)
+    weights, decided = mixer.decide(scene, primary, series)
     return {"subtask": int(idx), "source_a": int(primary), **decided, "carried_object": carried}, weights
 
 

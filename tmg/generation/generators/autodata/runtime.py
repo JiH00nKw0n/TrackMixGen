@@ -51,6 +51,7 @@ from tmg.generation.generators.isaaclab.runtime import (
     IsaacLabRuntime,
     _np,
     graft_builder,
+    held_rule_of,
 )
 from tmg.generation.graft import Graft
 from tmg.generation.simulators.isaaclab import measured_eef_poses
@@ -88,8 +89,9 @@ class AutoDataRuntime(IsaacLabRuntime):
     hand_var = "src_subtask_passthrough_actions"
     boundary_var = "selected_boundary"
 
-    def __init__(self, method, layout: IsaacLabLayout, records_dir: Path | None, cameras=(), image_size=None):
-        super().__init__(method, layout, records_dir)
+    def __init__(self, method, layout: IsaacLabLayout, records_dir: Path | None, cameras=(), image_size=None, held_rule=None):
+        super().__init__(method, layout, records_dir, held_rule=held_rule)
+        self._said_no_terms = False
         self.cameras = [str(c) for c in (cameras or [])]
         self.image_size = tuple(int(v) for v in image_size) if image_size else None
         self._frames: dict[str, list[np.ndarray]] = {}
@@ -184,10 +186,10 @@ class AutoDataRuntime(IsaacLabRuntime):
         if obs is None:
             terms = subtask_terms(env, env_id)
             obs = {"subtask_terms": terms} if terms else None
-            if not terms and not getattr(self, "_said_no_terms", False):
+            if not terms and not self._said_no_terms:
                 self._said_no_terms = True
                 print("[tmg] the environment publishes no subtask_terms observation group: the records carry no per-step "
-                      "subtask signals (generator.per_step_subtask_signals)", flush=True)
+                      "subtask signals (task.fit.reached)", flush=True)
         super().record_step(multi_waypoint, env, env_id, obs, success)
 
     def record_command(self, multi_waypoint, datastream, env_id: int, play_action) -> None:
@@ -247,9 +249,9 @@ def install_from_spec(spec: dict, namespace: dict | None = None) -> dict:
 
         namespace["setup_async_generation"] = setup_async_generation
 
-    chunk_seed = int(spec["chunk"]["seed"])
-    method = build_method(spec["method"], chunk_seed=chunk_seed)
-    runtime = AutoDataRuntime(method, IsaacLabLayout.from_spec(spec["extra"]["layout"]), records_dir=Path(spec["records_dir"]),
+    layout = IsaacLabLayout.from_spec(spec["extra"]["layout"])
+    method = build_method(spec["method"], chunk_seed=int(spec["chunk"]["seed"]), arms=layout.eefs)
+    runtime = AutoDataRuntime(method, layout, records_dir=Path(spec["records_dir"]), held_rule=held_rule_of(spec),
                               cameras=spec["extra"]["cameras"] if "cameras" in spec["extra"] else (spec["task"].get("cameras") or []),
                               image_size=spec["extra"].get("image_size") or spec["task"].get("image_size"))
     info = install(runtime, dict(spec["extra"].get("graft_hashes") or {}))

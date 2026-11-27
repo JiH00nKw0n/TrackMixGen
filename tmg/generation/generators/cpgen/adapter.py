@@ -31,6 +31,8 @@ from tmg.core.records import ATTEMPTS_JSONL, RECORDS_DIR
 from tmg.generation.base import ChunkSpec
 from tmg.generation.generators._shared import count_hdf5_demos, records_summary
 from tmg.generation.generators.robosuite_base import RobosuiteGenerator
+from tmg.generation.method.fit_layout import FitLayout
+from tmg.generation.method.interfaces import Arms
 
 ENTRYPOINT = "tmg.generation.generators.cpgen.entrypoint"
 GENERATED_OBS = "generated_obs.hdf5"
@@ -128,6 +130,11 @@ class CPGenGenerator(RobosuiteGenerator):
         from tmg.generation.generators.cpgen.noisy_replay import replay_selection
 
         return replay_selection(chosen, pool=Path(pool), output=Path(output), cfg=cfg, observation=observation)
+
+    def fit_layout(self) -> FitLayout:
+        """One arm; CP-Gen stops an attempt at its first failed constraint, so an attempt reached a subtask when it went on
+        to it; the selected source's poses are in the records."""
+        return FitLayout(arms=Arms(), reached="stops_at_failure", source_poses="records")
 
     def demo_layout(self) -> dict:
         return {"demo_glob": GENERATED_OBS, "image_key": "{cam}_image", "actions_key": "actions", "states_key": "states",

@@ -18,6 +18,14 @@ first), ``launcher_args`` (the script's own options), ``generator_args`` (``extr
 config) and ``provider_args`` (options after ``--``); ``task_extra`` and ``generator_config_text`` fill the spec. The AutoData
 adapter overrides the hooks only.
 
+``chunk_result`` also checks what the SkillMix fit and the mixing need of the records, so that a problem shows at the first
+chunk: the share of attempts whose subtask scene could not be read (``scene_reading.max_error_rate`` of the generator
+config) and the sanity report of the fit layout (``fit_records.sanity_report``: successful attempts that count as not
+having reached a subtask, how often the carried object is held, how often a mix record left the segment unmixed). Both
+are written into the chunk result. In a pool that needs the scenes (``needs_subtask_scenes``: ``generation.purpose:
+calibration`` or a mixing method) a share above the limit or a sanity error fails the chunk and stops the pool; any other
+pool keeps its chunk and warns.
+
 Success is never computed by tmg: the grafts read the official ``success`` value inside ``MultiWaypoint.execute``.
 SoftMimicGen's rope term fixes the rope end nodes at its first call of an episode, so calling it at reset (before the
 first action) would change the verdict; see ``docs/GENERATORS.md`` and ``task.success_term``.
@@ -33,27 +41,46 @@ import h5py
 from tmg.core.chunks import Chunk
 from tmg.core.records import ATTEMPTS_JSONL, RECORDS_DIR, read_attempts, validate_records
 from tmg.generation.base import ChunkSpec, SyntheticDataGenerator
+from tmg.generation.method.fit_layout import FitLayout, SanityLimits
+from tmg.generation.method.fit_records import Attempts, has_scene_error, print_sanity, sanity_report, scene_errors
+from tmg.generation.method.interfaces import Arms, HeldRule
+from tmg.generation.method.success_model import FEATURES, HELD_FEATURES
 from tmg.generation.simulators.isaaclab import validate_isaaclab_scene
 from tmg.generation.simulators.scenes import load_scene_file
 
 ENTRYPOINT = "tmg.generation.generators.isaaclab.entrypoint"
 GENERATED = "generated.hdf5"
-CALIBRATION_POOLS = ("pool_unmix", "pool_randmix")   # generation.name of the pools tmg fit_coefficients reads
-
-
-def scene_errors(records) -> list[str]:
-    """``attempt eef/k: error`` of every subtask record whose scene could not be read (``isaaclab.runtime``)."""
-    return [f"attempt {r.get('attempt')} {s.get('eef')}/{s.get('subtask_ind')}: {s['scene_error']}"
-            for r in records for s in r.get("subtasks") or [] if s.get("scene_error")]
 
 
 class IsaacLabGenerator(SyntheticDataGenerator):
     """Common part of the Isaac Lab adapters (SoftMimicGen here, the AutoData stack in ``..autodata.adapter``)."""
 
-    simulator = "isaaclab"
     package = ""                       # official datagen package, e.g. "isaaclab_mimic.datagen"
     soft_objects = False               # trajectory builder is Soft's ``generate_trajectory``
     runtime_module: str | None = None  # module whose ``install_from_spec`` grafts the package (None: the Isaac Lab runtime)
+    default_reached = "term_window"    # reached rule of the fit layout unless the task declares another (task.fit.reached)
+
+    # scene reading and the fit layout -------------------------------------------------------------------
+    def scene_reading(self) -> dict:
+        """``generator.scene_reading``: ``held_rule`` (the hold test of the runtime), ``unversioned_held_rule`` (the rule of
+        records without a record version) and ``max_error_rate`` (the share of a chunk's attempts whose scene may fail to
+        read)."""
+        return dict(self.generator_cfg.get("scene_reading") or {})
+
+    def held_rule(self) -> HeldRule | None:
+        return HeldRule.from_mapping(self.scene_reading().get("held_rule"))
+
+    def fit_layout(self) -> FitLayout:
+        """The arms of the generator config (``eefs``, the ones the runtime builds the mixer with); the selected source's
+        poses are in the records; the reached rule is the task's ``fit.reached`` (declared for a task whose environment
+        publishes no per-step subtask signals) or ``default_reached``; with a hold rule the features include the hold
+        mismatch."""
+        reading = self.scene_reading()
+        fit = dict(self.task.get("fit") or {})
+        return FitLayout(arms=Arms.of(self.generator_cfg["eefs"]), reached=str(fit.get("reached") or self.default_reached),
+                         source_poses="records", features=HELD_FEATURES if self.held_rule() is not None else FEATURES,
+                         unversioned_held_rule=HeldRule.from_mapping(reading.get("unversioned_held_rule")),
+                         sanity=SanityLimits.from_mapping(self.generator_cfg.get("fit")))
 
     def scene_dict(self) -> dict:
         """The scene config of this generator (ranges per reset event), validated."""
@@ -95,7 +122,8 @@ class IsaacLabGenerator(SyntheticDataGenerator):
             chunk={"index": chunk.index, "seed": chunk.seed, "attempts": chunk.attempts}, generator=self.generator_cfg["name"],
             task=self.task, scene=self.scene_dict(), method=self.method,
             protocol=self.protocol, generator_config=self.generator_config_text(inputs), folder=str(folder),
-            records_dir=str(folder / RECORDS_DIR), expected_outputs=[str(folder / RECORDS_DIR / ATTEMPTS_JSONL)], extra=extra)
+            records_dir=str(folder / RECORDS_DIR), expected_outputs=[str(folder / RECORDS_DIR / ATTEMPTS_JSONL)], extra=extra,
+            scene_reading={"held_rule": None if self.held_rule() is None else self.held_rule().as_dict()})
         (folder / "chunk_args.json").write_text(json.dumps(args, indent=1))
         return spec
 
@@ -159,17 +187,36 @@ class IsaacLabGenerator(SyntheticDataGenerator):
         successes = sum(1 for r in records if r.get("success"))
         result = {"attempts": len(records), "successes": successes, "exported_episodes": exported,
                   "generated_hdf5": str(generated) if generated.exists() else None}
-        errors = scene_errors(records)
-        if errors:
-            # the SkillMix fit refuses such records: a calibration pool fails the chunk and stops the pool at once, any
-            # other pool (the baseline) keeps its chunk and says so loudly
-            result["scene_errors"] = len(errors)
-            print(f"[tmg] WARNING chunk {folder.name}: {len(errors)} subtask records without their scene, e.g. {errors[0]}",
-                  flush=True)
-            if str(self.generation.get("name")) in CALIBRATION_POOLS:
-                result.update(error=f"{len(errors)} subtask records without their scene (scene_error), e.g. {errors[0]}; "
-                                    f"the SkillMix fit cannot use this calibration pool", stop_pool=True)
+        result.update(self.records_check(records, folder))
         return result
+
+    def records_check(self, records: list, folder: Path) -> dict:
+        """What the fit and the mixing need of a chunk's records (module docstring): ``scene_errors``, ``invalid_attempts``
+        and ``sanity`` for the chunk result, with ``error`` and ``stop_pool`` when the pool needs the scenes and the
+        records fail."""
+        out, problems = {}, []
+        without_scene = sum(1 for r in records if has_scene_error(r))
+        if without_scene:
+            limit = self.scene_reading().get("max_error_rate")
+            rate = without_scene / max(len(records), 1)
+            examples = scene_errors(records)
+            out.update(scene_errors=len(examples), attempts_without_scene=without_scene,
+                       invalid_attempts=sum(1 for r in records if r.get("invalid")))
+            print(f"[tmg] WARNING chunk {folder.name}: {without_scene} of {len(records)} attempts without the scene of a "
+                  f"subtask, e.g. {examples[0] if examples else 'marked invalid'}", flush=True)
+            if limit is not None and rate > float(limit):
+                problems.append(f"{without_scene} of {len(records)} attempts without the scene of a subtask "
+                                f"({100 * rate:.0f} % > scene_reading.max_error_rate {100 * float(limit):.0f} %), e.g. "
+                                f"{examples[0] if examples else 'marked invalid'}")
+        records_dir = folder / RECORDS_DIR
+        sanity = sanity_report(Attempts(list(records), [records_dir] * len(records), [0] * len(records)), self.fit_layout(), self.task)
+        print_sanity(sanity, f"chunk {folder.name}")
+        out["sanity"] = sanity
+        problems += sanity["errors"]
+        if problems and self.needs_subtask_scenes():
+            # every chunk would repeat it: fail the chunk and stop the pool at once instead of days later at the fit
+            out.update(error="; ".join(problems) + ": the SkillMix fit and mixing cannot use this pool", stop_pool=True)
+        return out
 
     def demo_layout(self) -> dict:
         """How ``tmg dataset`` reads this generator's chunk outputs (see ``tmg.data.dataset.DemoLayout``)."""

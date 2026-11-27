@@ -10,5 +10,6 @@ defaults:
 # Chunks of 50 attempts, or the generator's `fit_pool_chunk` (CP-Gen: 25), as on the server. Replaces rank_human_demos
 # (3,000 attempts, chunks of 250), whose source ranking was removed.
 name: pool_unmix
+purpose: calibration   # these pools exist for the fit: an Isaac Lab chunk whose records the fit could not use fails and stops the pool
 attempts: 2000
 chunk: ${oc.select:generator.fit_pool_chunk,50}

@@ -36,14 +36,29 @@ measure_links: {left: left_hand_pitch_link, right: right_hand_pitch_link}
 # randn_like draws of AutoData's target_eef_pose_to_action per step, in order: left pos, left quat, right pos, right quat;
 # a hand whose noise scale is zero at that step draws nothing (the tracking loop's noise ledger tolerates fewer draws)
 noise_draw_shapes: [3, 4, 3, 4]
-# Per-step subtask completion (2026-11-27, read in the isaaclab-dex image): AutoData reads it from the environment's
-# subtask_terms observation group (Datastream.get_subtask_term_signals, used by its automatic annotation), and neither the
-# Arena environments (Microwave Opening, Bottle Placement and Door Closing: their tasks define the Mimic subtask configs
-# and the term-signal names, no subtask_terms group) nor Isaac Lab Mimic's GR1T2 Pick Place env (no
-# get_subtask_term_signals) publish one; the released datasets carry annotated signals. Generation never checks a subtask
-# end online: each subtask runs the selected source's annotated segment, and only the task success is evaluated.
-# tmg fit_coefficients therefore counts every recorded subtask of these tasks as reached (label: task success).
-per_step_subtask_signals: false
+# How the runtime reads a subtask's scene for the records and SkillMix (tmg/generation/generators/isaaclab/runtime.py).
+# held_rule: a hand counts as holding the previous subtask's reference object when the object's origin is within rigid_m
+#   of the end effector (rigid object) or its nearest simulation node within nodes_m (deformable). A grasp leaves the
+#   object at the hand (Rope: 2 to 7 mm to the nearest node); a hand that only reached, pushed or supported the object is
+#   0.4 to 1.3 m away (GR1 Bottle Placement pilot, 2026-11-27). The rule is written into every record and into the rule
+#   file, and the mixer refuses a rule file fitted with another one. Change the values only together with `version`.
+# unversioned_held_rule: the rule of records without a record_version (made by the code up to commit 2fcfc0d, 2026-11-27,
+#   where these two distances were constants and were not recorded); tmg fit_coefficients reads such records with it.
+# max_error_rate: the largest share of a chunk's attempts whose subtask scene may fail to read (e.g. a towel folded so far
+#   that its nodal frame has no yaw) before a calibration or mixing pool fails the chunk and stops.
+# Not part of a chunk's identity (ChunkSpec.scene_reading): it changes no unmixed demonstration.
+scene_reading:
+  held_rule: {version: 1, rigid_m: 0.20, nodes_m: 0.10}
+  unversioned_held_rule: {version: 1, rigid_m: 0.20, nodes_m: 0.10}
+  max_error_rate: 0.1
+# Sanity limits of tmg fit_coefficients and of every chunk result (tmg/generation/method/fit_records.py sanity_report): a
+# successful attempt completed every subtask, so when more than this share of a block's successful attempts (of at least
+# min_successes) counts as not having reached it, the reached rule misreads the records and the fit (or the pool) stops.
+# Which reached rule a task uses is the task's own fit.reached (default term_window; task_success where the environment
+# publishes no per-step subtask signal).
+fit:
+  max_unreached_success_rate: 0.2
+  min_successes: 10
 method_overrides:
   skillmix: &closure_events        # the mixer aligns segments by the hands' closure events (a hand's 11 commands:
     mixing: {gripper_events: {type: closure, columns: [0, 1, 2, 3]}}   # proximal index, middle, pinky, ring first)

@@ -10,6 +10,8 @@ from tmg.generation.base import ChunkSpec
 from tmg.generation.generators._shared import count_hdf5_demos, records_summary
 from tmg.generation.generators.mimicgen import config_builder
 from tmg.generation.generators.robosuite_base import RobosuiteGenerator
+from tmg.generation.method.fit_layout import FitLayout
+from tmg.generation.method.interfaces import Arms
 
 __all__ = ["ENTRYPOINT", "IMPORTANT_STATS", "MG_CONFIG", "MimicGenGenerator", "RobosuiteGenerator"]
 
@@ -78,6 +80,11 @@ class MimicGenGenerator(RobosuiteGenerator):
             expected_outputs=[str(folder / experiment / IMPORTANT_STATS), str(folder / RECORDS_DIR / ATTEMPTS_JSONL)],
             extra={"env_name": env_name, "experiment": experiment, "graft_hashes": self.graft_hashes(),
                    "commit": self.generator_cfg.get("commit")})
+
+    def fit_layout(self) -> FitLayout:
+        """One arm; an attempt reached a subtask when the per-step termination signals of the earlier subtasks fired
+        (``task.subtask_term_signals``); the sources' in-hand poses come from the source file's ``datagen_info``."""
+        return FitLayout(arms=Arms(), reached="step_signals", source_poses="datagen_info")
 
     def demo_layout(self) -> dict:
         """How ``tmg dataset`` reads MimicGen chunk outputs (``<experiment>/demo.hdf5``, robomimic layout)."""

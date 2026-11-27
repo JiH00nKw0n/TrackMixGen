@@ -30,7 +30,7 @@ from tmg.core.records import AttemptRecorder
 from tmg.generation.execution import TrajectoryExecution, WaypointView
 from tmg.generation.generators._shared import record_error_guard
 from tmg.generation.graft import Graft, Installed, install_grafts
-from tmg.generation.method.interfaces import Method, MixContext
+from tmg.generation.method.interfaces import Method, MixContext, SubtaskScene
 from tmg.generation.simulators.robosuite import SCENE_META_ATTR
 
 EEF = "robot0"                      # MimicGen's robosuite tasks have one arm
@@ -65,23 +65,24 @@ class MimicGenRuntime:
         self._traj = None
         self._carried = None
 
-    def scene_extra(self, local_vars: dict, infos, all_inds, subtask_ind: int, object_name) -> dict:
-        """What SkillMix needs of the current scene: the reference object's pose the segment is moved to and,
-        from the second subtask on, the in-hand pose (the previous subtask's reference object in the end-effector frame)
-        now and in every source at the start of its segment. The same quantities as the attempt record's ``cur_obj_pose``,
-        ``eef_pose`` and ``objects`` (``tmg fit_coefficients`` reads those)."""
-        from tmg.generation.method.success_model import in_hand
+    def subtask_scene(self, local_vars: dict, infos, all_inds, subtask_ind: int, object_name, object_poses: list) -> SubtaskScene:
+        """What SkillMix scores of the current scene: the reference object's pose the segment is moved to and in every
+        source and, from the second subtask on, the end-effector pose and the pose of the previous subtask's reference
+        object (the in-hand pose) now and in every source at the start of its segment. The same quantities as the
+        attempt record's ``cur_obj_pose``, ``eef_pose`` and ``objects`` (``tmg fit_coefficients`` reads those)."""
         current = local_vars.get("cur_object_pose")
-        extra = {"current_object_pose": None if current is None else np.array(current), "reference_object": object_name}
+        scene = SubtaskScene(subtask=subtask_ind, reference_object=object_name,
+                             current_object_pose=None if current is None else np.array(current),
+                             source_object_poses=object_poses)
         carried = self._carried
         if carried is not None:
             cur = local_vars["cur_datagen_info"]
-            extra["carried_object"] = carried
-            extra["current_in_hand"] = in_hand(np.array(cur.eef_pose), np.array(cur.object_poses[carried]))
-            extra["source_in_hand"] = [in_hand(np.array(info.eef_pose[int(all_inds[i, subtask_ind][0])]),
-                                               np.array(info.object_poses[carried][int(all_inds[i, subtask_ind][0])]))
-                                       for i, info in enumerate(infos)]
-        return extra
+            starts = [int(all_inds[i, subtask_ind][0]) for i in range(len(infos))]
+            scene.carried_object = carried
+            scene.eef_pose, scene.carried_pose = np.array(cur.eef_pose), np.array(cur.object_poses[carried])
+            scene.source_eef_poses = [np.array(info.eef_pose[t]) for info, t in zip(infos, starts)]
+            scene.source_carried_poses = [np.array(info.object_poses[carried][t]) for info, t in zip(infos, starts)]
+        return scene
 
     def mix_segment(self, generator, local_vars: dict):
         """Grafted after the source segment is extracted: return the (possibly mixed) first eef pose array,
@@ -103,13 +104,13 @@ class MimicGenRuntime:
             segments.append((np.array(info.eef_pose[start]), np.array(info.target_pose[start:end]),
                              np.array(info.gripper_action[start:end])))
             object_poses.append(None if object_name is None else np.array(info.object_poses[object_name][start]))
-        extra = self.scene_extra(local_vars, infos, all_inds, subtask_ind, object_name)
+        scene = self.subtask_scene(local_vars, infos, all_inds, subtask_ind, object_name, object_poses)
         self._carried = object_name
         context = MixContext(
             subtask_ind=subtask_ind, primary=int(local_vars["selected_src_demo_ind"]),
             primary_eef_start=np.array(eef[0]), primary_targets=np.array(targets), primary_gripper=np.array(grippers),
             src_object_poses=object_poses, src_segments=segments, num_sources=len(infos),
-            has_reference_object=object_name is not None, rng=np.random.default_rng(0), extra=extra)
+            has_reference_object=object_name is not None, rng=np.random.default_rng(0), scene=scene)
         mixed = self.method.mixer.mix(context)
         self._last_mix = mixed.record
         if not mixed.record.get("mixed"):
