@@ -219,6 +219,7 @@ def install(runtime: AutoDataRuntime, graft_hashes: dict) -> dict:
     dg = importlib.import_module("autodata_core.data_generator")
     wp = importlib.import_module("autodata_core.waypoint")
     DataGenerator, MultiWaypoint = dg.DataGenerator, wp.MultiWaypoint
+    runtime.bind_official(DataGenerator)
     gen = Graft(DataGenerator.generate, expected_hash=graft_hashes.get("generate"), label="DataGenerator.generate")
     gen.insert_after_assign("initial_state", "_tmg.begin_attempt(self, env_id, success_term)")
     gen.insert_before_return('_tmg.end_attempt(self, env_id, {"success": False})', occurrence=0, expected_returns=2)

@@ -249,7 +249,7 @@ def test_mix_segment_registers_donor_segments_into_the_primary_rope(torch, monke
     """Soft objects: donors go through the official nodal registration, the primary does not, object frames are identity."""
     calls = []
 
-    def register(*, tgt_obj_nodal_pos, src_eef_poses, src_obj_nodal_pos, use_rotation_transform, bend_coef, rot_coef):
+    def register(*, tgt_obj_nodal_pos, src_eef_poses, src_obj_nodal_pos, use_rotation_transform=None, bend_coef=None, rot_coef=None):
         calls.append((float(tgt_obj_nodal_pos.a[0, 0]), float(src_obj_nodal_pos.a[0, 0]), use_rotation_transform, bend_coef, rot_coef))
         return T(src_eef_poses.a + 1000)
 
@@ -257,9 +257,10 @@ def test_mix_segment_registers_donor_segments_into_the_primary_rope(torch, monke
     infos = [rope_info(6, 0), rope_info(6, 10), rope_info(6, 20)]
     mixer = RecordingMixer()
     rt = make_runtime(Method0(mixer))
+    rt.registration_kwargs = {"use_rotation_transform": True, "bend_coef": 0.2, "rot_coef": 5e-3}    # as read from the official call
     rt.mix_segment(soft_generator(infos), soft_locals(infos, primary=1, soft=True))
     ctx = mixer.contexts[0]
-    assert [c[2:] for c in calls] == [(True, 0.1, 1e-3)] * 2 and calls[0][0] == calls[1][0] == float(infos[1].object_nodal_positions["rope"].a[0, 0, 0])
+    assert [c[2:] for c in calls] == [(True, 0.2, 5e-3)] * 2 and calls[0][0] == calls[1][0] == float(infos[1].object_nodal_positions["rope"].a[0, 0, 0])
     assert ctx.scene.eef == "robot0" and ctx.scene.reference_object == "rope" and ctx.scene.object_frame["version"] == "nodal_yaw_v1"
     assert all(np.array_equal(p, np.eye(4)) for p in ctx.src_object_poses)          # blending frames: the world after registration
     assert ctx.src_segments[0][1][0, 0, 3] == 1000.5 and ctx.src_segments[1][1][0, 0, 3] == 10.5 and ctx.src_segments[2][1][0, 0, 3] == 1020.5
@@ -271,6 +272,35 @@ def test_mix_segment_registers_donor_segments_into_the_primary_rope(torch, monke
     for j, info in enumerate(infos):
         np.testing.assert_allclose(ctx.scene.source_object_poses[j], nodal_frame(info.object_nodal_positions["rope"].a[0], ref))
     np.testing.assert_allclose(ctx.scene.current_object_pose, nodal_frame(infos[1].object_nodal_positions["rope"].a[0], ref))
+
+
+def test_the_registration_settings_are_read_from_the_official_builders_own_call(torch, monkeypatch):
+    """The official builder registers the selected source with literal coefficients in its own call; the donors are
+    registered with the same ones, read from that call, not with numbers of ours. Before the official class is bound (or
+    for a keyword that is not a literal there) the official function's own defaults apply."""
+    from tmg.generation.generators.isaaclab import runtime as rt
+
+    class DataGenerator:
+        def generate_trajectory(self, tgt, src, nodes, how):
+            transformed = transform_source_data_segment_using_nodal_registration(   # noqa: F821  the official call's shape
+                tgt_obj_nodal_pos=tgt, src_eef_poses=src, src_obj_nodal_pos=nodes, use_rotation_transform=True, bend_coef=0.1,
+                rot_coef=1e-3)
+            return transformed
+
+    assert rt.constant_call_keywords(DataGenerator.generate_trajectory, "transform_source_data_segment_using_nodal_registration") == {
+        "use_rotation_transform": True, "bend_coef": 0.1, "rot_coef": 1e-3}
+    runtime = make_runtime(Method0(None))
+    assert runtime.registration_kwargs == {}
+    runtime.bind_official(DataGenerator)
+    assert runtime.registration_kwargs == {"use_rotation_transform": True, "bend_coef": 0.1, "rot_coef": 1e-3}
+
+    class Other:
+        def generate_trajectory(self):
+            return 1
+
+    with pytest.raises(RuntimeError, match="expected one call"):
+        runtime.bind_official(Other)
+    rt.IsaacLabRuntime(Method0(None), soft_layout(), None).bind_official(Other)       # a rigid-object runtime reads nothing
 
 
 def install_fake_registration(monkeypatch, register):
@@ -664,6 +694,9 @@ class DataGenerator:
         src_subtask_target_poses = 2
         src_subtask_gripper_actions = 3
         src_subtask_nodal_positions = 4
+        transformed_eef_poses = transform_source_data_segment_using_nodal_registration(
+            tgt_obj_nodal_pos=None, src_eef_poses=src_subtask_eef_poses, src_obj_nodal_pos=src_subtask_nodal_positions,
+            use_rotation_transform=True, bend_coef=0.1, rot_coef=1e-3)
         transformed_seq = WaypointSequence.from_poses(src_subtask_eef_poses, src_subtask_target_poses, src_subtask_gripper_actions)
         return transformed_seq
 '''
@@ -711,6 +744,7 @@ def test_install_grafts_the_soft_builder_at_its_class_level_anchors(tmp_path, mo
     assert info["execute"] == ["after 'play_action = ...': _tmg.record_command(self, env, env_id, state, play_action)",
                                "after 'success = ...': _tmg.record_step(self, env, env_id, obs, success)"]
     assert dg.DataGenerator.generate_trajectory.__globals__["_tmg"] is runtime and dg.DataGenerator.generate.__tmg_graft__["edits"] == info["generate"]
+    assert runtime.registration_kwargs == {"use_rotation_transform": True, "bend_coef": 0.1, "rot_coef": 1e-3}   # the official call's
     assert inspect.iscoroutinefunction(wp.MultiWaypoint.execute)
     with pytest.raises(Exception):      # noqa: B017  Isaac Lab Mimic's builder name does not exist in the Soft-shaped package
         rt.install("fakesoft", rt.IsaacLabRuntime(Method0(), soft_layout(), records_dir=None), {})

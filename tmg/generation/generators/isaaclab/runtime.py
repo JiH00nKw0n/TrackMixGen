@@ -247,6 +247,9 @@ class IsaacLabRuntime:
         """``(current pose, per-source poses, frame record)`` of a deformable reference object (SoftMimicGen only)."""
         raise NotImplementedError(f"{type(self).__name__}: no deformable objects")
 
+    def bind_official(self, DataGenerator) -> None:
+        """Read what the runtime takes from the official generator class itself (nothing here)."""
+
     def measured_poses(self, owner, env_id: int, eefs) -> dict:
         """Measured end-effector poses: the configured links (``measure_links``) or the environment's observed eef poses."""
         if self.layout.measure_links:
@@ -512,7 +515,8 @@ class SoftMimicGenRuntime(IsaacLabRuntime):
     """SoftMimicGen's builder is ``generate_trajectory`` with a nodal-position anchor; its rope is a soft object.
 
     For a soft object every donor segment (its start pose and its targets) is first registered into the primary's rope
-    geometry with the official nodal registration, after which the blending frame is the world frame. The sources are
+    geometry with the official nodal registration (with the settings of the official builder's own call,
+    ``registration_kwargs``), after which the blending frame is the world frame. The sources are
     scored with the nodal frame of ``tmg.generation.method.soft_frame`` (reference: source 0's first node cloud); the current
     nodes are the builder's ``subtask_nodal_positions``.
     """
@@ -520,6 +524,19 @@ class SoftMimicGenRuntime(IsaacLabRuntime):
     builder_name = "generate_trajectory"
     mix_anchor = "src_subtask_nodal_positions"
     current_nodes_var = "subtask_nodal_positions"        # the builder's local holding the reference object's nodes now
+    registration_function = "transform_source_data_segment_using_nodal_registration"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # the settings (bend_coef, rot_coef, use_rotation_transform) the official builder registers the selected source
+        # with, read from its own call (``bind_official``); empty before that: the official function's defaults
+        self.registration_kwargs: dict = {}
+
+    registration_data = ("tgt_obj_nodal_pos", "src_eef_poses", "src_obj_nodal_pos")   # the arguments source_segment passes itself
+
+    def bind_official(self, DataGenerator) -> None:
+        settings = constant_call_keywords(getattr(DataGenerator, self.builder_name), self.registration_function)
+        self.registration_kwargs = {k: v for k, v in settings.items() if k not in self.registration_data}
 
     def soft_object_poses(self, generator, local_vars: dict, infos, object_name: str, starts: list) -> tuple:
         from tmg.generation.method.soft_frame import (
@@ -559,9 +576,24 @@ class SoftMimicGenRuntime(IsaacLabRuntime):
             # put the blended first waypoint off the primary's rope
             joined = transform_source_data_segment_using_nodal_registration(
                 tgt_obj_nodal_pos=local_vars.get("src_subtask_nodal_positions"), src_eef_poses=torch.cat([eef_start, targets], dim=0),
-                src_obj_nodal_pos=nodal, use_rotation_transform=True, bend_coef=0.1, rot_coef=1e-3)
+                src_obj_nodal_pos=nodal, **self.registration_kwargs)
             eef_start, targets = joined[0:1], joined[1:]
         return _np(eef_start)[0], _np(targets), _np(self.source_hand(info, eef_name, start, end)), np.eye(4)
+
+
+def constant_call_keywords(function, callee: str) -> dict:
+    """The keyword arguments with literal values of the one call of ``callee`` in ``function``'s source (the official
+    builder's registration call: its coefficients are literals there, not configuration). Raises when the source has no
+    such call or more than one."""
+    import ast
+    import inspect
+    import textwrap
+
+    tree = ast.parse(textwrap.dedent(inspect.getsource(function)))
+    calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call) and getattr(n.func, "id", getattr(n.func, "attr", None)) == callee]
+    if len(calls) != 1:
+        raise RuntimeError(f"{getattr(function, '__qualname__', function)}: expected one call of {callee}, found {len(calls)}")
+    return {kw.arg: ast.literal_eval(kw.value) for kw in calls[0].keywords if kw.arg and isinstance(kw.value, ast.Constant)}
 
 
 def runtime_class(soft: bool) -> type[IsaacLabRuntime]:
@@ -591,6 +623,7 @@ def install(package: str, runtime: IsaacLabRuntime, graft_hashes: dict) -> dict:
     dg = importlib.import_module(f"{package}.data_generator")
     wp = importlib.import_module(f"{package}.waypoint")
     DataGenerator, MultiWaypoint = dg.DataGenerator, wp.MultiWaypoint
+    runtime.bind_official(DataGenerator)               # before the builder is replaced by its grafted copy
     gen = Graft(DataGenerator.generate, expected_hash=graft_hashes.get("generate"), label="DataGenerator.generate")
     gen.insert_after_assign("new_initial_state", "_tmg.begin_attempt(self, env_id)")
     gen.insert_before_final_return("_tmg.end_attempt(self, env_id, results)")
