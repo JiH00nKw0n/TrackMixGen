@@ -27,4 +27,4 @@ overrides: []
 write_config: true                # also write configs/experiment/generator/<generator>/coefficients/<task>.yaml
 min_attempts: 100                 # refuse to fit on fewer attempts (per kind of pool)
 # How the records are read is declared by the generator adapter (its fit layout) and, per task, by task.fit.reached
-# (tmg/generation/method/fit_layout.py); the sanity limits are the generator's fit block.
+# (tmg/generation/method/fit_layout.py); the limits of the records checks are the generator's record_checks block.

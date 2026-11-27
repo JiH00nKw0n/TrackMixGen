@@ -188,13 +188,18 @@ def soft_generator(infos, env=None):
 
 
 HELD_RULE = {"version": 1, "rigid_m": 0.20, "nodes_m": 0.10}       # scene_reading.held_rule of the generator configs
+# the literal settings of the official builder's registration call (SoftMimicGen c9d146ba, read 2026-11-27), which are also
+# the values the code of 2fcfc0d passed for the donors of the running Rope randmix pool
+OFFICIAL_REGISTRATION = {"use_rotation_transform": True, "bend_coef": 0.1, "rot_coef": 1e-3}
 
 
 def make_runtime(method, records_dir=None, held_rule=HELD_RULE):
     from tmg.generation.generators.isaaclab.runtime import SoftMimicGenRuntime
     from tmg.generation.method.interfaces import HeldRule
 
-    return SoftMimicGenRuntime(method, soft_layout(), records_dir=records_dir, held_rule=HeldRule.from_mapping(held_rule))
+    runtime = SoftMimicGenRuntime(method, soft_layout(), records_dir=records_dir, held_rule=HeldRule.from_mapping(held_rule))
+    runtime.registration_kwargs = dict(OFFICIAL_REGISTRATION)        # as bind_official reads them from the official builder
+    return runtime
 
 
 # mix_segment ------------------------------------------------------------------------------------------
@@ -204,7 +209,7 @@ def test_mix_segment_without_a_mixer_returns_the_inputs_untouched(torch):
     rt = make_runtime(Method0(mixer=None))
     out = rt.mix_segment(types.SimpleNamespace(src_demo_datagen_info_pool=types.SimpleNamespace(datagen_infos=infos)), local_vars)
     assert out[0] is local_vars["src_subtask_eef_poses"] and out[1] is local_vars["src_subtask_target_poses"]
-    assert out[2] is local_vars["src_subtask_gripper_actions"] and rt._last_mix is None
+    assert out[2] is local_vars["src_subtask_gripper_actions"] and rt.last_mix("robot0") is None
 
 
 def test_mix_segment_hands_the_mixer_every_source_and_repacks_the_mixed_segment(torch):
@@ -221,7 +226,7 @@ def test_mix_segment_hands_the_mixer_every_source_and_repacks_the_mixed_segment(
     np.testing.assert_array_equal(scene.current_object_pose, pose(105.0))
     np.testing.assert_array_equal(scene.source_object_poses, ctx.src_object_poses)     # a rigid object: the blending frames
     assert scene.held_rule.as_dict() == HELD_RULE and scene.object_frame is None
-    assert ctx.rng.random() == np.random.default_rng(0).random()                     # the mixer's stream is always default_rng(0)
+    assert not hasattr(ctx, "rng")                                  # the mixers draw from their own seeded streams only
     np.testing.assert_array_equal(ctx.primary_eef_start, pose(10))
     np.testing.assert_array_equal(ctx.primary_targets, infos[1].target_eef_pose["robot0"].a[0:4])
     np.testing.assert_array_equal(ctx.primary_gripper, np.full((4, 1), 10))
@@ -229,7 +234,7 @@ def test_mix_segment_hands_the_mixer_every_source_and_repacks_the_mixed_segment(
     np.testing.assert_array_equal(ctx.src_object_poses[0], pose(100))
     np.testing.assert_array_equal(ctx.src_object_poses[1], pose(110))
     np.testing.assert_array_equal(ctx.src_segments[1][2], np.full((4, 1), 10))
-    assert rt._last_mix == {"mixed": True, "donor": 1}
+    assert rt.last_mix("robot0") == {"mixed": True, "donor": 1}
     # the mixed start replaces the first eef pose, the rest of the eef poses are kept; targets and grippers are the mixer's
     np.testing.assert_array_equal(eef.a[0], np.eye(4) * 2)
     np.testing.assert_array_equal(eef.a[1:], infos[1].eef_pose["robot0"].a[1:4])
@@ -242,7 +247,7 @@ def test_mix_segment_keeps_the_primary_when_the_mixer_declines(torch):
     rt = make_runtime(Method0(RecordingMixer(mixed=False)))
     out = rt.mix_segment(soft_generator(infos), local_vars)
     assert out[0] is local_vars["src_subtask_eef_poses"] and out[2] is local_vars["src_subtask_gripper_actions"]
-    assert rt._last_mix == {"mixed": False, "donor": 1}
+    assert rt.last_mix("robot0") == {"mixed": False, "donor": 1}
 
 
 def test_mix_segment_registers_donor_segments_into_the_primary_rope(torch, monkeypatch):
@@ -260,6 +265,11 @@ def test_mix_segment_registers_donor_segments_into_the_primary_rope(torch, monke
     rt.registration_kwargs = {"use_rotation_transform": True, "bend_coef": 0.2, "rot_coef": 5e-3}    # as read from the official call
     rt.mix_segment(soft_generator(infos), soft_locals(infos, primary=1, soft=True))
     ctx = mixer.contexts[0]
+    assert rt.last_mix("robot0")["registration"] == rt.registration_kwargs      # recorded with the mix, for the chunk result
+    unbound = make_runtime(Method0(RecordingMixer()))
+    unbound.registration_kwargs = None                               # the official call was never read: no donor is registered
+    with pytest.raises(RuntimeError, match="were not read"):
+        unbound.mix_segment(soft_generator(infos), soft_locals(infos, primary=1, soft=True))
     assert [c[2:] for c in calls] == [(True, 0.2, 5e-3)] * 2 and calls[0][0] == calls[1][0] == float(infos[1].object_nodal_positions["rope"].a[0, 0, 0])
     assert ctx.scene.eef == "robot0" and ctx.scene.reference_object == "rope" and ctx.scene.object_frame["version"] == "nodal_yaw_v1"
     assert all(np.array_equal(p, np.eye(4)) for p in ctx.src_object_poses)          # blending frames: the world after registration
@@ -274,33 +284,66 @@ def test_mix_segment_registers_donor_segments_into_the_primary_rope(torch, monke
     np.testing.assert_allclose(ctx.scene.current_object_pose, nodal_frame(infos[1].object_nodal_positions["rope"].a[0], ref))
 
 
-def test_the_registration_settings_are_read_from_the_official_builders_own_call(torch, monkeypatch):
+def official_builder(call: str):
+    """A class whose ``generate_trajectory`` holds the registration call ``call`` (the official builder's shape)."""
+    import linecache
+
+    source = ("class DataGenerator:\n    def generate_trajectory(self, tgt, src, nodes, bend, kw):\n"
+              f"        transformed = {call}\n        return transformed\n")
+    name = f"<official {abs(hash(call))}>"
+    linecache.cache[name] = (len(source), None, source.splitlines(keepends=True), name)      # inspect.getsource reads it
+    namespace = {}
+    exec(compile(source, name, "exec"), namespace)
+    return namespace["DataGenerator"]
+
+
+REGISTER = "transform_source_data_segment_using_nodal_registration"
+DATA = "tgt_obj_nodal_pos=tgt, src_eef_poses=src, src_obj_nodal_pos=nodes"
+
+
+def test_the_registration_settings_are_read_from_the_official_builders_own_call(torch):
     """The official builder registers the selected source with literal coefficients in its own call; the donors are
-    registered with the same ones, read from that call, not with numbers of ours. Before the official class is bound (or
-    for a keyword that is not a literal there) the official function's own defaults apply."""
+    registered with the same ones, read from that call, not with numbers of ours. The call as it is at SoftMimicGen
+    c9d146ba gives exactly the values 2fcfc0d hard-coded for the donors (True, 0.1, 1e-3)."""
     from tmg.generation.generators.isaaclab import runtime as rt
 
-    class DataGenerator:
-        def generate_trajectory(self, tgt, src, nodes, how):
-            transformed = transform_source_data_segment_using_nodal_registration(   # noqa: F821  the official call's shape
-                tgt_obj_nodal_pos=tgt, src_eef_poses=src, src_obj_nodal_pos=nodes, use_rotation_transform=True, bend_coef=0.1,
-                rot_coef=1e-3)
-            return transformed
+    official = official_builder(f"{REGISTER}({DATA}, use_rotation_transform=True, bend_coef=0.1, rot_coef=1e-3)")
+    passed = rt.SoftMimicGenRuntime.registration_data
+    assert rt.literal_call_keywords(official.generate_trajectory, REGISTER, passed) == OFFICIAL_REGISTRATION
+    runtime = rt.SoftMimicGenRuntime(Method0(None), soft_layout(), None)
+    assert runtime.registration_kwargs is None and runtime.official_settings() == {}
+    runtime.bind_official(official)
+    assert runtime.registration_kwargs == OFFICIAL_REGISTRATION and runtime.official_settings() == {REGISTER: OFFICIAL_REGISTRATION}
+    assert runtime.mix_settings(soft=True) == {"registration": OFFICIAL_REGISTRATION} and runtime.mix_settings(soft=False) == {}
+    # literals in other spellings are read: a signed number, `not`, a tuple
+    spelled = official_builder(f"{REGISTER}({DATA}, use_rotation_transform=not False, bend_coef=-0.5, rot_coef=+1e-3, shape=(1, 2))")
+    assert rt.literal_call_keywords(spelled.generate_trajectory, REGISTER, passed) == {
+        "use_rotation_transform": True, "bend_coef": -0.5, "rot_coef": 1e-3, "shape": (1, 2)}
+    rt.IsaacLabRuntime(Method0(None), soft_layout(), None).bind_official(object)       # a rigid-object runtime reads nothing
 
-    assert rt.constant_call_keywords(DataGenerator.generate_trajectory, "transform_source_data_segment_using_nodal_registration") == {
-        "use_rotation_transform": True, "bend_coef": 0.1, "rot_coef": 1e-3}
-    runtime = make_runtime(Method0(None))
-    assert runtime.registration_kwargs == {}
-    runtime.bind_official(DataGenerator)
-    assert runtime.registration_kwargs == {"use_rotation_transform": True, "bend_coef": 0.1, "rot_coef": 1e-3}
 
-    class Other:
-        def generate_trajectory(self):
-            return 1
+@pytest.mark.parametrize("call, why", [
+    (f"{REGISTER}({DATA}, bend_coef=self.bend, rot_coef=1e-3)", "bend_coef is 'self.bend', not a literal"),
+    (f"{REGISTER}({DATA}, bend_coef=bend, rot_coef=1e-3)", "bend_coef is 'bend', not a literal"),
+    (f"{REGISTER}({DATA}, bend_coef=2 * 0.05)", r"bend_coef is '2 \* 0.05', not a literal"),
+    (f"{REGISTER}({DATA}, bend_coef=float('0.1'))", "not a literal"),
+    (f"{REGISTER}(src, nodes, tgt, True, 0.1, 1e-3)", "6 positional arguments"),
+    (f"{REGISTER}(src, {DATA.split(', ', 1)[1]}, bend_coef=0.1)", "1 positional arguments"),
+    (f"{REGISTER}({DATA}, **kw)", r"passes \*\*kw"),
+    (f"{REGISTER}(tgt_obj_nodal_pos=tgt, src_eef_poses=src, bend_coef=0.1)", r"does not pass \['src_obj_nodal_pos'\] by keyword"),
+    ("other_registration(tgt, src, nodes)", "expected one call, found 0"),
+    (f"{REGISTER}({DATA}) if bend else {REGISTER}({DATA}, bend_coef=0.2)", "expected one call, found 2"),
+])
+def test_an_official_call_whose_settings_cannot_be_read_is_refused_not_guessed(torch, call, why):
+    """Strict: a setting that is not a literal, a positional argument, ``**kwargs``, a missing data argument, no call or
+    two calls all raise. Dropping such an argument would register the donors with the function's defaults while the
+    selected source uses the official values, with no trace."""
+    from tmg.generation.generators.isaaclab import runtime as rt
 
-    with pytest.raises(RuntimeError, match="expected one call"):
-        runtime.bind_official(Other)
-    rt.IsaacLabRuntime(Method0(None), soft_layout(), None).bind_official(Other)       # a rigid-object runtime reads nothing
+    runtime = rt.SoftMimicGenRuntime(Method0(RecordingMixer()), soft_layout(), None)
+    with pytest.raises(RuntimeError, match=why):
+        runtime.bind_official(official_builder(call))
+    assert runtime.registration_kwargs is None
 
 
 def install_fake_registration(monkeypatch, register):
@@ -490,7 +533,7 @@ def test_rope_records_the_nodal_frames_and_in_hand_poses_the_fit_needs(torch, tm
     rt = make_runtime(Method0(None), records_dir=tmp_path)
     rt.begin_attempt(gen, 0)
     out = rope_subtask(rt, gen, infos, 0, 2, now0)
-    assert out[0] is not None and rt._last_mix is None                 # no mixer: the builder's segment untouched
+    assert out[0] is not None and rt.last_mix("robot0") is None                 # no mixer: the builder's segment untouched
     rope_subtask(rt, gen, infos, 1, 2, now1)
     rt.end_attempt(gen, 0, {"success": True})
     line = json.loads((tmp_path / "attempts.jsonl").read_text().splitlines()[0])
@@ -505,7 +548,7 @@ def test_rope_records_the_nodal_frames_and_in_hand_poses_the_fit_needs(torch, tm
     np.testing.assert_allclose(P(s0["src_eef_pose"]), node_pose(infos[2].object_nodal_positions["rope"].a[0]), atol=1e-6)
     assert s0["carried_object"] is None and s1["carried_object"] == "rope" and s1["carried_candidate"] == "rope"
     assert s1["held_distance"]["now"] <= 0.03 and s1["held_distance"]["source"] < 1e-3
-    assert s1["held"] == {"now": True, "source": True, "deformable": True} and "held" not in s0     # tested on the nearest node
+    assert s1["held_distance"]["deformable"] is True and "held_distance" not in s0 and "held" not in s1   # tested on the nearest node; no stored verdict
     assert s0["held_rule"] == s1["held_rule"] == HELD_RULE and line["record_version"] == 2 and "invalid" not in line
     np.testing.assert_allclose(P(s1["objects"]["rope"]), nodal_frame(now1, ref), atol=1e-6)
     np.testing.assert_allclose(P(s1["src_objects"]["rope"]), P(s1["src_obj_pose"]))
@@ -573,7 +616,7 @@ def test_a_scene_that_cannot_be_read_fails_the_attempt_only_never_the_chunk(torc
     if mixing:
         mix = bad["subtasks"][0]["mix"]
         assert bad["invalid"] == "scene_error" and mix["mixed"] is False and mix["identity_reason"].startswith("scene_error: scene: KeyError")
-        assert len(mixer.contexts) == 1 and good["subtasks"][0]["mix"] == {"mixed": True, "donor": 1}     # only the good attempt was mixed
+        assert len(mixer.contexts) == 1 and good["subtasks"][0]["mix"] == {"mixed": True, "donor": 1, "registration": OFFICIAL_REGISTRATION}   # only the good attempt was mixed
     else:
         assert "invalid" not in bad and bad["subtasks"][0]["mix"] is None
 
@@ -647,7 +690,10 @@ def test_an_object_the_hand_does_not_hold_gives_no_in_hand_pose(torch):
         rt.record_subtask(local_vars)
     s1 = rt.rec.subtasks[1]
     assert s1["carried_object"] is None and s1["carried_candidate"] == "bottle" and s1["objects"] == {} and s1["src_objects"] == {}
-    assert s1["held_distance"]["now"] == pytest.approx(0.6) and s1["held"] == {"now": False, "source": False, "deformable": False}
+    from tmg.generation.method.success_model import held_test_of_record
+
+    test = held_test_of_record(s1)
+    assert s1["held_distance"]["now"] == pytest.approx(0.6) and (test.now, test.sources, test.deformable) == (False, [False], False)
 
 
 def test_the_hold_limits_come_from_the_rule_not_from_the_code(torch):
@@ -675,9 +721,12 @@ def test_the_hold_limits_come_from_the_rule_not_from_the_code(torch):
         seen[name] = rt.rec.subtasks[1]
     assert seen["configured"]["carried_object"] is None and seen["configured"]["held_rule"] == HELD_RULE
     assert seen["wide"]["carried_object"] == "bottle" and seen["wide"]["held_rule"]["version"] == 7
-    assert seen["wide"]["held"]["now"] is True and seen["wide"]["held"]["source"] is False       # the source's bottle is 100 m away
+    from tmg.generation.method.success_model import held_test_of_record
+
+    wide = held_test_of_record(seen["wide"])
+    assert wide.now is True and wide.sources == [False]                 # the source's bottle is 100 m away
     assert sorted(seen["wide"]["objects"]) == ["bottle"] and seen["wide"]["src_objects"] == {}
-    assert seen["none"]["carried_object"] == "bottle" and "held" not in seen["none"] and "held_rule" not in seen["none"]
+    assert seen["none"]["carried_object"] == "bottle" and "held_distance" not in seen["none"] and "held_rule" not in seen["none"]
     assert sorted(seen["none"]["src_objects"]) == ["bottle"]
 
 
@@ -734,7 +783,9 @@ def test_install_grafts_the_soft_builder_at_its_class_level_anchors(tmp_path, mo
     dg, wp = fake_package(tmp_path, monkeypatch, "fakesoft", SOFT_PACKAGE, WAYPOINT_MODULE)
     runtime = rt.SoftMimicGenRuntime(Method0(), soft_layout(), records_dir=None)
     info = rt.install("fakesoft", runtime, {"generate": None, "trajectory": None, "execute": None})
-    assert set(info) == {"generate", "generate_trajectory", "execute"}
+    assert set(info) == {"generate", "generate_trajectory", "execute", "hashes", "official_settings"}
+    assert set(info["hashes"]) == {"generate", "trajectory", "execute"} and all(len(h) == 64 for h in info["hashes"].values())
+    assert info["official_settings"] == {}                              # an unmixed run reads nothing from the official builder
     assert dg.DataGenerator.generate.__name__ == "generate" and dg.DataGenerator.generate_trajectory.__name__ == "generate_trajectory"
     assert info["generate"] == ["after 'new_initial_state = ...': _tmg.begin_attempt(self, env_id)",
                                 "before final return: _tmg.end_attempt(self, env_id, results)"]
@@ -744,11 +795,12 @@ def test_install_grafts_the_soft_builder_at_its_class_level_anchors(tmp_path, mo
     assert info["execute"] == ["after 'play_action = ...': _tmg.record_command(self, env, env_id, state, play_action)",
                                "after 'success = ...': _tmg.record_step(self, env, env_id, obs, success)"]
     assert dg.DataGenerator.generate_trajectory.__globals__["_tmg"] is runtime and dg.DataGenerator.generate.__tmg_graft__["edits"] == info["generate"]
-    assert runtime.registration_kwargs == {}                       # an unmixed run reads nothing from the official builder
+    assert runtime.registration_kwargs is None
     mixing = rt.SoftMimicGenRuntime(Method0(RecordingMixer()), soft_layout(), records_dir=None)
     fake_package(tmp_path, monkeypatch, "fakesoft2", SOFT_PACKAGE, WAYPOINT_MODULE)
-    rt.install("fakesoft2", mixing, {})
-    assert mixing.registration_kwargs == {"use_rotation_transform": True, "bend_coef": 0.1, "rot_coef": 1e-3}   # the official call's
+    logged = rt.install("fakesoft2", mixing, {})
+    assert mixing.registration_kwargs == OFFICIAL_REGISTRATION       # the official call's, and in the graft log
+    assert logged["official_settings"] == {"transform_source_data_segment_using_nodal_registration": OFFICIAL_REGISTRATION}
     fake_package(tmp_path, monkeypatch, "fakemimic", MIMIC_PACKAGE.replace("generate_eef_subtask_trajectory", "generate_trajectory")
                  .replace("src_subtask_object_pose = 4", "src_subtask_nodal_positions = 4"), WAYPOINT_MODULE)
     rt.install("fakemimic", rt.SoftMimicGenRuntime(Method0(None), soft_layout(), records_dir=None), {})   # no such call: unmixed is unaffected
@@ -788,7 +840,7 @@ def test_install_from_spec_picks_the_runtime_by_soft(tmp_path, monkeypatch, soft
                       "layout": {"eefs": ["robot0"], "arm_action_dims": {"robot0": [0, 6]}, "hand_prefixes": None, "hand_term": None,
                                  "measure_links": None, "noise_draw_shapes": [6]}}}
     info = rt.install_from_spec(spec, None)
-    assert set(info) == {"generate", builder, "execute"}
+    assert set(info) == {"generate", builder, "execute", "hashes", "official_settings"}
     runtime = getattr(dg.DataGenerator, builder).__globals__["_tmg"]
     assert type(runtime) is (rt.SoftMimicGenRuntime if soft else rt.IsaacLabRuntime)
     assert runtime.layout.arm_action_dims == {"robot0": (0, 6)} and runtime.layout.noise_draw_shapes == (6,) and runtime.records_dir == tmp_path / "records"
@@ -902,9 +954,37 @@ def test_unmixed_generation_returns_the_builders_own_objects_and_draws_nothing(t
         out = rt.mix_segment(gen, local_vars)
         assert reads == list(range(k))                             # mix_segment itself read no scene
         assert out[0] is local_vars["src_subtask_eef_poses"] and out[1] is local_vars["src_subtask_target_poses"]
-        assert out[2] is local_vars["src_subtask_gripper_actions"] and rt._last_mix is None
+        assert out[2] is local_vars["src_subtask_gripper_actions"] and rt.last_mix("robot0") is None
         rt.record_subtask(local_vars)
     rt.end_attempt(gen, 0, {"success": True})
     after = (np.random.get_state()[1], random.getstate(), torch.random.get_rng_state())
     assert np.array_equal(before[0], after[0]) and before[1] == after[1] and before[2] == after[2]
     assert reads == [0, 1] and "scene_error" in rt.rec.subtasks[1] and "scene_error" not in rt.rec.subtasks[0]
+
+
+def test_a_deformable_object_carried_to_another_reference_object_is_a_scene_error_not_a_silent_zero(torch, tmp_path, monkeypatch):
+    """The in-hand pose of a deformable object against another reference object is not implemented. That is said: the
+    subtask's scene is an error (NotImplementedError), so a mixing attempt is marked invalid, instead of the subtask
+    being mixed with in-hand features of 0."""
+    import json
+
+    install_fake_registration(monkeypatch, lambda **kw: kw["src_eef_poses"])
+    infos = hand_on_rope([rope_info(6, 0), rope_info(6, 10)])
+    for info, offset in zip(infos, (0, 10)):
+        info.object_poses["peg"] = T(np.stack([pose(200 + offset + i) for i in range(6)]))
+    gen = rope_generator(infos, eef_pose=node_pose(rope_cloud(0.6, 0.9)))
+    mixer = RecordingMixer()
+    rt = make_runtime(Method0(mixer), records_dir=tmp_path)
+    rt.begin_attempt(gen, 0)
+    rope_subtask(rt, gen, infos, 0, 1, rope_cloud(0.5, 0.7))            # grasp the rope (deformable)
+    local_vars = soft_locals(infos, primary=1, subtask=1, soft=False)   # then a subtask whose reference object is a rigid peg
+    local_vars.update({"self": gen, "subtask_object_name": "peg", "subtask_object_pose": T(pose(300.0)),
+                       "selected_src_subtask_boundary": T([4, 6])})
+    out = rt.mix_segment(gen, local_vars)
+    rt.record_subtask(local_vars)
+    rt.end_attempt(gen, 0, {"success": True})
+    line = json.loads((tmp_path / "attempts.jsonl").read_text().splitlines()[0])
+    s1 = line["subtasks"][1]
+    assert out[0] is local_vars["src_subtask_eef_poses"] and len(mixer.contexts) == 1          # only the first subtask was mixed
+    assert s1["scene_error"].startswith("scene: NotImplementedError") and "deformable" in s1["scene_error"]
+    assert line["invalid"] == "scene_error" and s1["mix"]["mixed"] is False and "inhand_features" not in s1["mix"]

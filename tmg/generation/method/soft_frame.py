@@ -32,7 +32,7 @@ the node centroid, about 0.3 m for the rope held at one end (Rope pilot, 2026-11
 node. That is the intended definition and the one of the 2026-11-07 code (``soft_pose.py``: ``_hand_in_object`` of the
 same centroid frame): the in-hand features compare this offset between the current scene and a source, and both see the
 same centroid. Whether the object is held at all is decided separately, from the nearest node
-(``isaaclab.runtime.held_distance``).
+(``isaaclab.runtime.held_distance`` against the generator's ``HeldRule``).
 
 The frame is a feature, not a registration: the segments themselves are still moved with SoftMimicGen's own nodal
 registration, and the frame changes nothing in a generation without SkillMix (method none). The same definition was used
@@ -43,6 +43,8 @@ from __future__ import annotations
 import hashlib
 
 import numpy as np
+
+from tmg.core.poses import as_array as _np
 
 FRAME_VERSION = "nodal_yaw_v1"           # recorded with every frame, so a fit refuses records of another definition
 MIN_ROTATION_FIT = 0.5                   # least rotation-fit correlation r of a cloud whose yaw is used (module docstring)
@@ -83,8 +85,3 @@ def nodal_frame(nodes, reference) -> np.ndarray:
     frame[:3, :3] = [[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]]
     frame[:3, 3] = center
     return frame
-
-
-def _np(x) -> np.ndarray:
-    """A torch tensor (or anything array-like) as a float numpy array."""
-    return np.asarray(x.detach().cpu().numpy() if hasattr(x, "detach") else x, dtype=float)

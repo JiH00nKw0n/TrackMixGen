@@ -6,8 +6,9 @@ sif: null
 data_root: /home/gpuadmin/workspace/jihoonkwon/tmg_data
 workers: auto
 max_workers: 16
-max_workers_by_simulator: {isaaclab: 3}   # chunk processes one pool runs at once with workers: auto, per generator.simulator: an Isaac Sim process takes about 15 GB of RAM (12 at once ran out of memory)
 shared_gpus: true             # other users hold GPUs here: a simulator that takes one GPU must be told which (the generator's gpu_variable, ISAAC_GPU)
+hostname: gpusystem           # `hostname -s` of this machine: the Makefile applies shared_gpus here also when CLUSTER was left at its default
+max_workers_by_simulator: {isaaclab: 3}   # chunk processes one pool runs at once with workers: auto, per generator.simulator: an Isaac Sim process takes about 15 GB of RAM (12 at once ran out of memory)
 threads_per_worker: 1
 min_free_disk_gib: 20
 render: egl                     # offscreen rendering of the robosuite images: EGL only (GPU, NVIDIA EGL; EGL device i = GPU i here)

@@ -146,5 +146,5 @@ def test_verify_baseline_refuses_a_generator_that_does_not_declare_byte_verify_b
         verify.verify_baseline(cfg)
     assert calls == [] and not hasattr(verify, "supports_verify")
     root = Path(__file__).resolve().parents[2] / "configs/experiment/generator"
-    declared = {p.stem: yaml.safe_load(p.read_text()).get("byte_verify") for p in root.glob("*.yaml")}
+    declared = {p.stem: yaml.safe_load(p.read_text()).get("byte_verify") for p in root.glob("*.yaml") if "name" in yaml.safe_load(p.read_text())}
     assert declared == {"mimicgen": True, "cpgen": False, "softmimicgen": False, "dexmimicgen": False}

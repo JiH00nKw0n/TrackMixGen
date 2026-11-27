@@ -29,7 +29,7 @@ def pose(x=0.0, y=0.0, z=0.8, yaw=0.0):
 
 def test_the_mix_context_carries_a_typed_scene_and_no_string_keyed_extras():
     names = set(MixContext.__dataclass_fields__)
-    assert "scene" in names and "extra" not in names
+    assert "scene" in names and "extra" not in names and "rng" not in names
     assert MixContext.__dataclass_fields__["scene"].type == "SubtaskScene | None"
     scene = SubtaskScene(subtask=0)
     assert scene.num_sources == 0 and scene.carried_object is None and scene.held is None and scene.held_rule is None
@@ -107,7 +107,7 @@ def test_what_a_scene_records_gives_the_fit_the_features_the_mixer_scored():
         scored = source_features(scene, HELD_FEATURES)
         for j in range(3):
             record = {"subtask_ind": 1, "eef": "right", "object_name": "fridge", "src_demo_ind": j, **scene.record(j)}
-            assert record["held"] == {"now": test.now, "source": test.sources[j], "deformable": False}
+            assert record["held_distance"] == {"now": now_m, "source": sources_m[j], "deformable": False} and "held" not in record
             assert record["held_rule"] == rule.as_dict() and record["carried_candidate"] == "bottle"
             assert record["carried_object"] == ("bottle" if test.now else None)
             assert sorted(record["objects"]) == (["bottle"] if test.now else []) and sorted(record["src_objects"]) == (["bottle"] if test.sources[j] else [])

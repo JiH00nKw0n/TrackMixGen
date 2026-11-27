@@ -103,7 +103,7 @@ def test_mix_segment_keeps_other_passthrough_channels_next_to_the_mixed_hand(tor
     gen = dex_generator(infos, torch)
     eef, targets, passthrough = rt.mix_segment(gen, local_vars)
     ctx = mixer.contexts[0]
-    assert ctx.primary == 1 and ctx.rng.random() == np.random.default_rng(0).random()
+    assert ctx.primary == 1
     scene = ctx.scene
     assert scene.eef == "right" and scene.reference_object == "object" and scene.carried_object is None and scene.held is None
     assert scene.held_rule.as_dict() == HELD_RULE and scene.object_frame is None
@@ -117,7 +117,7 @@ def test_mix_segment_keeps_other_passthrough_channels_next_to_the_mixed_hand(tor
     np.testing.assert_array_equal(eef.a[0], np.eye(4) * 2)
     np.testing.assert_array_equal(eef.a[1:], infos[1].eef_pose["right"].a[1:4])
     assert eef.dtype == targets.dtype == passthrough["right"].dtype == "float32"
-    assert rt._last_mix == {"mixed": True, "donor": 1}
+    assert rt.last_mix("right") == {"mixed": True, "donor": 1} and rt.last_mix("left") is None
 
 
 def test_mix_segment_without_a_mixer_or_without_a_mix_returns_the_passthrough_dict(torch):
@@ -339,7 +339,7 @@ def test_install_from_spec_grafts_autodata_and_wraps_the_success_term_setup(tmp_
     seen = []
     ns = {"setup_async_generation": lambda datastream, x, success_term: seen.append((datastream, success_term))}
     info = rt.install_from_spec(spec, ns)
-    assert set(info) == {"generate", "generate_eef_subtask_trajectory", "execute", "hashes"}
+    assert set(info) == {"generate", "generate_eef_subtask_trajectory", "execute", "hashes", "official_settings"}
     assert info["generate"] == ["after 'initial_state = ...': _tmg.begin_attempt(self, env_id, success_term)",
                                 'before return #0: _tmg.end_attempt(self, env_id, {"success": False})',
                                 'before return #1: _tmg.end_attempt(self, env_id, {"success": buffers.success})']
@@ -438,3 +438,42 @@ def test_an_environment_whose_signal_getter_is_not_implemented_has_no_signals_an
     out = capsys.readouterr().out
     assert line["term_first"] == {} and line["n_steps"] == 3 and out.count("publishes no per-step subtask signals") == 1
     assert "fit.reached: task_success" in out
+
+
+def test_two_arms_whose_builder_calls_interleave_keep_their_own_scene_and_mix_record(torch, tmp_path):
+    """Should AutoData build both arms' subtasks before either is recorded, each record still gets its own arm's mix
+    record and scene: the runtime keeps them per end effector, not in one slot."""
+    infos = [datagen_info(6, 0), datagen_info(6, 10)]
+    ds = FakeDatastream(torch)
+    ds.last_target = {"right": pose(1.0), "left": pose(-1.0)}
+    ds.objects = {"object": pose(0.95)}
+    gen = dex_generator(infos, datastream=ds)
+
+    class NamingMixer(RecordingMixer):
+        def mix(self, context):
+            out = super().mix(context)
+            out.record = {"mixed": False, "arm": context.scene.eef}
+            return out
+
+    rt = make_runtime(Method0(NamingMixer()), records_dir=tmp_path)
+    rt.begin_attempt(gen, 0)
+    spec = [types.SimpleNamespace(subtask_term_signal=None)]
+
+    def local_vars(eef):
+        bounds = T(np.array([[[0, 4], [4, 6]]] * len(infos)))
+        return {"src_subtask_eef_poses": infos[1].eef_pose[eef][0:4], "src_subtask_target_poses": infos[1].target_eef_pose[eef][0:4],
+                "src_subtask_passthrough_actions": {eef: infos[1].passthrough_action[eef][0:4]}, "eef_name": eef, "subtask_ind": 0,
+                "selected_src_demo_ind": 1, "all_randomized_subtask_boundaries": {eef: bounds}, "subtask_object_name": "object",
+                "env_id": 0, "subtask_object_pose": T(pose(0.9)), "self": gen, "subtasks": spec, "selected_boundary": T([0, 4])}
+
+    right, left = local_vars("right"), local_vars("left")
+    rt.mix_segment(gen, right)
+    rt.mix_segment(gen, left)                                           # the left arm's builder runs before the right is recorded
+    assert rt.last_mix("right") == {"mixed": False, "arm": "right"} and rt.last_mix("left") == {"mixed": False, "arm": "left"}
+    rt.record_subtask(right)
+    rt.record_subtask(left)
+    by_arm = {s["eef"]: s for s in rt.rec.subtasks}
+    assert by_arm["right"]["mix"]["arm"] == "right" and by_arm["left"]["mix"]["arm"] == "left"
+    np.testing.assert_allclose(np.asarray(by_arm["right"]["eef_pose"])[:3], pose(1.0)[:3, 3])
+    np.testing.assert_allclose(np.asarray(by_arm["left"]["eef_pose"])[:3], pose(-1.0)[:3, 3])
+    assert rt.last_mix("right") is None and rt.last_mix("left") is None      # consumed by their records

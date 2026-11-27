@@ -54,3 +54,8 @@ def yaw_of(pose) -> float:
     """Yaw angle (rad) of a pose about the world z axis, ``atan2(r10, r00)``."""
     pose = np.asarray(pose, dtype=float)
     return float(np.arctan2(pose[1, 0], pose[0, 0]))
+
+
+def as_array(x) -> np.ndarray:
+    """A torch tensor (or anything array-like) as a float numpy array."""
+    return np.asarray(x.detach().cpu().numpy() if hasattr(x, "detach") else x, dtype=float)

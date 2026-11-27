@@ -1,0 +1,40 @@
+# Settings shared by the Isaac Lab generators (softmimicgen.yaml and dexmimicgen.yaml list this file in their defaults; it
+# is not a generator of its own). The flat keys the Makefile reads (simulator, byte_verify, gpu_variable, image) stay in
+# each generator's file.
+
+# One chunk process is one Isaac Sim instance of about 15 GB of host memory (12 at once ran the Isaac server out of memory,
+# 2026-11): with workers: auto a pool runs at most this many at once, on every machine, unless the machine's cluster file
+# names its own number (max_workers_by_simulator: {isaaclab: N}).
+default_max_workers: 3
+
+# How the runtime reads a subtask's scene for the records and SkillMix (tmg/generation/generators/isaaclab/runtime.py).
+# held_rule: a hand counts as holding the previous subtask's reference object when the object's origin is within rigid_m
+#   of the end effector (rigid object) or its nearest simulation node within nodes_m (deformable). A grasp leaves the
+#   object at the hand (Rope calibration pools of 2026-11-27: at most 6.2 mm to the nearest node in the sources; a dropped
+#   rope 0.35 to 0.40 m away); a hand that only reached, pushed or supported the object is 0.4 to 1.3 m away (GR1 Bottle
+#   Placement pilot, 2026-11-27). The rule is written into every record and into the rule file, and the mixer refuses a
+#   rule file fitted with another one. Change the values only together with `version`.
+# unversioned_held_rule: the rule of records without a record_version (made by the code up to commit 2fcfc0d, 2026-11-27,
+#   where these two distances were constants and were not recorded); tmg fit_coefficients reads such records with it.
+# Not part of a chunk's identity (ChunkSpec.scene_reading): it changes no unmixed demonstration.
+scene_reading:
+  held_rule: {version: 1, rigid_m: 0.20, nodes_m: 0.10}
+  unversioned_held_rule: {version: 1, rigid_m: 0.20, nodes_m: 0.10}
+
+# Limits of the records checks of tmg fit_coefficients and of every chunk result (tmg/generation/method/fit_records.py,
+# fit_layout.py). A rate is an error only when the counts of everything read so far (the whole pool in the fit, the pool's
+# finished chunks in a chunk result) show with `confidence` that the true rate is above its limit; one chunk's share is
+# never compared with a limit, so a few unlucky attempts do not stop a pool, while a failure of every attempt stops it at
+# the first chunk. With a true rate equal to the limit a pool of 80 chunks of 50 attempts stops wrongly with probability
+# 0.009 (simulated); with a true rate of 2 % against 5 %, never in 2,000 simulated pools.
+#   max_scene_error_rate: attempts whose subtask scene could not be read (e.g. a towel folded so far that its nodal frame
+#     has no yaw). Stops a calibration or mixing pool.
+#   max_unreached_success_rate: successful attempts of a block that count as not having reached it. A successful attempt
+#     completed every subtask, so this means the task's reached rule misreads the records. Stops the fit and a
+#     calibration pool; a warning in any other pool.
+# Measured on the Rope calibration pools of 2fcfc0d (2026-11-27, 941 attempts read): 0 of 941 attempts with a scene error
+# (below 0.8 % at this confidence) and 0 of 526 successes not reached (below 1.3 %); the limits are several times that.
+record_checks:
+  max_scene_error_rate: 0.05
+  max_unreached_success_rate: 0.05
+  confidence: 0.999

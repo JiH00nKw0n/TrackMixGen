@@ -17,12 +17,17 @@ Three value objects are shared by every runtime, the mixer, the attempt records 
   ``success_model.scene_of_record`` reads it back for the fit, so the mixer and the fit compute the features with one
   function.
 - ``HeldRule`` / ``HeldTest``: how a runtime decides whether the hand holds the carried object (distance limits from the
-  generator config, recorded with every record and in the rule file).
+  generator config, recorded with every record and in the rule file). Whether a hand holds the object is asked in one
+  place, ``SubtaskScene.holds_now`` / ``source_holds``: the hold test where the runtime makes one, else whether the pose
+  is known. The features, the records and the sanity report all go through it.
+
+Mixer implementations register themselves (``register_mixer``); a method config may name the module that does
+(``mixing.module``), so a new mixer needs no edit here.
 """
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Protocol
 
 import numpy as np
@@ -118,13 +123,21 @@ class HeldRule:
         return float(distance) <= self.limit(deformable)
 
 
+HELD_DISTANCE_DECIMALS = 4      # hold distances are rounded to 0.1 mm before they are tested and recorded
+
+
 @dataclass
 class HeldTest:
-    """The hold test of one subtask: the distances the rule was applied to, now and in every source at its segment start."""
+    """The hold test of one subtask: the distances the rule was applied to, now and in every source at its segment start
+    (rounded to ``HELD_DISTANCE_DECIMALS`` first, so the recorded distances give the verdict)."""
     rule: HeldRule
     deformable: bool
     now_m: float
     sources_m: list
+
+    def __post_init__(self):
+        self.now_m = round(float(self.now_m), HELD_DISTANCE_DECIMALS)
+        self.sources_m = [round(float(d), HELD_DISTANCE_DECIMALS) for d in self.sources_m]
 
     @property
     def now(self) -> bool:
@@ -162,25 +175,41 @@ class SubtaskScene:
     def num_sources(self) -> int:
         return len(self.source_object_poses or self.source_eef_poses or [])
 
+    # who holds the carried object: the one place that says so -----------------------------------------
+    def holds_now(self) -> bool:
+        """The hand holds the carried object now: the hold test's verdict, or without a test that its pose is known."""
+        if self.carried_object is None:
+            return False
+        return self.held.now if self.held is not None else self.carried_pose is not None
+
+    def source_holds(self, j: int) -> bool:
+        """Source j's hand holds the carried object at its segment start (as ``holds_now``)."""
+        if self.carried_object is None:
+            return False
+        if self.held is not None:
+            return self.held.sources[j]
+        return self.source_carried_poses is not None and self.source_carried_poses[j] is not None
+
     def record(self, selected: int) -> dict:
         """The subtask-record fields of the selected source, what ``success_model.scene_of_record`` reads back. ``objects``
-        and ``src_objects`` hold the carried object, and only where its pose is known (and it is held), so the fit's
-        in-hand features are the mixer's."""
+        and ``src_objects`` hold the carried object's pose where the hand holds it; the hold test is recorded as its
+        distances (``held_distance``: now, selected source, deformable) and rule (``held_rule``), from which a reader
+        rebuilds the ``HeldTest``, never as a second copy of its verdicts."""
         objects, src_objects = {}, {}
-        if self.carried_object is not None and self.carried_pose is not None:
+        if self.holds_now() and self.carried_pose is not None:
             objects[self.carried_object] = self.carried_pose
         carried_src = None if self.source_carried_poses is None else self.source_carried_poses[selected]
-        if self.carried_object is not None and carried_src is not None:
+        if self.source_holds(selected) and carried_src is not None:
             src_objects[self.carried_object] = carried_src
         out = {"cur_obj_pose": self.current_object_pose,
                "src_obj_pose": None if self.source_object_poses is None else self.source_object_poses[selected],
                "eef_pose": self.eef_pose, "src_eef_pose": None if self.source_eef_poses is None else self.source_eef_poses[selected],
                "objects": objects, "src_objects": src_objects,
-               "carried_object": self.carried_object if self.carried_pose is not None else None,
+               "carried_object": self.carried_object if self.holds_now() else None,
                "carried_candidate": self.carried_object}
         if self.held is not None:
-            out["held_distance"] = {"now": self.held.now_m, "source": self.held.sources_m[selected]}
-            out["held"] = {"now": self.held.now, "source": self.held.sources[selected], "deformable": self.held.deformable}
+            out["held_distance"] = {"now": self.held.now_m, "source": self.held.sources_m[selected],
+                                    "deformable": self.held.deformable}
         if self.held_rule is not None:
             out["held_rule"] = self.held_rule.as_dict()
         if self.object_frame is not None:
@@ -202,8 +231,7 @@ class MixContext:
     src_segments: list                             # per source: (eef_start (4,4), targets (T_i,4,4), gripper (T_i,G))
     num_sources: int
     has_reference_object: bool
-    rng: np.random.Generator = field(default_factory=lambda: np.random.default_rng(0))   # unused by the mixers, see README
-    scene: SubtaskScene | None = None              # what the mixer scores (None: the mixer leaves the segment as it is)
+    scene: SubtaskScene | None = None              # what the mixer scores; required when the subtask has a reference object
 
 
 @dataclass
@@ -249,16 +277,25 @@ class MixerType(Protocol):
         ...
 
 
-_MIXERS: dict[str, MixerType] = {}                                              # mixing.type -> class; filled lazily
+_MIXERS: dict[str, MixerType] = {}                                              # mixing.type -> class
+BUILTIN_MIXER_MODULES = ("tmg.generation.method.skillmix",)                     # imported on first use; each registers itself
 
 
-def _mixer_types() -> dict[str, MixerType]:
-    """Mixer implementations by ``method.mixing.type``."""
-    if not _MIXERS:
-        # imported here, not at the top: the mixer module imports MixContext and MixedSegment from this module
-        from tmg.generation.method.skillmix import SkillMixer
+def register_mixer(name: str, mixer: MixerType) -> None:
+    """Register a mixer implementation under ``mixing.type`` ``name`` (called by the module that defines it)."""
+    if _MIXERS.get(name, mixer) is not mixer:
+        raise ValueError(f"mixer type {name!r} is already registered")
+    _MIXERS[name] = mixer
 
-        _MIXERS.update(skillmix=SkillMixer)
+
+def mixer_types(module: str | None = None) -> dict[str, MixerType]:
+    """Mixer implementations by ``method.mixing.type``, after importing the built-in mixer modules and ``module`` (a
+    method config's ``mixing.module``: the module that registers the mixer it names). Imported here, not at the top: a
+    mixer module imports ``MixContext`` and ``MixedSegment`` from this module."""
+    import importlib
+
+    for name in (*BUILTIN_MIXER_MODULES, *([module] if module else [])):
+        importlib.import_module(name)
     return _MIXERS
 
 
@@ -266,8 +303,8 @@ def build_method(cfg: Mapping, *, chunk_seed: int, arms: Arms | Sequence[str] | 
     """Build the method of a ``method`` config block (plain mapping). ``arms``: the generator's end effectors from its
     layout (``Arms.of``; None for a generator with one unnamed arm), handed to the mixer when it is made.
 
-    ``mixing.type`` picks the mixer implementation; a new variant is a class added to ``_mixer_types`` plus a method
-    config file naming it. A ``tracking`` or ``sources`` block (path following, rank-based source sampling) is refused:
+    ``mixing.type`` picks the mixer implementation; a new variant is a class that calls ``register_mixer`` in its module
+    plus a method config file naming the type (and, outside this package, the module: ``mixing.module``). A ``tracking`` or ``sources`` block (path following, rank-based source sampling) is refused:
     those methods were removed from the repository.
     """
     name = str(cfg.get("name", "none"))
@@ -283,7 +320,7 @@ def build_method(cfg: Mapping, *, chunk_seed: int, arms: Arms | Sequence[str] | 
     mixer = None
     if mixing.get("enabled", False):
         kind = str(mixing.get("type", "skillmix"))
-        types = _mixer_types()
+        types = mixer_types(mixing.get("module"))
         if kind not in types:
             raise ValueError(f"method.mixing.type {kind!r} unknown; known: {sorted(types)}")
         mixer = types[kind].from_config(mixing, chunk_seed=chunk_seed, method_name=name, arms=Arms.of(arms))

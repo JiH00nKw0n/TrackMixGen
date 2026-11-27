@@ -29,7 +29,11 @@ brought to the current record version and checked (``tmg.generation.method.fit_r
 could not be read are left out, the records must name the layout's arms, and records measured with different
 deformable-object frames or hold rules are refused. A subtask without a reference object gets no block (the mixer
 leaves it unmixed). The fit prints, per block, where the reached verdicts came from and a sanity report
-(``fit_records.sanity_report``), and stops when the report has an error.
+(``fit_records.sanity_report``, judged on the whole pool by ``judge_sanity``), and stops when the report has an error.
+A randmix row whose mix record cannot say what a feature needs (``success_model.FeatureUnknown``: an unversioned record
+without per-source hold flags that the pools' own hold tests could not fill) is left out and counted. A feature whose
+column is the same in every row of a block cannot be fitted: its slope is reported, and a slope other than 0 is a
+loud warning.
 
 Output: ``<output>/coefficients.yaml`` and ``<output>/FIT_COEFFICIENTS.json`` (summary), and when ``write_config`` is true
 ``configs/experiment/generator/<generator>/coefficients/<task>.yaml``, the file ``method.mixing.coefficients`` names. The
@@ -54,7 +58,9 @@ from tmg.generation.method.fit_records import (
     ASSUMED,
     SIGNAL,
     Attempts,
+    complete_source_holds,
     describe_outcomes,
+    judge_sanity,
     measured_with,
     mix_records,
     prepare,
@@ -69,6 +75,7 @@ from tmg.generation.method.success_model import (
     FEATURES,
     HELD_FEATURE,
     UNITS,
+    FeatureUnknown,
     design_rows,
     eef_subtasks,
     mix_record_features,
@@ -121,19 +128,25 @@ def unmix_rows(attempts: Attempts, success: Sequence, k: int, num_sources: int, 
 
 
 def randmix_rows(attempts: Attempts, success: Sequence | None, k: int, num_sources: int, *, features: Sequence[str] = FEATURES,
-                 eef: str | None = None) -> Rows:
+                 eef: str | None = None, unknown: list | None = None) -> Rows:
     """Rows of subtask k (of end effector ``eef``) from a randmix pool: the recorded weights, the weighted features, their
     spread. An attempt counts when it has a mix record of subtask k and, with ``success`` (the reached rule's verdicts),
     every earlier subtask succeeded. ``success`` None is the generator whose mix record itself shows that the attempt
     reached k (``ReachedRule.mix_record_proves_reach``), also when the motion plan to k then failed and k has no subtask
-    record."""
+    record. An attempt whose mix record cannot say a feature (``FeatureUnknown``) gives no row; its index in ``attempts``
+    is appended to ``unknown``."""
     rows = Rows([], [], [])
     for index, a in enumerate(attempts.records):
         m = mix_records(a, eef).get(k)
         if m is None or (success is not None and not all(success[index][:k])):
             continue
         w = np.asarray(m["weights"], dtype=float)
-        phi = mix_record_features(m, features, num_sources)
+        try:
+            phi = mix_record_features(m, features, num_sources)
+        except FeatureUnknown:
+            if unknown is not None:
+                unknown.append(index)
+            continue
         rows.x.append(np.concatenate([w, w @ phi, [entropy(w)]]))
         rows.y.append(float(bool(a["success"])))
         rows.chunks.append(attempts.chunks[index])
@@ -250,13 +263,25 @@ def has_reference_object(attempts: Attempts, eef: str | None, k: int) -> bool:
     return not subs or any(s.get("object_name") is not None for s in subs)
 
 
+def constant_features(randmix: Rows, unmix: Rows, num_sources: int, features: Sequence[str]) -> dict:
+    """``{feature: value}`` of the features whose column is the same in every row of a block (nothing to fit there)."""
+    randmix, unmix = Rows(*randmix), Rows(*unmix)
+    rows = np.array(list(unmix.x) + list(randmix.x))
+    if not len(rows):
+        return {}
+    columns = rows[:, num_sources:num_sources + len(features)]
+    return {f: float(columns[0, i]) for i, f in enumerate(features) if np.all(columns[:, i] == columns[0, i])}
+
+
 def fit_blocks(randmix: Attempts, unmix: Attempts, *, layout: FitLayout, task: Mapping, num_sources: int, source=None,
                with_cv: bool = True) -> tuple[dict, dict]:
     """The rule-file block of every subtask from the (prepared) attempts of the randmix and unmix pools, keyed by
-    ``SubtaskId``, and per block where the reached verdicts of the earlier subtasks came from (module docstring).
-    ``source``: the source-demonstration file, read when the layout takes the sources' poses from its ``datagen_info``."""
+    ``SubtaskId``, and per block what the fit says about it: ``reached`` (where the reached verdicts of the earlier
+    subtasks came from), ``unknown_rows`` (randmix attempts left out because their mix record could not say a feature)
+    and ``constant_features`` (module docstring). ``source``: the source-demonstration file, read when the layout takes
+    the sources' poses from its ``datagen_info``."""
     rule = reached_rule(layout.reached)
-    blocks, reached = {}, {}
+    blocks, about = {}, {}
     for eef in layout.arms.record_eefs:
         K = rule.num_subtasks(randmix.records + unmix.records, eef, task)
         infos = read_source_infos(source) if layout.source_poses == "datagen_info" and K > 1 else None
@@ -268,15 +293,34 @@ def fit_blocks(randmix: Attempts, unmix: Attempts, *, layout: FitLayout, task: M
         for k in range(K):
             if not has_reference_object(unmix, eef, k):
                 continue
-            key = layout.arms.subtask(k, eef)
-            blocks[key] = fit_subtask(randmix_rows(randmix, reached_randmix, k, num_sources, features=layout.features, eef=eef),
-                                      unmix_rows(unmix, reached_unmix, k, num_sources, layout=layout, eef=eef, source_infos=infos),
-                                      num_sources, with_cv, layout.features)
-            reached[key] = describe_outcomes({j: {kind: used_unmix[j][kind] + used_randmix[j][kind] for kind in (SIGNAL, ASSUMED)}
-                                              for j in range(k)})
+            key, unknown = layout.arms.subtask(k, eef), []
+            mixed = randmix_rows(randmix, reached_randmix, k, num_sources, features=layout.features, eef=eef, unknown=unknown)
+            single = unmix_rows(unmix, reached_unmix, k, num_sources, layout=layout, eef=eef, source_infos=infos)
+            blocks[key] = fit_subtask(mixed, single, num_sources, with_cv, layout.features)
+            about[key] = {"reached": describe_outcomes({j: {kind: used_unmix[j][kind] + used_randmix[j][kind] for kind in (SIGNAL, ASSUMED)}
+                                                        for j in range(k)}),
+                          "unknown_rows": len(unknown), "constant_features": constant_features(mixed, single, num_sources, layout.features)}
     if not blocks:
         raise ValueError("no subtask with a reference object in the records")
-    return blocks, reached
+    return blocks, about
+
+
+def print_block(key, block: Mapping, about: Mapping) -> None:
+    """What the fit says about one block, the warnings loud."""
+    print(f"[tmg] subtask {key}: rows randmix/unmix {block['rows']['randmix']}/{block['rows']['unmix']}, d {block['d']:+.3f} "
+          f"({'softmax' if block['d'] > 0 else 'best source alone'}), CV gain {block.get('cv_log_loss_gain_percent')}", flush=True)
+    print(f"[tmg] subtask {key}: reached from {about['reached']}", flush=True)
+    if about["unknown_rows"]:
+        print(f"[tmg] WARNING subtask {key}: {about['unknown_rows']} randmix attempts left out: their mix records do not say "
+              f"which sources hold the carried object, and no hold test of these pools settles it", flush=True)
+    for feature, value in about["constant_features"].items():
+        slope = block["g"][feature]
+        if slope != 0.0:
+            print(f"[tmg] WARNING subtask {key}: feature {feature} is {value} in every row, yet its fitted slope is {slope:+.3g}: "
+                  f"nothing in these pools supports that slope", flush=True)
+        else:
+            print(f"[tmg] subtask {key}: feature {feature} is {value} in every row (slope 0: these pools say nothing about it)",
+                  flush=True)
 
 
 # rule file ------------------------------------------------------------------------------------------------------------
@@ -328,7 +372,7 @@ def fit_coefficients(cfg) -> dict:
     name = f"{generator['name']}/{task['name']}"
     print(f"[tmg] {name}: fit layout arms {list(layout.arms.names) or 'one arm'}, reached rule {layout.reached}, source poses "
           f"from {layout.source_poses}, features {list(layout.features)}", flush=True)
-    prepared, sanity = {}, {}
+    prepared, sanity, problems = {}, {}, []
     for kind, read in attempts.items():
         attempts[kind], prepared[kind] = prepare(read, layout)
         about = prepared[kind]
@@ -340,18 +384,27 @@ def fit_coefficients(cfg) -> dict:
             print(f"[tmg] WARNING {kind} pools: {about['unversioned_upgraded']} attempt records carry no record_version "
                   f"(written before 2026-11-27): read as version 1 with the hold rule declared for unversioned records, "
                   f"{layout.unversioned_held_rule}, checked against their recorded hold distances", flush=True)
+    holds = complete_source_holds(attempts["randmix"].records + attempts["unmix"].records)
+    if holds["filled"] or holds["unknown"]:
+        print(f"[tmg] WARNING {holds['filled'] + holds['unknown']} mix records do not say which sources hold the carried object "
+              f"(unversioned records where the hand held nothing): {holds['filled']} filled from the hold tests these pools "
+              f"recorded per (end effector/subtask/source: [held, tested]) {holds['evidence']}, {holds['unknown']} left "
+              f"unknown (their rows are left out)", flush=True)
+    for kind in attempts:
         sanity[kind] = sanity_report(attempts[kind], layout, task)
-        print_sanity(sanity[kind], f"{kind} pools")
-    errors = [f"{kind} pools: {text}" for kind, report in sanity.items() for text in report["errors"]]
-    if errors:
-        raise ValueError("the records fail the sanity check of the fit: " + "; ".join(errors))
+        # the scene errors are counted over everything read, before the unreadable attempts were left out
+        sanity[kind].update(attempts=prepared[kind]["attempts"], without_scene=prepared[kind]["without_scene"])
+        errors, warnings = judge_sanity(sanity[kind], layout.sanity)
+        print_sanity(sanity[kind], f"{kind} pools", errors, warnings)
+        sanity[kind].update(errors=errors, warnings=warnings)
+        problems += [f"{kind} pools: {text}" for text in errors]
+    if problems:
+        raise ValueError("the records fail the sanity check of the fit: " + "; ".join(problems))
     frame, held_rule = measured_with(attempts["randmix"].records + attempts["unmix"].records)
-    blocks, reached = fit_blocks(attempts["randmix"], attempts["unmix"], layout=layout, task=task, num_sources=num_sources,
-                                 source=plain.get("source"))
+    blocks, about = fit_blocks(attempts["randmix"], attempts["unmix"], layout=layout, task=task, num_sources=num_sources,
+                               source=plain.get("source"))
     for key, b in blocks.items():
-        print(f"[tmg] subtask {key}: rows randmix/unmix {b['rows']['randmix']}/{b['rows']['unmix']}, d {b['d']:+.3f} "
-              f"({'softmax' if b['d'] > 0 else 'best source alone'}), CV gain {b['cv_log_loss_gain_percent']}", flush=True)
-        print(f"[tmg] subtask {key}: reached from {reached[key]}", flush=True)
+        print_block(key, b, about[key])
     basis = (f"Fit (tmg fit_coefficients) on the randmix pools {pools['randmix']} ({len(attempts['randmix'])} "
              f"attempts) and the unmix pools {pools['unmix']} ({len(attempts['unmix'])} attempts); rows of "
              f"subtask k: the attempts that reached it, label = the attempt's task success.")
@@ -366,8 +419,10 @@ def fit_coefficients(cfg) -> dict:
                             for key, b in blocks.items()},
                "layout": {"arms": list(layout.arms.names), "reached": layout.reached, "source_poses": layout.source_poses,
                           "features": list(layout.features)},
-               "reached_from": {str(key.key): text for key, text in reached.items()},
-               "records": prepared, "sanity": sanity,
+               "reached_from": {str(key.key): a["reached"] for key, a in about.items()},
+               "unknown_rows": {str(key.key): a["unknown_rows"] for key, a in about.items()},
+               "constant_features": {str(key.key): a["constant_features"] for key, a in about.items()},
+               "records": prepared, "source_holds": holds, "sanity": sanity,
                "written": written}
     write_json(output / SUMMARY, summary)
     print(f"[tmg] written: {', '.join(written)}")

@@ -232,9 +232,11 @@ def test_skillmix_mixer_with_a_current_object_pose_gives_non_identity_weights():
     rule = _rule(3, g=[-5.0, 0.0, 0.0, 0.0, 0.0], d=1.0)
     rec = SkillMixer(coefficients=rule, arms=Arms(("right",))).mix(_context(segs, objs, 1, pose(0.01), eef="right")).record
     assert "identity_reason" not in rec and rec["mixed"] is True and max(rec["weights"]) < 1.0
-    for ctx in (_context(segs, objs, 1, None), MixContext(**{**vars(_context(segs, objs, 1, pose())), "scene": None})):
-        rec = SkillMixer(coefficients=rule).mix(ctx).record
-        assert rec["mixed"] is False and rec["identity_reason"] == "no current object pose"
+    rec = SkillMixer(coefficients=rule).mix(_context(segs, objs, 1, None)).record
+    assert rec["mixed"] is False and rec["identity_reason"] == "no current object pose"
+    # a subtask with a reference object and no scene at all is a runtime's omission: raised, never a silent identity
+    with pytest.raises(ValueError, match="gave the mixer no scene"):
+        SkillMixer(coefficients=rule).mix(MixContext(**{**vars(_context(segs, objs, 1, pose())), "scene": None}))
 
 
 # the hold test: features, record and the rule file's check --------------------------------------------------------

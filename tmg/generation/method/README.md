@@ -74,7 +74,6 @@ runtimes also call `mixer.begin_attempt()` when an attempt starts (the randmix r
 | `src_object_poses` | per source: the reference object's pose (4x4) at that source's segment start, so a mixer can express every segment in the object frame |
 | `src_segments` | per source: (eef_start, targets, gripper) of its segment |
 | `num_sources`, `has_reference_object` | how many sources exist; whether the subtask has a reference object (no object: no frame to mix in) |
-| `rng` | optional (defaults to `default_rng(0)`); SkillMix does not use it (its randmix draws come from their own stream seeded with the chunk seed) |
 | `scene` | the `SubtaskScene`: the reference object now and in every source, and from the second subtask on the end effector and the carried object (the previous subtask's reference object) now and in every source; with a hold test, its rule and distances. `None`: the mixer leaves the segment as it is |
 
 The mixer returns a `MixedSegment`: the segment the generator should transform and execute (`eef_start`, `targets`,
@@ -89,9 +88,15 @@ into the attempt's `subtasks[i]["mix"]` entry of `attempts.jsonl`; SkillMix writ
 
 Nothing in this folder or in `tmg/generation/fit_coefficients.py` names a generator. A new generator plugs in through its
 adapter and config: its runtime fills a `SubtaskScene` per subtask and builds the method with its arms; its adapter
-declares `fit_layout()` (an existing reached rule of `fit_records.REACHED`, or a new `ReachedRule` registered there); and
-its generator config says what shared code asks about it (`simulator`, `byte_verify`, `gpu_variable`, and for a hold test
-`scene_reading`).
+declares `fit_layout()`; and its generator config says what shared code asks about it (`simulator`, `byte_verify`,
+`gpu_variable`, `default_max_workers`, and for a hold test `scene_reading` and `record_checks`). What it needs beyond the
+existing pieces it registers from its own modules: a reached rule (`fit_records.register_reached_rule`), a feature group
+(`success_model.register_features`: names, units, how to compute it from a scene and read it from a mix record), a mixer
+(`interfaces.register_mixer`).
+
+Who holds the carried object is asked in one place, `SubtaskScene.holds_now()` / `source_holds(j)`: the hold test's
+verdict where the runtime makes one (rebuilt from the recorded distances and rule for a scene read back from a record),
+else whether the pose is known. The in-hand features, the mismatch, the records and the sanity report all use it.
 
 ## 2. Current values
 
@@ -113,7 +118,8 @@ the method name `skillmix_randmix`, so a generator that overrides `skillmix` lis
 
 1. Write the class next to `skillmix.py`: a `mix(context) -> MixedSegment` method, a class method `from_config(cfg, *,
    chunk_seed, method_name, arms)`, and `begin_attempt()` if it keeps per-attempt state. Seed every random draw from the chunk seed.
-2. Register it under a name in `interfaces._mixer_types()`.
+2. Register it under a name at the end of its module (`interfaces.register_mixer(name, cls)`); a mixer outside this
+   package is found through the method config's `mixing.module`.
 3. Add a method file that names it (`mixing: {type: <name>, ...}`) under its own `name`, so its pools, datasets and runs
    get their own folders.
 

@@ -87,7 +87,15 @@ from scipy.spatial.transform import Rotation
 from tmg.core.poses import invert, transform_all
 from tmg.generation.method.event_mix import _matching_events, events, mix_many
 from tmg.generation.method.grippers import SignGripper, build_detector
-from tmg.generation.method.interfaces import Arms, HeldRule, MixContext, MixedSegment, SubtaskId, SubtaskScene
+from tmg.generation.method.interfaces import (
+    Arms,
+    HeldRule,
+    MixContext,
+    MixedSegment,
+    SubtaskId,
+    SubtaskScene,
+    register_mixer,
+)
 from tmg.generation.method.success_model import (
     FEATURES,
     INHAND_FEATURES,
@@ -511,8 +519,14 @@ class SkillMixer:
                   "source_a": primary, "mixed": False, "rule": self.rule}
         self.calls += 1
         identity = MixedSegment(context.primary_eef_start, context.primary_targets, context.primary_gripper, record)
-        if not context.has_reference_object or scene is None or scene.current_object_pose is None:
-            record["identity_reason"] = "subtask has no reference object" if not context.has_reference_object else "no current object pose"
+        if not context.has_reference_object:
+            record["identity_reason"] = "subtask has no reference object"
+            return identity
+        if scene is None:                                  # a runtime's omission, never a reason to leave a segment unmixed
+            raise ValueError(f"subtask {context.subtask_ind} has a reference object but the runtime gave the mixer no scene "
+                             f"(MixContext.scene)")
+        if scene.current_object_pose is None:
+            record["identity_reason"] = "no current object pose"
             return identity
         n = context.num_sources
         series = [self._event_series(np.asarray(context.src_segments[j][2], dtype=float)) for j in range(n)]
@@ -564,3 +578,6 @@ class SkillMixer:
         for i, (wk, k) in enumerate(zip(w, keep)):
             out += wk * np.asarray(context.src_segments[k][2], dtype=float).reshape(-1, width)[np.asarray(index[str(i)])]
         return out.reshape(-1) if g0.ndim == 1 else out
+
+
+register_mixer("skillmix", SkillMixer)

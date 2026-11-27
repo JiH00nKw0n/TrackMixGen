@@ -1,5 +1,8 @@
 # SoftMimicGen (NVlabs/SoftMimicGen @ c9d146ba on the Isaac Lab fork masoudmoghani/IsaacLab, branch softmimicgen
 # @ 25c69e08) on Isaac Sim 5.1. One Franka arm, soft objects (rope, towel).
+defaults:
+  - isaaclab_common            # default_max_workers, scene_reading (hold rule), record_checks
+  - _self_
 name: softmimicgen
 simulator: isaaclab
 byte_verify: false              # tmg verify_baseline (byte-for-byte rerun against the official generator) is not available
@@ -23,27 +26,12 @@ hand_prefixes: null
 hand_term: null
 measure_links: null                     # the observed eef pose is the controller target for the Franka
 noise_draw_shapes: [6]                  # target_eef_pose_to_action draws one 6-vector per step (also at zero noise)
-# How the runtime reads a subtask's scene for the records and SkillMix (tmg/generation/generators/isaaclab/runtime.py).
-# held_rule: a hand counts as holding the previous subtask's reference object when the object's origin is within rigid_m
-#   of the end effector (rigid object) or its nearest simulation node within nodes_m (deformable). A grasp leaves the
-#   object at the hand (Rope: 2 to 7 mm to the nearest node); a hand that only reached, pushed or supported the object is
-#   0.4 to 1.3 m away (GR1 Bottle Placement pilot, 2026-11-27). The rule is written into every record and into the rule
-#   file, and the mixer refuses a rule file fitted with another one. Change the values only together with `version`.
-# unversioned_held_rule: the rule of records without a record_version (made by the code up to commit 2fcfc0d, 2026-11-27,
-#   where these two distances were constants and were not recorded); tmg fit_coefficients reads such records with it.
-# max_error_rate: the largest share of a chunk's attempts whose subtask scene may fail to read (e.g. a towel folded so far
-#   that its nodal frame has no yaw) before a calibration or mixing pool fails the chunk and stops.
-# Not part of a chunk's identity (ChunkSpec.scene_reading): it changes no unmixed demonstration.
-scene_reading:
-  held_rule: {version: 1, rigid_m: 0.20, nodes_m: 0.10}
-  unversioned_held_rule: {version: 1, rigid_m: 0.20, nodes_m: 0.10}
-  max_error_rate: 0.1
-# Sanity limits of tmg fit_coefficients and of every chunk result (tmg/generation/method/fit_records.py sanity_report): a
-# successful attempt completed every subtask, so when more than this share of a block's successful attempts (of at least
-# min_successes) counts as not having reached it, the reached rule misreads the records and the fit (or the pool) stops.
-# Which reached rule a task uses is the task's own fit.reached (default term_window; task_success where the environment
-# publishes no per-step subtask signal).
-fit:
-  max_unreached_success_rate: 0.2
-  min_successes: 10
+# Per-step subtask signals (2026-11-27, read in the isaaclab-soft image), which decide a task's fit.reached (how
+# tmg fit_coefficients tells which subtasks an attempt reached; a task-config key outside the chunk identity): the rope
+# environment publishes them (its subtask_terms observation group has the term grasp = mdp.object_grasped, read by
+# FrankaRopeMimicEnv.get_subtask_term_signals), so Rope keeps the default, term_window. The towel environment
+# (softmimicgen_tasks/franka_towel/env_cfg.py) has the policy group only, its mdp has no grasp term and
+# FrankaTowelMimicEnv implements no get_subtask_term_signals, so its source signal grasp_1 is an annotation and
+# generation records none: towel.yaml declares fit: {reached: task_success} (every recorded subtask counts as reached and
+# the task-success label alone is used).
 method_overrides: {}

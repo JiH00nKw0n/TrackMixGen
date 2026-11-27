@@ -124,6 +124,27 @@ def _chunk_with_records(folder: Path, lines):
 
 
 RULE = {"version": 1, "rigid_m": 0.2, "nodes_m": 0.1}
+REGISTRATION = {"use_rotation_transform": True, "bend_coef": 0.1, "rot_coef": 0.001}
+
+
+def finish(spec, result):
+    """Write the chunk's CHUNK_DONE.json, as the runner does for a chunk without an error."""
+    from tmg.core.chunks import CHUNK_DONE, write_json
+
+    write_json(Path(spec.folder) / CHUNK_DONE, result)
+    return result
+
+
+def chunk(generator, pool, name, lines):
+    """One more chunk of ``pool``: its result, kept as finished when it has no error."""
+    result = generator.chunk_result(_chunk_with_records(pool / name, lines))
+    return result if "error" in result else finish(_spec_of(pool / name), result)
+
+
+def _spec_of(folder):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(folder=str(folder))
 
 
 def rope_line(success=True, grasp_step=5, held=True, scene_error=None, invalid=None, mixed=None):
@@ -132,9 +153,9 @@ def rope_line(success=True, grasp_step=5, held=True, scene_error=None, invalid=N
         s = {"eef": "robot0", "subtask_ind": k, "object_name": "object", "src_demo_ind": 0, "start_step": 10 * k,
              "term_signal": "grasp" if k == 0 else None, "held_rule": RULE, "mix": None}
         if k == 1:
-            s["held"] = {"now": held, "source": True, "deformable": True}
+            s["held_distance"] = {"now": 0.005 if held else 0.35, "source": 0.002, "deformable": True}
         if mixed is not None:
-            s["mix"] = {"subtask": k, "mixed": mixed, "weights": [1.0]} if mixed else {
+            s["mix"] = {"subtask": k, "mixed": mixed, "weights": [1.0], "registration": REGISTRATION} if mixed else {
                 "subtask": k, "mixed": False, "identity_reason": "scene_error: scene: ValueError: no yaw"}
         return s
 
@@ -173,61 +194,80 @@ def test_which_pools_need_their_subtask_scenes_is_a_generation_flag_and_the_meth
     assert soft_generator(tmp_path, monkeypatch, "test/pilot20", "skillmix", overrides=RANDMIX).needs_subtask_scenes()   # a mixing pool
 
 
-def test_scene_errors_stop_a_pool_only_above_the_configured_share_of_a_chunk(tmp_path, monkeypatch, capsys):
-    """One unreadable scene in a chunk (a folded towel) costs that attempt; the pool stops when more than
-    ``scene_reading.max_error_rate`` (0.1) of a chunk's attempts are affected, and only a pool that needs the scenes."""
+def test_scene_errors_are_judged_on_the_pools_finished_chunks_not_on_one_chunks_share(tmp_path, monkeypatch, capsys):
+    """A chunk with 3 unreadable scenes of 20 (15 %, three times the 5 % limit) does not stop a pool: a 5 % rate does that
+    to one chunk in thirteen. The same share chunk after chunk does, once the pool's counts show it; a chunk in which
+    every attempt fails stops the pool at once; and only a pool that needs the scenes is stopped."""
     error = "scene: ValueError: the planar rotation of this node cloud is undefined"
-    few = [rope_line() for _ in range(19)] + [rope_line(scene_error=error)]                # 1 of 20: 5 %
-    many = [rope_line() for _ in range(17)] + [rope_line(scene_error=error)] * 3           # 3 of 20: 15 %
+    unlucky = [rope_line() for _ in range(17)] + [rope_line(scene_error=error)] * 3          # 3 of 20
+    clean = [rope_line() for _ in range(20)]
     calibration = soft_generator(tmp_path, monkeypatch, "pool_unmix")
-    assert calibration.scene_reading()["max_error_rate"] == 0.1
-    result = calibration.chunk_result(_chunk_with_records(tmp_path / "few", few))
-    assert result["attempts_without_scene"] == 1 and result["scene_errors"] == 1 and "error" not in result and "stop_pool" not in result
-    assert "WARNING" in capsys.readouterr().out
-    result = calibration.chunk_result(_chunk_with_records(tmp_path / "many", many))
-    assert result["stop_pool"] is True and "3 of 20 attempts" in result["error"] and "max_error_rate" in result["error"]
-    baseline = soft_generator(tmp_path, monkeypatch, "test/pilot20")                         # an unmixed baseline pool: warned only
-    result = baseline.chunk_result(_chunk_with_records(tmp_path / "baseline", many))
-    assert result["attempts_without_scene"] == 3 and "error" not in result and "WARNING" in capsys.readouterr().out
-    clean = calibration.chunk_result(_chunk_with_records(tmp_path / "clean", [rope_line() for _ in range(4)]))
-    assert "scene_errors" not in clean and "error" not in clean and clean["sanity"]["errors"] == []
+    assert calibration.fit_layout().sanity.max_scene_error_rate == 0.05
+    pool = tmp_path / "healthy" / "chunks"
+    first = chunk(calibration, pool, "seed1", unlucky)
+    assert first["attempts_without_scene"] == 3 and "error" not in first and first["sanity"]["without_scene"] == 3
+    assert first["sanity_verdict"] == {"chunks": 1, "errors": [], "warnings": []} and "tripod" not in str(first["scene_error_examples"])
+    for index in range(2, 8):                                        # the rest of the pool is clean: 3 of 140 in the end
+        result = chunk(calibration, pool, f"seed{index}", clean)
+        assert "error" not in result and result["sanity_verdict"]["chunks"] == index
+    assert "3 of 140 (2.1 %) attempts without the scene" in capsys.readouterr().out
+    pool = tmp_path / "sick" / "chunks"                              # 15 % in every chunk: shown by the fourth chunk
+    results = [chunk(calibration, pool, f"seed{index}", unlucky) for index in range(1, 5)]
+    assert ["error" in r for r in results] == [False, False, False, True] and results[3]["stop_pool"] is True
+    assert "pool up to chunk seed4 (4 chunks)" in results[3]["error"] and "12 of 80 (15.0 %) attempts without the scene" in results[3]["error"]
+    assert "record_checks.max_scene_error_rate = 0.05" in results[3]["error"]
+    broken = calibration.chunk_result(_chunk_with_records(tmp_path / "broken" / "chunks" / "seed1", [rope_line(scene_error=error)] * 20))
+    assert broken["stop_pool"] is True and "20 of 20 (100.0 %)" in broken["error"]            # systematic: at the first chunk
+    baseline = soft_generator(tmp_path, monkeypatch, "test/pilot20")                         # an unmixed baseline pool: said, not stopped
+    result = baseline.chunk_result(_chunk_with_records(tmp_path / "baseline" / "chunks" / "seed1", [rope_line(scene_error=error)] * 20))
+    assert "error" not in result and result["sanity_verdict"]["errors"] and "ERROR sanity" in capsys.readouterr().out
 
 
-def test_a_mixing_pool_counts_its_invalid_attempts_and_stops_above_the_share(tmp_path, monkeypatch, capsys):
-    error = "scene: ValueError: no yaw"
-    bad = rope_line(scene_error=error, invalid="scene_error", mixed=False)
+def test_a_mixing_pool_counts_its_invalid_attempts_and_records_the_donor_registration(tmp_path, monkeypatch, capsys):
+    bad = rope_line(scene_error="scene: ValueError: no yaw", invalid="scene_error", mixed=False)
     mixing = soft_generator(tmp_path, monkeypatch, "pool_unmix", "skillmix", overrides=RANDMIX)
-    result = mixing.chunk_result(_chunk_with_records(tmp_path / "one", [rope_line(mixed=True) for _ in range(19)] + [bad]))
+    pool = tmp_path / "mix" / "chunks"
+    result = chunk(mixing, pool, "seed1", [rope_line(mixed=True) for _ in range(19)] + [bad])
     assert result["invalid_attempts"] == 1 and "error" not in result and result["successes"] == 20     # the official count stays
-    assert result["sanity"]["blocks"]["0"]["mix"] == {"records": 19, "identity": 0, "identity_rate": 0.0, "identity_reasons": {}}
-    result = mixing.chunk_result(_chunk_with_records(tmp_path / "many", [rope_line(mixed=True) for _ in range(5)] + [bad] * 5))
-    assert result["stop_pool"] is True and "5 of 10 attempts" in result["error"]
+    assert result["sanity"]["blocks"]["0"]["mix"] == {"records": 19, "identity": 0, "identity_reasons": {}}
+    assert result["donor_registration"] == [REGISTRATION]              # the settings the donors were registered with
+    result = mixing.chunk_result(_chunk_with_records(pool / "seed2", [rope_line(mixed=True) for _ in range(5)] + [bad] * 10))
+    assert result["stop_pool"] is True and "11 of 35 (31.4 %) attempts without the scene" in result["error"]
+    unmixed = soft_generator(tmp_path, monkeypatch, "pool_unmix").chunk_result(
+        _chunk_with_records(tmp_path / "plain" / "chunks" / "seed1", [rope_line() for _ in range(3)]))
+    assert "donor_registration" not in unmixed
 
 
-def test_the_chunk_result_carries_the_sanity_report_and_a_calibration_pool_stops_on_its_errors(tmp_path, monkeypatch, capsys):
-    """The first chunk already shows a reached rule that misreads the records (every success "grasped" after shaping began),
-    a carried object that is never held, and the declared fallback of a task without signals."""
-    late = [rope_line(grasp_step=25) for _ in range(12)]
+def test_unreached_successes_stop_a_calibration_pool_and_only_warn_in_a_data_pool(tmp_path, monkeypatch, capsys):
+    """The share of successes that count as not reached is judged on the pool's finished chunks. A reached rule that
+    misreads every record stops a calibration pool at its first chunk; a mixing data pool (softmax, not read by the fit)
+    gets a warning; a task whose environment publishes no signals passes through its declared rule, and the same records
+    under a rule that cannot read them stop at once."""
+    late = [rope_line(grasp_step=25) for _ in range(12)]              # every success "grasped" after shaping began
+    few = [rope_line() for _ in range(18)] + [rope_line(grasp_step=25)] * 2            # 2 of 20: nothing shown
     calibration = soft_generator(tmp_path, monkeypatch, "pool_unmix")
-    result = calibration.chunk_result(_chunk_with_records(tmp_path / "late", late))
-    assert result["stop_pool"] is True and "12 of 12 successful attempts count as not having reached it" in result["error"]
-    assert result["sanity"]["blocks"]["1"]["successes_unreached_rate"] == 1.0 and "ERROR sanity" in capsys.readouterr().out
-    baseline = soft_generator(tmp_path, monkeypatch, "test/pilot20")
-    result = baseline.chunk_result(_chunk_with_records(tmp_path / "late_baseline", late))
-    assert "error" not in result and result["sanity"]["errors"]                             # reported, the baseline pool goes on
+    result = calibration.chunk_result(_chunk_with_records(tmp_path / "late" / "chunks" / "seed1", late))
+    assert result["stop_pool"] is True and "block 1: 12 of 12 (100.0 %) successful attempts count as not having reached it" in result["error"]
+    assert result["sanity"]["blocks"]["1"]["successes_unreached"] == 12 and "ERROR sanity" in capsys.readouterr().out
+    pool = tmp_path / "few" / "chunks"
+    assert all("error" not in chunk(calibration, pool, f"seed{index}", few) for index in range(1, 4))      # 6 of 60
+    (tmp_path / "rule.yaml").write_text("rule: softmax\nnum_sources: 1\nsubtasks: {0: {a: [0.0], g: {dx: 0, dy: 0, rotation: 0, "
+                                        "inhand_position: 0, inhand_rotation: 0}, d: 1, c0: 0}}\n")
+    data = soft_generator(tmp_path, monkeypatch, "test/pilot20", "skillmix", overrides=(f"method.mixing.coefficients={tmp_path / 'rule.yaml'}",))
+    assert data.needs_subtask_scenes() and data.generation.get("purpose") != "calibration"
+    result = data.chunk_result(_chunk_with_records(tmp_path / "data" / "chunks" / "seed1", late))
+    assert "error" not in result and result["sanity_verdict"]["errors"] == []
+    assert "12 of 12" in result["sanity_verdict"]["warnings"][0] and "WARNING sanity" in capsys.readouterr().out
     loose = [rope_line(held=False) for _ in range(12)]
-    result = calibration.chunk_result(_chunk_with_records(tmp_path / "loose", loose))
-    assert "error" not in result and result["sanity"]["blocks"]["1"]["held"]["now"] == 0.0
-    assert any("holds the carried object in none of 12" in w for w in result["sanity"]["warnings"])
-    assert "WARNING sanity" in capsys.readouterr().out
-    few = calibration.chunk_result(_chunk_with_records(tmp_path / "few", late[:4]))          # under min_successes: not judged
-    assert "error" not in few
+    result = calibration.chunk_result(_chunk_with_records(tmp_path / "loose" / "chunks" / "seed1", loose))
+    assert "error" not in result and result["sanity"]["blocks"]["1"]["held"] == {"tested": 12, "now": 0, "sources": {"0": [12, 12]}}
+    assert any("holds the carried object in none of 12" in w for w in result["sanity_verdict"]["warnings"])
     # Towel records carry no signal at all: its task declares task_success, so its chunks pass; Rope's would not
     silent = [dict(rope_line(), term_first={}) for _ in range(12)]
     towel = soft_generator(tmp_path, monkeypatch, "pool_unmix", task="towel")
     assert towel.fit_layout().reached == "task_success"
-    assert "error" not in towel.chunk_result(_chunk_with_records(tmp_path / "towel", silent))
-    result = calibration.chunk_result(_chunk_with_records(tmp_path / "silent_rope", silent))
+    assert "error" not in towel.chunk_result(_chunk_with_records(tmp_path / "towel" / "chunks" / "seed1", silent))
+    result = calibration.chunk_result(_chunk_with_records(tmp_path / "silent_rope" / "chunks" / "seed1", silent))
     assert result["stop_pool"] is True and "cannot read the records" in result["error"]
 
 

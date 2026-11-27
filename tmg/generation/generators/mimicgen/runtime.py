@@ -110,7 +110,7 @@ class MimicGenRuntime:
             subtask_ind=subtask_ind, primary=int(local_vars["selected_src_demo_ind"]),
             primary_eef_start=np.array(eef[0]), primary_targets=np.array(targets), primary_gripper=np.array(grippers),
             src_object_poses=object_poses, src_segments=segments, num_sources=len(infos),
-            has_reference_object=object_name is not None, rng=np.random.default_rng(0), scene=scene)
+            has_reference_object=object_name is not None, scene=scene)
         mixed = self.method.mixer.mix(context)
         self._last_mix = mixed.record
         if not mixed.record.get("mixed"):

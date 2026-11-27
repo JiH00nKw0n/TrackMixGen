@@ -15,6 +15,14 @@ Features of source demonstration j for subtask k of an attempt (``source_feature
   object" and "source j holds it exactly as now" would both be the in-hand features (0, 0). With it (0, 0, 0) means the
   in-hand state is the same (the same pose, or nothing in either hand) and a mismatch has its own slope.
 
+Who holds the object is asked of the scene (``SubtaskScene.holds_now`` / ``source_holds``: the hold test's verdict where
+the runtime makes one, else whether the pose is known), by the in-hand features and the mismatch alike, for a scene from
+a runtime and for one rebuilt from a record (whose hold test is rebuilt from the recorded distances and rule).
+
+Features are registered in groups (``register_features``: names, units, how to compute them from a scene and how to read
+them back from a mix record), so a generator can add one without editing this module; the three groups above are
+registered here.
+
 A rule file lists the features of its blocks (``features``): MimicGen and CP-Gen use ``FEATURES`` (five), generators with a
 hold test ``HELD_FEATURES`` (six). The mixer scores with the rule file's list; the fit uses the list of the generator's
 fit layout and writes it.
@@ -24,7 +32,7 @@ TASK success, not with subtask k's own success (2026-11-17): a subtask that almo
 can still decide whether a later subtask succeeds through the in-hand pose it leaves, and only the task label sees that.
 In CP-Gen Threading the rule fitted on the grasp's own success kept the two grasp sources whose task success was 1 % and
 7 %. For the last subtask both labels are the same. Which subtasks an attempt reached is decided by the reached rule of
-the generator's fit layout (``tmg.generation.method.fit_records``).
+the generator's fit layout (``tmg.generation.method.fit_records``: the registered reached rules).
 
 ``scene_of_record`` rebuilds the ``SubtaskScene`` of a subtask record against its selected source, so a row of an unmixed
 attempt (``design_rows``) and the mixer's features come from the same function. Where the selected source's poses come
@@ -33,7 +41,8 @@ generators) or the source file's ``datagen_info`` (MimicGen).
 """
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -45,18 +54,58 @@ INHAND_FEATURES = ("inhand_position", "inhand_rotation")
 FEATURES = SCENE_FEATURES + INHAND_FEATURES                 # generators without a hold test (MimicGen, CP-Gen)
 HELD_FEATURE = "inhand_mismatch"
 HELD_FEATURES = FEATURES + (HELD_FEATURE,)                  # generators with a hold test (the Isaac Lab generators)
-UNITS = {"dx": "m", "dy": "m", "rotation": "rad", "inhand_position": "m", "inhand_rotation": "rad",
-         HELD_FEATURE: "0 or 1"}
 SOURCE_POSES = ("records", "datagen_info")                  # FitLayout.source_poses
 
 
+# the feature registry -------------------------------------------------------------------------------------------------
+class FeatureUnknown(ValueError):
+    """A record does not say what a feature needs (the fit leaves such a row out and counts it)."""
+
+
+@dataclass(frozen=True)
+class FeatureGroup:
+    """Features computed together: ``of_scene(scene)`` gives them for every source, ``(J, len(names))``, and
+    ``of_mix_record(mix, num_sources)`` reads the same array back from a mix record (``FeatureUnknown`` when the record
+    cannot say)."""
+    names: tuple
+    units: tuple
+    of_scene: Callable
+    of_mix_record: Callable
+
+
+UNITS: dict[str, str] = {}                                  # feature name -> unit, of every registered feature
+_GROUP_OF: dict[str, tuple[FeatureGroup, int]] = {}         # feature name -> (its group, its column in the group)
+
+
+def register_features(group: FeatureGroup) -> FeatureGroup:
+    """Make a group's features known to the mixer, the fit and the rule files."""
+    taken = [n for n in group.names if n in _GROUP_OF]
+    if taken or len(group.names) != len(group.units):
+        raise ValueError(f"feature group {group.names}: already registered {taken}, or names and units differ in number")
+    for index, (name, unit) in enumerate(zip(group.names, group.units)):
+        _GROUP_OF[name], UNITS[name] = (group, index), unit
+    return group
+
+
 def check_features(names) -> tuple[str, ...]:
-    """``names`` as a tuple, after checking that every one is a known feature."""
+    """``names`` as a tuple, after checking that every one is a registered feature."""
     names = tuple(str(n) for n in names)
-    unknown = [n for n in names if n not in UNITS]
+    unknown = [n for n in names if n not in _GROUP_OF]
     if unknown or len(set(names)) != len(names):
-        raise ValueError(f"unknown or repeated SkillMix features {unknown or list(names)}; known: {list(UNITS)}")
+        raise ValueError(f"unknown or repeated SkillMix features {unknown or list(names)}; known: {list(_GROUP_OF)}")
     return names
+
+
+def _columns(names: Sequence[str], compute: Callable, num_sources: int) -> np.ndarray:
+    """The columns ``names``, ``(J, len(names))``, each group computed once with ``compute(group)``."""
+    names, groups = check_features(names), {}
+    columns = []
+    for name in names:
+        group, index = _GROUP_OF[name]
+        if group.names not in groups:
+            groups[group.names] = np.asarray(compute(group), dtype=float).reshape(num_sources, len(group.names))
+        columns.append(groups[group.names][:, index])
+    return np.column_stack(columns) if columns else np.zeros((num_sources, 0))
 
 
 # poses ----------------------------------------------------------------------------------------------------------------
@@ -90,62 +139,73 @@ def inhand_features(current_in_hand, source_in_hand) -> np.ndarray:
 
 # features of a scene --------------------------------------------------------------------------------------------------
 def current_in_hand(scene: SubtaskScene) -> np.ndarray | None:
-    """The carried object's pose in the hand now, or None (nothing carried, pose unknown, not held)."""
-    if scene.carried_object is None or scene.carried_pose is None:
+    """The carried object's pose in the hand now, or None (the hand does not hold it, or its pose is not known)."""
+    if not scene.holds_now() or scene.carried_pose is None:
         return None
     return in_hand(scene.eef_pose, scene.carried_pose)
 
 
 def source_in_hand(scene: SubtaskScene, j: int) -> np.ndarray | None:
     """The carried object's pose in source j's hand at its segment start, or None."""
-    if scene.carried_object is None or scene.source_carried_poses is None or scene.source_carried_poses[j] is None:
+    if not scene.source_holds(j) or scene.source_carried_poses is None or scene.source_carried_poses[j] is None:
         return None
     return in_hand(scene.source_eef_poses[j], scene.source_carried_poses[j])
 
 
 def held_flags(scene: SubtaskScene) -> tuple[bool, list[bool]]:
-    """``(the hand holds the carried object now, per source: it holds it at its segment start)``: where the in-hand pose
-    exists."""
-    return current_in_hand(scene) is not None, [source_in_hand(scene, j) is not None for j in range(scene.num_sources)]
+    """``(the hand holds the carried object now, per source: it holds it at its segment start)``."""
+    return scene.holds_now(), [scene.source_holds(j) for j in range(scene.num_sources)]
+
+
+def _place_of_scene(scene: SubtaskScene) -> np.ndarray:
+    return np.array([scene_features(scene.current_object_pose, pose) for pose in scene.source_object_poses])
+
+
+def _hand_of_scene(scene: SubtaskScene) -> np.ndarray:
+    out = np.zeros((scene.num_sources, len(INHAND_FEATURES)))
+    now = current_in_hand(scene)
+    for j in range(scene.num_sources):
+        src = source_in_hand(scene, j) if now is not None else None
+        if src is not None:
+            out[j] = inhand_features(now, src)
+    return out
+
+
+def _mismatch_of_scene(scene: SubtaskScene) -> np.ndarray:
+    now, sources = held_flags(scene)
+    return np.array([[float(now != held)] for held in sources])
+
+
+def _hand_of_mix(mix: Mapping, num_sources: int) -> np.ndarray:
+    rows = mix.get("inhand_features")
+    return np.asarray(rows, dtype=float) if rows else np.zeros((num_sources, len(INHAND_FEATURES)))
+
+
+def _mismatch_of_mix(mix: Mapping, num_sources: int) -> np.ndarray:
+    held = mix.get("held")
+    if not held:                                    # nothing carried, or a generator without a hold test
+        return np.zeros((num_sources, 1))
+    if held.get("sources") is None:
+        raise FeatureUnknown("the mix record does not say which sources hold the carried object")
+    return np.array([[float(bool(held["now"]) != bool(s))] for s in held["sources"]])
+
+
+register_features(FeatureGroup(SCENE_FEATURES, ("m", "m", "rad"), _place_of_scene,
+                               lambda mix, num_sources: np.asarray(mix["scene_features"], dtype=float)))
+register_features(FeatureGroup(INHAND_FEATURES, ("m", "rad"), _hand_of_scene, _hand_of_mix))
+register_features(FeatureGroup((HELD_FEATURE,), ("0 or 1",), _mismatch_of_scene, _mismatch_of_mix))
 
 
 def source_features(scene: SubtaskScene, names: Sequence[str] = FEATURES) -> np.ndarray:
     """The features ``names`` of every source against the scene, ``(J, len(names))`` (module docstring)."""
-    J = scene.num_sources
-    current = scene.current_object_pose
-    place = np.array([scene_features(current, scene.source_object_poses[j]) for j in range(J)]).reshape(J, len(SCENE_FEATURES))
-    hand = np.zeros((J, len(INHAND_FEATURES)))
-    mismatch = np.zeros((J, 1))
-    now = current_in_hand(scene)
-    if scene.carried_object is not None:
-        for j in range(J):
-            src = source_in_hand(scene, j)
-            if now is not None and src is not None:
-                hand[j] = inhand_features(now, src)
-            mismatch[j, 0] = float((now is None) != (src is None))
-    return select_features(place, hand, mismatch, names)
-
-
-def select_features(place, hand, mismatch, names: Sequence[str]) -> np.ndarray:
-    """The columns ``names`` of the scene features (J, 3), the in-hand features (J, 2) and the mismatch flag (J, 1)."""
-    every = np.hstack([place, hand, mismatch])
-    order = SCENE_FEATURES + INHAND_FEATURES + (HELD_FEATURE,)
-    names = check_features(names)
-    if names == order[:every.shape[1] - 1]:
-        return np.hstack([place, hand])
-    return every[:, [order.index(n) for n in names]]
+    return _columns(names, lambda group: group.of_scene(scene), scene.num_sources)
 
 
 def mix_record_features(mix: Mapping, names: Sequence[str], num_sources: int) -> np.ndarray:
     """The features ``names`` of every source from a mix record (``scene_features``, ``inhand_features`` and, with a hold
-    test, ``held``: ``{now, sources}``), ``(J, len(names))``: what ``source_features`` gave the mixer."""
-    place = np.asarray(mix["scene_features"], dtype=float)
-    hand = np.asarray(mix["inhand_features"], dtype=float) if mix.get("inhand_features") else np.zeros((num_sources, len(INHAND_FEATURES)))
-    mismatch = np.zeros((num_sources, 1))
-    held = mix.get("held")
-    if held:
-        mismatch[:, 0] = [float(bool(held["now"]) != bool(s)) for s in held["sources"]]
-    return select_features(place, hand, mismatch, names)
+    test, ``held``: ``{now, sources}``), ``(J, len(names))``: what ``source_features`` gave the mixer. Raises
+    ``FeatureUnknown`` when the record cannot say (an unversioned record without per-source hold flags)."""
+    return _columns(names, lambda group: group.of_mix_record(mix, num_sources), num_sources)
 
 
 # rows of unmixed attempts ---------------------------------------------------------------------------------------------
@@ -162,7 +222,7 @@ def scene_of_record(s: Mapping, carried: str | None, *, source_poses: str = "rec
     reference object of the end effector's previous subtask (None for its first). The carried object's pose now is
     ``objects[carried]`` (absent: not known or not held); the selected source's comes from the record (``source_poses``
     "records": ``src_eef_pose`` and ``src_objects[carried]``, absent: not known or not held) or from ``source_infos``
-    ("datagen_info")."""
+    ("datagen_info"). A recorded hold test (``held_test_of_record``) decides who holds the object."""
     if source_poses not in SOURCE_POSES:
         raise ValueError(f"source_poses must be one of {SOURCE_POSES}, got {source_poses!r}")
     if "src_obj_pose" not in s:
@@ -179,16 +239,25 @@ def scene_of_record(s: Mapping, carried: str | None, *, source_poses: str = "rec
         if source_infos is None:
             raise ValueError("the in-hand features of subtask >= 1 need the source demonstrations' datagen_info")
         src_eef, src_carried = datagen_in_hand_poses(source_infos, int(s["src_demo_ind"]), int(s["src_subtask_start"]), carried)
-    rule = HeldRule.from_mapping(s.get("held_rule"))
-    held = None
-    if rule is not None and s.get("held_distance") is not None and s.get("held") is not None:
-        held = HeldTest(rule=rule, deformable=bool(s["held"]["deformable"]), now_m=float(s["held_distance"]["now"]),
-                        sources_m=[float(s["held_distance"]["source"])])
+    rule, held = HeldRule.from_mapping(s.get("held_rule")), held_test_of_record(s)
     return SubtaskScene(subtask=int(s["subtask_ind"]), eef=s.get("eef"), reference_object=s.get("object_name"),
                         current_object_pose=s["cur_obj_pose"], source_object_poses=[s["src_obj_pose"]],
                         eef_pose=s.get("eef_pose"), source_eef_poses=[src_eef], carried_object=carried,
                         carried_pose=carried_pose, source_carried_poses=[src_carried], held=held, held_rule=rule,
                         object_frame=s.get("object_frame"))
+
+
+def held_test_of_record(s: Mapping) -> HeldTest | None:
+    """The hold test of a subtask record against its selected source, rebuilt from the recorded distances and rule
+    (``held_distance``: now, source, deformable; ``held_rule``); None when the record has none (first subtask, nothing
+    carried, or a generator without a hold test)."""
+    distance, rule = s.get("held_distance"), HeldRule.from_mapping(s.get("held_rule"))
+    if distance is None or rule is None:
+        return None
+    if "deformable" not in distance:
+        raise ValueError(f"subtask record {s.get('eef')}/{s.get('subtask_ind')}: held_distance without 'deformable' (an "
+                         f"unversioned record that was not upgraded, fit_records.prepare)")
+    return HeldTest(rule=rule, deformable=bool(distance["deformable"]), now_m=distance["now"], sources_m=[distance["source"]])
 
 
 def eef_subtasks(attempt: Mapping, eef: str | None = None) -> list[dict]:

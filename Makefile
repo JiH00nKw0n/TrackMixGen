@@ -70,13 +70,14 @@ comma  := ,
 # chooses it (generator config `gpu_variable`: ISAAC_GPU for the Isaac Lab generators), and the targets that start the
 # simulator (generate and with it coefficients, resets, eval, validate, evaluate, check-scene) refuse to run on such a machine
 # without it (GPU_CHOICE_CHECK, the first line of their recipes; validate and evaluate stop before the policy server starts).
-# The machine is recognised by CLUSTER, or by the data_root of a shared_gpus cluster existing on this host (a run that forgot
-# CLUSTER and got the default, local).
+# The machine is the one CLUSTER names, or the one whose cluster config declares this host's name (`hostname`, compared with
+# `hostname -s`): a run that forgot CLUSTER and got the default, local, is still on that machine.
 GPU_CHOICE_CHECK = @true
 GPU_VARIABLE         := $(call config_value,experiment/generator/$(GENERATOR),gpu_variable)
 SHARED_GPU_CLUSTERS  := $(basename $(notdir $(shell grep -lE '^shared_gpus:[[:space:]]*true' $(REPO)/configs/machine/cluster/*.yaml 2>/dev/null)))
-SHARED_GPU_HOST_ROOTS := $(foreach c,$(SHARED_GPU_CLUSTERS),$(call config_value,machine/cluster/$(c),data_root))
-ON_SHARED_GPU_HOST   := $(if $(filter $(SHARED_GPU_CLUSTERS),$(strip $(CLUSTER))),1,$(if $(strip $(foreach r,$(SHARED_GPU_HOST_ROOTS),$(wildcard $(r)))),1,))
+HOSTNAME             ?= $(shell hostname -s 2>/dev/null)
+HOST_CLUSTERS        := $(foreach c,$(SHARED_GPU_CLUSTERS),$(if $(filter $(HOSTNAME),$(call config_value,machine/cluster/$(c),hostname)),$(c),))
+ON_SHARED_GPU_HOST   := $(if $(or $(filter $(SHARED_GPU_CLUSTERS),$(strip $(CLUSTER))),$(strip $(HOST_CLUSTERS))),1,)
 ifneq ($(GPU_VARIABLE),)
 ifeq ($(ON_SHARED_GPU_HOST),1)
 ifeq ($(strip $($(GPU_VARIABLE))),)

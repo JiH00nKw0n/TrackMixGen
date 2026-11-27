@@ -19,12 +19,17 @@ config) and ``provider_args`` (options after ``--``); ``task_extra`` and ``gener
 adapter overrides the hooks only.
 
 ``chunk_result`` also checks what the SkillMix fit and the mixing need of the records, so that a problem shows at the first
-chunk: the share of attempts whose subtask scene could not be read (``scene_reading.max_error_rate`` of the generator
-config) and the sanity report of the fit layout (``fit_records.sanity_report``: successful attempts that count as not
-having reached a subtask, how often the carried object is held, how often a mix record left the segment unmixed). Both
-are written into the chunk result. In a pool that needs the scenes (``needs_subtask_scenes``: ``generation.purpose:
-calibration`` or a mixing method) a share above the limit or a sanity error fails the chunk and stops the pool; any other
-pool keeps its chunk and warns.
+chunk and not days later at the fit (``records_check``). Every chunk result carries the chunk's sanity counts
+(``fit_records.sanity_report``: attempts whose subtask scene could not be read, successful attempts that count as not
+having reached a subtask, how often the carried object is held, how often a mix record left the segment unmixed) and
+the settings the donors of a deformable subtask were registered with. The verdict is never one chunk's share against a
+limit, which would stop a healthy pool on a few unlucky attempts: the counts of the pool's finished chunks are added up
+(``merge_sanity``) and judged with the limits and confidence of the generator's ``record_checks``
+(``fit_records.judge_sanity``). A failure of every attempt is beyond any limit in the first chunk, so that still stops
+at once. In a pool that needs the scenes (``needs_subtask_scenes``: ``generation.purpose: calibration`` or a mixing
+method) an error fails the chunk and stops the pool; any other pool keeps its chunk and warns. The share of successful
+attempts that count as not reached is an error only for a calibration pool (the fit reads those verdicts); elsewhere
+it is a warning.
 
 Success is never computed by tmg: the grafts read the official ``success`` value inside ``MultiWaypoint.execute``.
 SoftMimicGen's rope term fixes the rope end nodes at its first call of an episode, so calling it at reset (before the
@@ -38,11 +43,11 @@ from pathlib import Path
 
 import h5py
 
-from tmg.core.chunks import Chunk
+from tmg.core.chunks import CHUNK_DONE, Chunk, read_json
 from tmg.core.records import ATTEMPTS_JSONL, RECORDS_DIR, read_attempts, validate_records
-from tmg.generation.base import ChunkSpec, SyntheticDataGenerator
+from tmg.generation.base import CALIBRATION, ChunkSpec, SyntheticDataGenerator
 from tmg.generation.method.fit_layout import FitLayout, SanityLimits
-from tmg.generation.method.fit_records import Attempts, has_scene_error, print_sanity, sanity_report, scene_errors
+from tmg.generation.method.fit_records import Attempts, judge_sanity, merge_sanity, print_sanity, sanity_report, scene_errors
 from tmg.generation.method.interfaces import Arms, HeldRule
 from tmg.generation.method.success_model import FEATURES, HELD_FEATURES
 from tmg.generation.simulators.isaaclab import validate_isaaclab_scene
@@ -62,9 +67,8 @@ class IsaacLabGenerator(SyntheticDataGenerator):
 
     # scene reading and the fit layout -------------------------------------------------------------------
     def scene_reading(self) -> dict:
-        """``generator.scene_reading``: ``held_rule`` (the hold test of the runtime), ``unversioned_held_rule`` (the rule of
-        records without a record version) and ``max_error_rate`` (the share of a chunk's attempts whose scene may fail to
-        read)."""
+        """``generator.scene_reading``: ``held_rule`` (the hold test of the runtime) and ``unversioned_held_rule`` (the rule
+        of records without a record version)."""
         return dict(self.generator_cfg.get("scene_reading") or {})
 
     def held_rule(self) -> HeldRule | None:
@@ -80,7 +84,7 @@ class IsaacLabGenerator(SyntheticDataGenerator):
         return FitLayout(arms=Arms.of(self.generator_cfg["eefs"]), reached=str(fit.get("reached") or self.default_reached),
                          source_poses="records", features=HELD_FEATURES if self.held_rule() is not None else FEATURES,
                          unversioned_held_rule=HeldRule.from_mapping(reading.get("unversioned_held_rule")),
-                         sanity=SanityLimits.from_mapping(self.generator_cfg.get("fit")))
+                         sanity=SanityLimits.from_mapping(self.generator_cfg.get("record_checks")))
 
     def scene_dict(self) -> dict:
         """The scene config of this generator (ranges per reset event), validated."""
@@ -191,31 +195,29 @@ class IsaacLabGenerator(SyntheticDataGenerator):
         return result
 
     def records_check(self, records: list, folder: Path) -> dict:
-        """What the fit and the mixing need of a chunk's records (module docstring): ``scene_errors``, ``invalid_attempts``
-        and ``sanity`` for the chunk result, with ``error`` and ``stop_pool`` when the pool needs the scenes and the
-        records fail."""
-        out, problems = {}, []
-        without_scene = sum(1 for r in records if has_scene_error(r))
-        if without_scene:
-            limit = self.scene_reading().get("max_error_rate")
-            rate = without_scene / max(len(records), 1)
-            examples = scene_errors(records)
-            out.update(scene_errors=len(examples), attempts_without_scene=without_scene,
-                       invalid_attempts=sum(1 for r in records if r.get("invalid")))
-            print(f"[tmg] WARNING chunk {folder.name}: {without_scene} of {len(records)} attempts without the scene of a "
-                  f"subtask, e.g. {examples[0] if examples else 'marked invalid'}", flush=True)
-            if limit is not None and rate > float(limit):
-                problems.append(f"{without_scene} of {len(records)} attempts without the scene of a subtask "
-                                f"({100 * rate:.0f} % > scene_reading.max_error_rate {100 * float(limit):.0f} %), e.g. "
-                                f"{examples[0] if examples else 'marked invalid'}")
+        """What the fit and the mixing need of a chunk's records (module docstring): ``sanity`` (this chunk's counts),
+        ``sanity_verdict`` (errors and warnings of the pool's finished chunks so far, this one included),
+        ``donor_registration`` (the settings the donors of deformable subtasks were registered with) and, when the pool
+        needs the scenes and the verdict has errors, ``error`` and ``stop_pool``."""
+        layout = self.fit_layout()
         records_dir = folder / RECORDS_DIR
-        sanity = sanity_report(Attempts(list(records), [records_dir] * len(records), [0] * len(records)), self.fit_layout(), self.task)
-        print_sanity(sanity, f"chunk {folder.name}")
-        out["sanity"] = sanity
-        problems += sanity["errors"]
-        if problems and self.needs_subtask_scenes():
-            # every chunk would repeat it: fail the chunk and stop the pool at once instead of days later at the fit
-            out.update(error="; ".join(problems) + ": the SkillMix fit and mixing cannot use this pool", stop_pool=True)
+        sanity = sanity_report(Attempts(list(records), [records_dir] * len(records), [0] * len(records)), layout, self.task)
+        earlier = finished_sanity(folder)
+        pool = merge_sanity([*earlier, sanity])
+        errors, warnings = judge_sanity(pool, layout.sanity, unreached_is_error=self.generation.get("purpose") == CALIBRATION)
+        label = f"pool up to chunk {folder.name} ({len(earlier) + 1} chunks)"
+        print_sanity(pool, label, errors, warnings)
+        out = {"sanity": sanity, "sanity_verdict": {"chunks": len(earlier) + 1, "errors": errors, "warnings": warnings}}
+        if sanity["without_scene"]:
+            examples = scene_errors(records)
+            out.update(attempts_without_scene=sanity["without_scene"], invalid_attempts=sum(1 for r in records if r.get("invalid")),
+                       scene_error_examples=examples[:3])
+        registrations = donor_registrations(records)
+        if registrations:
+            out["donor_registration"] = registrations
+        if errors and self.needs_subtask_scenes():
+            # the pool's later chunks would add to it: fail the chunk and stop the pool now instead of days later at the fit
+            out.update(error=f"{label}: " + "; ".join(errors) + ": the SkillMix fit and mixing cannot use this pool", stop_pool=True)
         return out
 
     def demo_layout(self) -> dict:
@@ -225,6 +227,30 @@ class IsaacLabGenerator(SyntheticDataGenerator):
         return {"demo_glob": GENERATED, "image_key": "{cam}", "actions_key": "actions", "states_key": None,
                 "labels_from_records": True, "success_only_file": True, "replay_groups": ["initial_state", "states"],
                 "per_step_groups": ["states"]}
+
+
+def finished_sanity(folder: Path) -> list[dict]:
+    """The sanity counts of the pool's other finished chunks (the ``sanity`` of their ``CHUNK_DONE.json``; a chunk
+    finished before the counts were recorded has none)."""
+    out = []
+    for done in sorted(Path(folder).parent.glob(f"*/{CHUNK_DONE}")):
+        if done.parent.resolve() == Path(folder).resolve():
+            continue
+        sanity = read_json(done).get("sanity")
+        if sanity:
+            out.append(sanity)
+    return out
+
+
+def donor_registrations(records) -> list[dict]:
+    """The distinct settings the donors of deformable subtasks were registered with (mix records' ``registration``)."""
+    seen = []
+    for r in records:
+        for s in r.get("subtasks") or []:
+            settings = (s.get("mix") or {}).get("registration")
+            if settings is not None and settings not in seen:
+                seen.append(settings)
+    return seen
 
 
 class SoftMimicGenGenerator(IsaacLabGenerator):

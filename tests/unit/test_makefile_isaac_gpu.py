@@ -35,16 +35,20 @@ def test_other_clusters_and_images_are_not_affected():
     assert "set ISAAC_GPU" not in dry_run("generate", "CLUSTER=local", "GENERATOR=softmimicgen")
 
 
-def test_the_isaac_host_is_recognised_by_its_data_root_whatever_the_cluster(tmp_path):
-    """CLUSTER left at its default (local) on the Isaac server: the isaac cluster's data_root exists there."""
+def test_the_shared_gpu_machine_is_recognised_by_its_declared_hostname_whatever_the_cluster():
+    """CLUSTER left at its default (local) on the Isaac server: its cluster config declares the machine's hostname, an
+    explicit setting, instead of the Makefile guessing from a folder that happens to exist."""
     import yaml
 
-    root = yaml.safe_load((REPO / "configs/machine/cluster/isaac.yaml").read_text())["data_root"]
-    out = dry_run("generate", "GENERATOR=softmimicgen", f"SHARED_GPU_HOST_ROOTS={tmp_path}")       # stands in for that root
+    isaac = yaml.safe_load((REPO / "configs/machine/cluster/isaac.yaml").read_text())
+    assert isaac["shared_gpus"] is True and isaac["hostname"]
+    out = dry_run("generate", "GENERATOR=softmimicgen", f"HOSTNAME={isaac['hostname']}")
     assert "set ISAAC_GPU" in out and "CLUSTER=local" in out
-    assert "set ISAAC_GPU" not in dry_run("generate", "GENERATOR=softmimicgen", f"SHARED_GPU_HOST_ROOTS={tmp_path / 'absent'}")
-    if not Path(root).exists():                                     # not on the Isaac server: the default run is allowed
-        assert "set ISAAC_GPU" not in dry_run("generate", "GENERATOR=softmimicgen")
+    assert "set ISAAC_GPU" not in dry_run("generate", "GENERATOR=softmimicgen", "HOSTNAME=some-other-machine")
+    assert "set ISAAC_GPU" not in dry_run("generate", "GENERATOR=mimicgen", f"HOSTNAME={isaac['hostname']}")
+    assert "set ISAAC_GPU" not in dry_run("generate", "GENERATOR=softmimicgen", f"HOSTNAME={isaac['hostname']}", isaac_gpu="6")
+    text = (REPO / "Makefile").read_text()
+    assert "data_root" not in text[text.index("GPU_CHOICE_CHECK = @true"):text.index("ifneq ($(GPU_VARIABLE),)")]
 
 
 def test_verify_baseline_is_refused_for_generators_that_do_not_declare_byte_verify():
@@ -63,7 +67,8 @@ def test_the_guard_reads_the_configs_not_generator_cluster_or_image_names():
     guard = text[text.index("GPU_CHOICE_CHECK = @true"):text.index("ifneq (,$(filter isaaclab-%,$(IMAGE)))")]
     assert "isaac" not in guard.lower().replace("isaac_gpu", "") and "gpu_variable" in guard and "shared_gpus" in guard
     assert "ISAAC_GPU_CHECK" not in text and "ON_ISAAC_HOST" not in text
-    generators = {p.stem: yaml.safe_load(p.read_text()).get("gpu_variable") for p in (REPO / "configs/experiment/generator").glob("*.yaml")}
+    generators = {p.stem: yaml.safe_load(p.read_text()).get("gpu_variable") for p in (REPO / "configs/experiment/generator").glob("*.yaml")
+                  if "name" in yaml.safe_load(p.read_text())}
     assert generators == {"softmimicgen": "ISAAC_GPU", "dexmimicgen": "ISAAC_GPU", "mimicgen": None, "cpgen": None}
     clusters = {p.stem: yaml.safe_load(p.read_text()).get("shared_gpus", False) for p in (REPO / "configs/machine/cluster").glob("*.yaml")}
     assert [name for name, shared in clusters.items() if shared] == ["isaac"]

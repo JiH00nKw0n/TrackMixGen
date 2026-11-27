@@ -52,6 +52,7 @@ from tmg.generation.generators.isaaclab.runtime import (
     _np,
     graft_builder,
     held_rule_of,
+    installed_about,
 )
 from tmg.generation.graft import Graft
 from tmg.generation.simulators.isaaclab import measured_eef_poses
@@ -234,7 +235,7 @@ def install(runtime: AutoDataRuntime, graft_hashes: dict) -> dict:
     setattr(DataGenerator, runtime.builder_name, builder.compile({"_tmg": runtime}))
     MultiWaypoint.execute = exe.compile({"_tmg": runtime})
     return {"generate": gen.edits, runtime.builder_name: builder.edits, "execute": exe.edits,
-            "hashes": {"generate": gen.hash, "trajectory": builder.hash, "execute": exe.hash}}
+            **installed_about(runtime, {"generate": gen.hash, "trajectory": builder.hash, "execute": exe.hash}, graft_hashes)}
 
 
 def install_from_spec(spec: dict, namespace: dict | None = None) -> dict:
