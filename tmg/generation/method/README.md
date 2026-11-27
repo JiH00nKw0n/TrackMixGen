@@ -5,10 +5,17 @@ and the pieces it shares. Nothing here imports a simulator, so every class is un
 methods exist (`configs/experiment/method/`): `none`, the generator as released, and `skillmix`.
 
 ```
-interfaces.py    MixContext, MixedSegment, SegmentMixer, Method, build_method and the mixer registry _MIXERS (MixerType)
+interfaces.py    MixContext, MixedSegment, SegmentMixer, Method, build_method and the mixer registry _MIXERS (MixerType);
+                 the value objects every runtime, the mixer, the records and the fit share: Arms and SubtaskId (which end
+                 effectors number their own subtasks; the id of one subtask), SubtaskScene (the scene of a subtask as
+                 SkillMix scores it), HeldRule / HeldTest (when a hand counts as holding the carried object)
 skillmix.py      SkillMixer (mixing.type: skillmix), the rule file (SkillMixRule, load_rule), softmax_weights,
                  RandmixDraws / randmix_weights (mixing.rule: randmix), symmetry alignment
-success_model.py the per-source features (scene, in-hand) and the rows of the fit (task-success label)
+success_model.py the per-source features of a SubtaskScene (scene, in-hand, hold mismatch), the same function for the mixer
+                 and for the fit's rows (scene_of_record rebuilds the scene from a subtask record)
+fit_layout.py    FitLayout: what a generator adapter declares about its records (arms, reached rule, where the source
+                 poses come from, features, sanity limits); the one fit path of tmg fit_coefficients reads it
+fit_records.py   the records as the fit reads them: record versions, checks, the reached rules (REACHED), the sanity report
 soft_frame.py    the object frame of a deformable object from its nodes (SoftMimicGen rope, towel), for the features
 event_mix.py     event-aligned blending of segments (mix_many; align_segments for CP-Gen)
 grippers.py      gripper state and event rules: gripper_states / change_indices (scalar sign commands),
@@ -25,7 +32,14 @@ the fitted mixed-effects logistic model of the task success given the mixing wei
     P(task succeeds | reached k, w) = sigmoid( c0 + sum_j w_j s_j + d H(w) ),   s_j = a_j + g . phi_j
 
 Two-armed generators (DexMimicGen's GR1) number the subtasks of every arm from 0, so their rule files key the blocks
-`<eef>/<k>` (`skillmix.subtask_key`); single-arm files (MimicGen, CP-Gen, SoftMimicGen) keep the keys `0, 1, ...`.
+`<eef>/<k>` (`SubtaskId.key`); single-arm files (MimicGen, CP-Gen, SoftMimicGen) keep the keys `0, 1, ...`. The arms come
+from the generator's layout (the generator config's `eefs`): the runtime builds the mixer with them
+(`build_method(..., arms=...)`) and the adapter's fit layout names the same ones, so the mixer and the fit cannot disagree.
+A generator with a hold test (the Isaac Lab runtimes: is the previous subtask's reference object in the hand?) has a sixth
+feature, `inhand_mismatch` (1 when exactly one of the two hands, now or source j, holds the object), so "source j does not
+hold it" is not read as "source j holds it exactly as now"; its rule file lists its `features` and records the `held_rule`
+(and, for a deformable object, the `object_frame`) its records were measured with, and the mixer refuses a scene measured
+otherwise.
 `a_j` is source j's own effect, `g` the feature slopes, `d` the effect of spreading the weight (`H` the entropy of `w`). The
 weights that maximize it over the sources compatible with the selected one (same gripper events) are `softmax(s / d)` when
 `d > 0`; weights below 1e-3 are dropped. When `d <= 0` one source takes all the weight: the best-scored one (`mixing.single_source: best`, method `skillmix`) or one drawn with probability `softmax(s)` (`sample`, method `skillmix_sample`; with `best` every scene can get the same source). The retained segments are aligned
@@ -61,14 +75,23 @@ runtimes also call `mixer.begin_attempt()` when an attempt starts (the randmix r
 | `src_segments` | per source: (eef_start, targets, gripper) of its segment |
 | `num_sources`, `has_reference_object` | how many sources exist; whether the subtask has a reference object (no object: no frame to mix in) |
 | `rng` | optional (defaults to `default_rng(0)`); SkillMix does not use it (its randmix draws come from their own stream seeded with the chunk seed) |
-| `extra` | `current_object_pose`, `reference_object`, and from the second subtask on `current_in_hand` and `source_in_hand` |
+| `scene` | the `SubtaskScene`: the reference object now and in every source, and from the second subtask on the end effector and the carried object (the previous subtask's reference object) now and in every source; with a hold test, its rule and distances. `None`: the mixer leaves the segment as it is |
 
 The mixer returns a `MixedSegment`: the segment the generator should transform and execute (`eef_start`, `targets`,
 `gripper`) and a `record` dict. Returning the inputs unchanged is the identity (the official behaviour). The record goes
 into the attempt's `subtasks[i]["mix"]` entry of `attempts.jsonl`; SkillMix writes `call`, `subtask`, `source_a`, `rule`,
-`mixed`, `weights`, `incompatible`, `scene_features` (and `inhand_features`), with the softmax rule `scores` and `d`, with
-the randmix rule `dirichlet_c`, on a blend `symmetry` and `alignment`, and when it did nothing `identity_reason`. The fit
-reads `weights`, `scene_features` and `inhand_features` of the randmix pools.
+`mixed`, `weights`, `incompatible`, `scene_features` (and from the second subtask on `inhand_features`; with a hold test
+`held`: who holds the carried object, now and per source), with the softmax rule `scores` and `d`, with the randmix rule
+`dirichlet_c`, on a blend `symmetry` and `alignment`, and when it did nothing `identity_reason`. The fit reads `weights`,
+`scene_features`, `inhand_features` and `held` of the randmix pools.
+
+## 1b. A new generator
+
+Nothing in this folder or in `tmg/generation/fit_coefficients.py` names a generator. A new generator plugs in through its
+adapter and config: its runtime fills a `SubtaskScene` per subtask and builds the method with its arms; its adapter
+declares `fit_layout()` (an existing reached rule of `fit_records.REACHED`, or a new `ReachedRule` registered there); and
+its generator config says what shared code asks about it (`simulator`, `byte_verify`, `gpu_variable`, and for a hold test
+`scene_reading`).
 
 ## 2. Current values
 
@@ -89,7 +112,7 @@ the method name `skillmix_randmix`, so a generator that overrides `skillmix` lis
 ## 3. Adding a mixer variant
 
 1. Write the class next to `skillmix.py`: a `mix(context) -> MixedSegment` method, a class method `from_config(cfg, *,
-   chunk_seed)`, and `begin_attempt()` if it keeps per-attempt state. Seed every random draw from the chunk seed.
+   chunk_seed, method_name, arms)`, and `begin_attempt()` if it keeps per-attempt state. Seed every random draw from the chunk seed.
 2. Register it under a name in `interfaces._mixer_types()`.
 3. Add a method file that names it (`mixing: {type: <name>, ...}`) under its own `name`, so its pools, datasets and runs
    get their own folders.
