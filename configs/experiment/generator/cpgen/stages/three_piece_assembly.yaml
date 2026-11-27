@@ -1,0 +1,11 @@
+# Stage structure of cpgen three_piece_assembly (tmg/generation/simulators/scenes.py, load_task_stages). Kept out of the task config,
+# which is part of the identity of every finished chunk.
+# subtask_kinds: one kind per subtask of the task's SkillMix rule file, in order (grasp piece 1; insert piece 1 into base; grasp piece 2; insert piece 2 into piece 1);
+# scripts/derive_coefficients.py chooses subtasks by kind (the conditions that mix only the grasp or only the place subtasks).
+subtask_kinds: [grasp, place, grasp, place]
+# stage_checks: the stage signals tmg eval records per episode (tmg/evaluation/stages.py; CP-Gen has no termination
+# signals). object_lifted: on while the object is more than `height` (m) above its height at the episode start (0.04:
+# the lift threshold of robosuite's Lift task); objects are named as in the task's MimicGen interface (datagen_interface).
+stage_checks:
+  - {type: object_lifted, name: piece_1_lifted, object: piece_1, height: 0.04}
+  - {type: object_lifted, name: piece_2_lifted, object: piece_2, height: 0.04}

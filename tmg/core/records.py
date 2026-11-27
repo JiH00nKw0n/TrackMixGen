@@ -76,6 +76,28 @@ def _jsonable(value):
     return str(value)
 
 
+class SignalLog:
+    """Named boolean signals of one attempt or episode, one value per step (the state after the step). Generation feeds it
+    the subtask termination signals (``AttemptRecorder.add_step``) and evaluation its stage signals
+    (``tmg.evaluation.stages``), so both write ``term_first`` the same way."""
+
+    def __init__(self):
+        self.series: dict[str, list[int]] = {}
+
+    def add(self, signals) -> None:
+        """Append one step's ``{name: bool}`` (None or empty: nothing is recorded for the step)."""
+        for name, value in (signals or {}).items():
+            self.series.setdefault(str(name), []).append(1 if value else 0)
+
+    def first_on(self) -> dict[str, int]:
+        """Per signal the index of the first step after which it was on, -1 when it never was (``term_first``)."""
+        out = {}
+        for name, values in self.series.items():
+            on = np.flatnonzero(np.asarray(values))
+            out[name] = int(on[0]) if on.size else -1
+        return out
+
+
 class AttemptRecorder:
     """Accumulates one attempt and writes it as one npz and one jsonl line."""
 
@@ -94,7 +116,7 @@ class AttemptRecorder:
         self.eef_names: list[str] = []
         self.a_pre, self.a_label, self.a_exec, self.noise = [], [], [], []
         self.seg_of_step, self.seg_sub, self.seg_kind, self.seg_len = [], [], [], []
-        self.term = {}
+        self.term = SignalLog()
         self.succ = []
         self.track = {k: [] for k in ("s_before", "s_after", "ds_proposed", "ds_actual", "k", "region", "capped", "slot")}
         self.subtasks = []
@@ -197,9 +219,7 @@ class AttemptRecorder:
         self.seg_of_step.append(np.int16(seg_id))
         if 0 <= seg_id < len(self.seg_len):
             self.seg_len[seg_id] += 1
-        if term_signals:
-            for name, value in term_signals.items():
-                self.term.setdefault(name, []).append(1 if value else 0)
+        self.term.add(term_signals)
         t = self.track
         if track is None:
             for key in ("s_before", "s_after", "ds_proposed", "ds_actual"):
@@ -241,10 +261,6 @@ class AttemptRecorder:
             self.n_failure += 1
         succ = np.asarray(self.succ, dtype=np.uint8)
         idx = np.flatnonzero(succ)
-        term_first = {}
-        for name, sig in self.term.items():
-            s = np.flatnonzero(np.asarray(sig))
-            term_first[name] = int(s[0]) if s.size else -1
         line = dict(
             attempt=self.attempt,
             success=bool(success),
@@ -255,7 +271,7 @@ class AttemptRecorder:
             scene_meta=self.scene_meta,
             succ_first=int(idx[0]) if idx.size else -1,
             succ_last=int(succ[-1]) if succ.size else 0,
-            term_first=term_first,
+            term_first=self.term.first_on(),
             n_success_so_far=self.n_success,
             n_failure_so_far=self.n_failure,
             npz=NPZ_FORMAT % self.attempt,
@@ -289,7 +305,7 @@ class AttemptRecorder:
             track_capped=np.array(self.track["capped"], dtype=np.uint8),
             track_slot=np.array(self.track["slot"], dtype=np.uint8),
         )
-        for name, sig in self.term.items():
+        for name, sig in self.term.series.items():
             arrays["term__" + name] = np.array(sig, dtype=np.uint8)
         np.savez_compressed(self.dir / line["npz"], **arrays)
         with open(self.dir / ATTEMPTS_JSONL, "a") as f:

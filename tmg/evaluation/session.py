@@ -106,14 +106,33 @@ def policy_input(obs: dict, observation: dict, *, image_key: str = "{cam}_image"
     return out
 
 
+def reach_rates(rows: list[dict]) -> dict:
+    """Per stage signal of the rows that carry a stage record (``term_first``: the first step at which each signal turned
+    on, -1 when never; ``tmg.evaluation.stages``): ``{n, n_reached, reach_rate}``, signals in the order they first appear.
+    Rows without ``term_first`` (written before the stage record existed, or by an evaluator without one) are not
+    counted."""
+    staged = [r["term_first"] for r in rows if r.get("term_first")]
+    out = {}
+    for name in dict.fromkeys(name for first in staged for name in first):
+        steps = [first[name] for first in staged if name in first]
+        reached = sum(1 for step in steps if step >= 0)
+        out[name] = {"n": len(steps), "n_reached": reached, "reach_rate": reached / len(steps)}
+    return out
+
+
 def summarize(rows: list[dict]) -> dict:
-    """Success rate with Wilson interval overall and per split."""
+    """Success rate with Wilson interval overall and per split, and the reach rate of every stage signal (``stages``)
+    where the rows carry a stage record."""
     def block(rs):
         n, k = len(rs), sum(int(r["success"]) for r in rs)
         lo, hi = wilson(k, n)
-        return {"n": n, "n_success": k, "success_rate": (k / n if n else None), "ci_low": lo, "ci_high": hi,
-                "mean_steps": (float(np.mean([r["steps"] for r in rs])) if rs else None),
-                "errors": sum(1 for r in rs if r.get("error"))}
+        out = {"n": n, "n_success": k, "success_rate": (k / n if n else None), "ci_low": lo, "ci_high": hi,
+               "mean_steps": (float(np.mean([r["steps"] for r in rs])) if rs else None),
+               "errors": sum(1 for r in rs if r.get("error"))}
+        stages = reach_rates(rs)
+        if stages:
+            out["stages"] = stages
+        return out
     out = {"all": block(rows), "by_split": {}}
     for split in sorted({r["split"] for r in rows}):
         out["by_split"][split] = block([r for r in rows if r["split"] == split])

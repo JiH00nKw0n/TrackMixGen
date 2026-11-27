@@ -163,18 +163,18 @@ def robot_base_xy(env) -> tuple[float, float]:
     return float(pos[0]), float(pos[1])
 
 
+def env_interface(interface_name: str, env):
+    """MimicGen's environment interface ``interface_name`` (``interface_name(task)``) on a robosuite environment: object
+    poses and subtask termination signals as the generator reads them."""
+    from mimicgen.env_interfaces.base import REGISTERED_ENV_INTERFACES
+
+    return REGISTERED_ENV_INTERFACES[INTERFACE_TYPE][interface_name](env)
+
+
 def make_object_xy(interface_name: str) -> Callable:
     """Build ``object_xy(env) -> {object: (x, y)}`` reading positions through the MimicGen interface class."""
-    cache: dict = {}
-
     def object_xy(env) -> dict:
-        cls = cache.get("cls")
-        if cls is None:
-            from mimicgen.env_interfaces.base import REGISTERED_ENV_INTERFACES
-
-            cls = REGISTERED_ENV_INTERFACES[INTERFACE_TYPE][interface_name]
-            cache["cls"] = cls
-        poses = cls(env).get_object_poses()
+        poses = env_interface(interface_name, env).get_object_poses()
         return {k: np.asarray(p)[:2, 3].copy() for k, p in poses.items()}
 
     return object_xy

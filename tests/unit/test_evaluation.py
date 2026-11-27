@@ -92,6 +92,7 @@ def eval_setup(tmp_path, monkeypatch):
     FakeClient.served = str(tmp_path / CKPT)
     monkeypatch.setattr(rollout, "register_env_class", lambda task, scene: "Square_OURS")
     monkeypatch.setattr(rollout, "make_env", lambda *a, **k: env)
+    monkeypatch.setattr(rollout, "stage_record_of", lambda generator, task, env: None)   # no MimicGen interface here
     monkeypatch.setattr(session, "PolicyClient", FakeClient)    # play_scenes resolves the class at call time
     overrides = ["task=square", "scene=ours", f"checkpoint={tmp_path / CKPT}", "training_seed=5"]
     write_resets(resets_path(resolved(compose("eval", overrides))), 3, 2)

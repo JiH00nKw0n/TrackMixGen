@@ -1,0 +1,5 @@
+# Stage structure of mimicgen hammer_cleanup (tmg/generation/simulators/scenes.py, load_task_stages). Kept out of the task config,
+# which is part of the identity of every finished chunk.
+# subtask_kinds: one kind per subtask of the task's SkillMix rule file, in order (open drawer; grasp hammer; place hammer and close drawer);
+# scripts/derive_coefficients.py chooses subtasks by kind (the conditions that mix only the grasp or only the place subtasks).
+subtask_kinds: [open, grasp, place]

@@ -16,12 +16,26 @@ from tmg import CONFIGS_ROOT
 
 GENERATOR_DIR = "experiment/generator"      # configs/experiment/generator/<generator>/ holds task, scene and coefficient data
 SCENE_DIR = "scene"
+STAGES_DIR = "stages"
 MAX_PARENT_DEPTH = 8
 
 
 def generator_config_dir(generator: str, root: Path | None = None) -> Path:
     """``configs/experiment/generator/<generator>``: the folder of one generator's task, scene and coefficient files."""
     return Path(root or CONFIGS_ROOT) / GENERATOR_DIR / generator
+
+
+def load_task_stages(generator: str, task: str, root: Path | None = None) -> dict:
+    """``configs/experiment/generator/<generator>/stages/<task>.yaml``: the stage structure of a task ({} without a file).
+
+    ``subtask_kinds``: one kind per subtask of the task's SkillMix rule file (``grasp``, ``place``, ...), by which
+    ``scripts/derive_coefficients.py`` chooses subtasks; ``stage_checks``: the stage signals ``tmg eval`` records for a
+    generator without termination signals (``tmg.evaluation.stages``). The file is separate from the task config because
+    the task config is part of the identity of every finished chunk (``tmg.generation.base.ChunkSpec.identity``): a key
+    added there would make every existing pool of the task look changed and refuse to be resumed or extended.
+    """
+    path = generator_config_dir(generator, root) / STAGES_DIR / f"{task}.yaml"
+    return dict(yaml.safe_load(path.read_text()) or {}) if path.exists() else {}
 
 
 def scene_details_path(name: str, generator: str, root: Path | None = None) -> Path:

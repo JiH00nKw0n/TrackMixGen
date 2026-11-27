@@ -1,0 +1,9 @@
+# Stage structure of cpgen mug_cleanup (tmg/generation/simulators/scenes.py, load_task_stages). Kept out of the task config,
+# which is part of the identity of every finished chunk.
+# No subtask_kinds: the rule file has 4 subtasks (CP-Gen constraints) and the task config names 3; add one kind
+# per constraint (in the order of the task's constraints.json) before deriving a condition that chooses subtasks by kind.
+# stage_checks: the stage signals tmg eval records per episode (tmg/evaluation/stages.py; CP-Gen has no termination
+# signals). object_lifted: on while the object is more than `height` (m) above its height at the episode start (0.04:
+# the lift threshold of robosuite's Lift task); objects are named as in the task's MimicGen interface (datagen_interface).
+stage_checks:
+  - {type: object_lifted, name: object_lifted, object: object, height: 0.04}

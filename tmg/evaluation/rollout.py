@@ -13,10 +13,12 @@ so observations are produced exactly as MimicGen produced the training images (s
 3. the episode ends at task success or at the task horizon.
 
 ``episodes.jsonl`` gets one line per episode (``reset_index``, ``split``, ``success``, ``steps``,
-``policy_seed``, ``checkpoint``, ``error``); a rerun plays only the missing reset indices. ``shard=[k, n]`` plays
+``policy_seed``, ``checkpoint``, ``error``, and for a task with stage signals ``term_first``: the first step at which each
+signal turned on, ``tmg.evaluation.stages``); a rerun plays only the missing reset indices. ``shard=[k, n]`` plays
 only the scenes with reset index modulo n equal to k, so n processes (each with its own policy server) can
 share one checkpoint's evaluation; they append to the same file, and a final run without ``shard`` writes the
-summary. ``eval_summary.json`` holds the success rate per split with a Wilson 95% interval. The output folder is
+summary. ``eval_summary.json`` holds the success rate per split with a Wilson 95% interval and, under ``stages``, the
+share of episodes that reached each stage signal. The output folder is
 ``<run folder>/eval/<split>_h<horizon>/<checkpoint name>`` unless ``output`` is given, so evaluations of different
 checkpoints or step limits never share a file. With ``append_validation`` the summary of the ``val`` split is also
 appended as one row to the training run's ``validation.jsonl`` (what ``tmg select_checkpoint`` reads).
@@ -48,6 +50,7 @@ from tmg.evaluation.session import (  # noqa: F401  re-exported: tests and scrip
     summarize,
     wilson,
 )
+from tmg.evaluation.stages import StageRecord, stage_record_of
 from tmg.generation.simulators.robosuite import load_scene_chain, register_env_class
 
 __all__ = ["EPISODES", "SUMMARY", "eval_output", "wilson", "summarize", "episode_seed", "check_server", "select_scenes",
@@ -96,21 +99,31 @@ def sync_controllers(env) -> None:
         controller.reset_goal()
 
 
-def run_episode(env, policy: PolicyClient, reset: Scene, task: dict, observation: dict, *, horizon: int, seed: int) -> dict:
-    """Play one stored scene; returns ``{"success", "steps", "error"}``."""
+def run_episode(env, policy: PolicyClient, reset: Scene, task: dict, observation: dict, *, horizon: int, seed: int,
+                stages: StageRecord | None = None) -> dict:
+    """Play one stored scene; returns ``{"success", "steps", "error"}`` and, with ``stages`` (the task's stage record,
+    ``tmg.evaluation.stages``), ``term_first``: per stage signal the index of the first step after which it was on (-1
+    when never), as in the generation records."""
     try:
         obs = env.reset_to({"states": reset["states"], "model": reset["model"]})
         sync_controllers(env)
         obs = env.get_observation()
         policy.reset(seed, task.get("instruction"))
+        if stages is not None:
+            stages.begin()
         success, steps = False, 0
         for steps in range(1, horizon + 1):
             action = policy.act(policy_input(obs, observation))
             obs, _, _, _ = env.step(action)
+            if stages is not None:
+                stages.step()
             if env.is_success()["task"]:
                 success = True
                 break
-        return {"success": bool(success), "steps": int(steps), "error": None}
+        result = {"success": bool(success), "steps": int(steps), "error": None}
+        if stages is not None:
+            result["term_first"] = stages.first_on()
+        return result
     except Exception:  # noqa: BLE001  simulator or transport failures count as failures and are recorded
         return {"success": False, "steps": 0, "error": traceback.format_exc()}
 
@@ -143,9 +156,10 @@ def _play_robosuite(plain: dict, task: dict, scene: dict, todo: list[Scene], che
         env_meta = env_meta_from_dataset(Path(plain["dataset"]))
         print(f"[tmg] environment from the dataset's env_args ({plain['dataset']})", flush=True)
     env = make_env(env_name, obs_cfg, str(plain.get("robot", "Panda")), env_meta)
+    stages = stage_record_of(str(plain["generator"]["name"]), task, env.env)
 
     def run_one(policy, reset, seed):
-        return run_episode(env, policy, reset, task, obs_cfg, horizon=horizon, seed=seed)
+        return run_episode(env, policy, reset, task, obs_cfg, horizon=horizon, seed=seed, stages=stages)
 
     play_scenes(todo, server=ev["server"], checkpoint=checkpoint, obs_cfg=obs_cfg, eval_seed=ev["seed"],
                 training_seed=plain.get("training_seed", 0), run_one=run_one, record=record)
